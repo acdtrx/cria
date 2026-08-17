@@ -13,12 +13,17 @@ don't own.
 
 1. **Manage the tools you already have; never replace them.** The host provides
    `llama-server`, `mlx_lm.server` and `hf`; cria orchestrates them. No bundled
-   runtimes, no private model registry, no reimplemented downloader. A missing tool
+   runtimes, no private model registry, no downloader of its own. A missing tool
    disables its features and is reported — nothing gets installed.
 2. **The Hugging Face cache is the single source of truth** (settled 2026-08-18).
-   Every model on disk lives in the HF cache, every download goes through `hf`, and
-   servers launch with explicit paths resolved from cache snapshots. cria adds the one
-   operation the `hf` CLI lacks: deleting a single quant from a multi-quant GGUF repo
+   Every model on disk lives in the HF hub cache, and servers launch **by Hub
+   reference** (`-hf org/repo:QUANT` for llama-server, `--model org/repo` for
+   mlx_lm.server), fetching anything missing into that same cache themselves — cria
+   moves no model bytes of its own, so an agent can write a model + profile and the
+   first start does the rest. This relies on 2026+ llama.cpp, which stores `-hf`
+   downloads in the standard hub cache (older builds kept a private
+   `~/.cache/llama.cpp`; the tool check must flag those). cria adds the one operation
+   the ecosystem lacks: deleting a single quant from a multi-quant GGUF repo
    (snapshot symlink + blob, minding blobs shared across snapshots, sharded
    `-NNNNN-of-NNNNN` files, and `.incomplete` leftovers). The MLX side is asymmetric
    by nature — each MLX quant is its own repo, so repo-level deletion already works
@@ -50,16 +55,20 @@ don't own.
 
 - **Models view** — every model in the HF cache with its quants and true disk sizes
   (direct cache walk; per-file granularity is the point).
-- **Download flow** — given a repo, list its files with sizes via the Hub API, pick a
-  quant, download through `hf`, watch progress.
+- **Pick a quant** — given a repo, list its files with sizes via the Hub API; the
+  pick lands in config (via `cria new` or an agent edit). Nothing is fetched until
+  first start.
 - **Cache surgery** — delete a single GGUF quant; delete an MLX repo; report the
   space reclaimed.
 - **Serve** — pick model + profile, start detached, see status (pid, port, health,
-  uptime), tail the raw log, stop.
+  uptime), tail the raw log, stop. A first start fetches the model; cria shows a
+  distinct *downloading* state, rendering progress from on-disk cache bytes versus
+  Hub-API sizes — filesystem observation, never parsing anyone's output.
 - **Scaffolding** — `cria new <model>` creates the model folder with a commented
   `model.toml` and a starter profile; `cria docs` prints the schema.
 - **Tool check** — on start, report which of `hf` / `llama-server` / `mlx_lm.server`
-  are present and which features their absence disables.
+  are present, which features their absence disables, and whether `llama-server` is
+  recent enough to share the hub cache.
 
 ## Anti-goals
 

@@ -26,6 +26,15 @@ Group entries under headings as themes emerge.
   sessions become a felt daily friction. (ruled 2026-08-18: v1 is single-host; keep
   the host-access layer clean enough that a remote backend could slot in.)
 
+## Upstream APIs
+
+- **llama-server router mode.** Recent llama-server hosts several models in one
+  process — auto-discovery from the cache, `GET /models`, `POST /models/load` and
+  `/models/unload`, `--models-max`. Could replace process-per-profile on the llama
+  side. Revisit trigger: wanting several GGUF models resident at once, or per-profile
+  process management proving to be daily friction. (noted 2026-08-18: documented and
+  maintained upstream, so it clears the bar that log parsing never did.)
+
 ## Telemetry
 
 - **Richer server stats** (throughput, slots, memory). Revisit trigger: llama.cpp or

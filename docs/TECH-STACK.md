@@ -63,11 +63,16 @@
 
 cria orchestrates tools the host already has; it installs nothing.
 
-- **`hf`** — all downloads and Hub auth. cria never fetches model payloads itself.
-- **`llama-server`** (llama.cpp) — GGUF serving. Launched with an explicit
-  `-m <resolved snapshot path>` so the HF cache stays the single source of truth;
-  status via its documented HTTP endpoints, never its log format.
-- **`mlx_lm.server`** (mlx-lm) — MLX serving, Apple silicon only.
+- **`hf`** — Hub auth (`hf auth login`); cria reads the token file and exports
+  `HF_TOKEN` to servers it launches so gated repos work. cria moves no model bytes
+  itself — servers fetch their own models (below), and cache surgery is direct
+  filesystem work.
+- **`llama-server`** (llama.cpp) — GGUF serving, launched by Hub reference
+  (`-hf org/repo:QUANT`); it fetches missing models into the standard HF hub cache
+  (2026+ behavior — older builds kept a private `~/.cache/llama.cpp`, which the tool
+  check must flag). Status via its documented HTTP endpoints, never its log format.
+- **`mlx_lm.server`** (mlx-lm) — MLX serving, Apple silicon only, launched with
+  `--model org/repo`; fetches via huggingface_hub into the same cache.
 - Each found on `PATH`, overridable in `config.toml`. Missing tools degrade features
   and are reported; `mlx_lm.server` absent on Linux is normal, not an error.
 
