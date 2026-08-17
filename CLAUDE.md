@@ -2,8 +2,8 @@
 
 > Entry point for any coding agent working on this project.
 >
-> **If `docs/<project>.md` exists, read it first** — the philosophy there binds design
-> decisions; these rules assume it.
+> **Read `docs/cria.md` first** — the philosophy there binds design decisions; these
+> rules assume it.
 >
 > **What lives where:** this file — working method and hard rails; `docs/CODING-RULES.md`
 > — generic coding principles, always applicable; `docs/TECH-STACK.md` — the stack and
