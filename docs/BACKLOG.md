@@ -34,6 +34,16 @@ Group entries under headings as themes emerge.
   trigger: sizing up a repo before download becomes a felt need the agent flow
   doesn't cover.
 
+## Cache view
+
+- **Aliased blobs show as one file.** The walker keys a repo's files by blob, so
+  two different snapshot names pointing at the same blob collapse into a single
+  row in the cache view; deletion handles the aliasing correctly (it re-scans
+  snapshot links itself), only the display is lossy. (noted 2026-08-18 during
+  the surgery step.) Revisit trigger: a real repo shows a confusing row where
+  two names share bytes, or a deletion plan's "shared blobs left behind" list
+  names a file the view never showed.
+
 ## Platform & distribution
 
 - **Linux as a supported platform.** `linux/amd64` must keep compiling (`CLAUDE.md`,

@@ -8,7 +8,9 @@
 // files and their bytes belongs here; deciding how to show any of it belongs to
 // the TUI and the CLI.
 //
-// This is the read side. Deletion is a separate, deliberate operation.
+// The write side is deletion, and only deletion: a plan states what would go
+// before anything is touched, and executing it removes exactly that set
+// (delete.go). Nothing else in this package writes to the cache.
 package hubcache
 
 import (
@@ -155,13 +157,19 @@ func (c *Cache) Repo(id string) (*Repo, bool) {
 // holds: the spellings llama-server would accept for the same tag all find the
 // same item.
 func (r *Repo) Item(quant string) (*Item, bool) {
-	labels := make([]string, len(r.Items))
-	for i := range r.Items {
-		labels[i] = r.Items[i].Label
-	}
-	match, found := MatchQuant(labels, quant)
+	match, found := MatchQuant(itemLabels(r), quant)
 	if !found {
 		return nil, false
 	}
 	return &r.Items[match], true
+}
+
+// itemLabels lists the quants a repo holds, for the lookups and the messages
+// that speak of a repo by what it offers.
+func itemLabels(r *Repo) []string {
+	labels := make([]string, len(r.Items))
+	for i := range r.Items {
+		labels[i] = r.Items[i].Label
+	}
+	return labels
 }

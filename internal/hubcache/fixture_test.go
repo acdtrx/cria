@@ -84,6 +84,34 @@ func (r *repoTree) snapshot(revision string, files ...cachedFile) *repoTree {
 	return r
 }
 
+// alias adds a snapshot entry pointing at the blob another file's bytes already
+// landed in: two names, one blob, which is what the cache holds when a revision
+// publishes the same bytes under a different name. The blob has to exist
+// already, so the file it belongs to is added first.
+func (r *repoTree) alias(revision, name string, of cachedFile) *repoTree {
+	r.t.Helper()
+	blob := filepath.Join(r.dir, "blobs", blobName(of.content()))
+	if _, err := os.Stat(blob); err != nil {
+		r.t.Fatalf("cannot alias %s: the blob of %s is not there: %v", name, of.name, err)
+	}
+	dir := filepath.Join(r.dir, "snapshots", revision)
+	mkdir(r.t, dir)
+	r.link(dir, name, blob)
+	return r
+}
+
+// file drops a plain file into the repository directory, for the bookkeeping the
+// cache keeps beside the snapshots — refs, trees, .no_exist markers.
+func (r *repoTree) file(name, content string) *repoTree {
+	r.t.Helper()
+	path := filepath.Join(r.dir, name)
+	mkdir(r.t, filepath.Dir(path))
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		r.t.Fatalf("cannot write %s: %v", path, err)
+	}
+	return r
+}
+
 // main writes the ref that names the current revision.
 func (r *repoTree) main(revision string) *repoTree {
 	r.t.Helper()
@@ -191,16 +219,6 @@ func repoIDs(cache *Cache) []string {
 		ids[i] = repo.ID
 	}
 	return ids
-}
-
-// itemLabels lists a repo's quants, for failure messages and for the assertions
-// that only care about which quants were found.
-func itemLabels(repo *Repo) []string {
-	labels := make([]string, len(repo.Items))
-	for i, item := range repo.Items {
-		labels[i] = item.Label
-	}
-	return labels
 }
 
 // diskUsage sums what a tree occupies the way du does: every regular file once,
