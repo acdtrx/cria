@@ -1,6 +1,13 @@
 # Step 2 — config schema and strict loader
 
-**Phase 1 · Status: not started**
+**Phase 1 · Status: done (2026-08-18)** — suite green (76 cases), all gates
+pass; go-toml/v2 v2.4.3 entered. Decisions taken during implementation:
+strictness is schema-driven over a `map[string]any` decode (go-toml struct tags
+would duplicate the key list — the parallel list this step forbids); extra
+loud-validation rules: port range 1–65535, non-empty strings, `[tools]` paths
+absolute, repo halves on the id charset; missing root/`models/`/`config.toml`
+is an empty tree (scaffolding is step 3's job); non-`.toml` files are skipped,
+`.toml` files with bad ids are reported broken.
 
 ## Intent
 
