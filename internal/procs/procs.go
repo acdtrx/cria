@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -52,8 +53,32 @@ type Identity struct {
 // SameProcess reports whether two identities name one process. A zero identity
 // matches nothing: it says the answer was never obtained, which must never read
 // as agreement.
+//
+// The start time has to match exactly — it is what stops a recycled pid from
+// impersonating a dead server. The command line has to match on its arguments,
+// not on its program path, because a running process can rewrite its own argv[0]
+// without becoming another process: macOS re-execs framework Python through
+// Python.app within a few milliseconds of launch, which is what every
+// mlx_lm.server does just after cria has recorded it. The arguments survive that
+// rewrite, and a pid handed to some other program does not share them.
 func (i Identity) SameProcess(other Identity) bool {
-	return i != Identity{} && i == other
+	if (i == Identity{}) || i.StartedAt != other.StartedAt {
+		return false
+	}
+	if i.Command == other.Command {
+		return true
+	}
+	args := arguments(i.Command)
+	return args != "" && args == arguments(other.Command)
+}
+
+// arguments is a command line without the program path `ps` prints in front of
+// it. A command with nothing after the program has no arguments to be judged on,
+// and the caller falls back to the whole command rather than treating "no
+// arguments" as agreement.
+func arguments(command string) string {
+	_, args, _ := strings.Cut(command, " ")
+	return args
 }
 
 // Process is one process on the host: which pid, and what it is.

@@ -34,6 +34,17 @@ Group entries under headings as themes emerge.
   trigger: sizing up a repo before download becomes a felt need the agent flow
   doesn't cover.
 
+## Serve
+
+- **MLX downloads are nearly invisible as a phase.** `mlx_lm.server` binds its
+  port and answers `/v1/models` *before* fetching the model, so the
+  `downloading` phase (port-not-answering + model-not-cached) shows only for an
+  instant; llama's fetch-then-bind shows it fully. cria applies the SERVE.md
+  rule faithfully — the phase model would need an mlx-specific signal to do
+  better, and no documented one exists. (noted 2026-08-18 during the final e2e.)
+  Revisit trigger: MLX first-starts of large models become common and the
+  running-but-actually-fetching window proves confusing in daily use.
+
 ## Cache view
 
 - **Aliased blobs show as one file.** The walker keys a repo's files by blob, so

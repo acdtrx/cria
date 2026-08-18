@@ -27,8 +27,14 @@ observe, stop, re-attach — and the runtime state records behind it.
 ## Liveness (settled 2026-08-18)
 
 A record is **live** when its pid exists *and* the process identity matches the
-record — command line and process start time agree, so a reused pid never
-impersonates a dead server. Otherwise the record is **exited**.
+record: the start time agrees exactly (a reused pid never impersonates a dead
+server), and the command line agrees on its **arguments** rather than its
+program path (amended 2026-08-18: a running process can rewrite its own argv[0]
+without becoming another process — macOS re-execs framework Python through
+Python.app moments after spawn, which every `mlx_lm.server` does, so a
+whole-command comparison read healthy MLX servers as exited; a command with no
+arguments falls back to the whole-string comparison). Otherwise the record is
+**exited**.
 
 - Exited records are kept — they are the crash report: the TUI and `cria status`
   show "exited" with the log tail one keypress away. An exited record disappears

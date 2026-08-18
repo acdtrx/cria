@@ -13,7 +13,7 @@ import (
 
 // version identifies this binary; it is what `cria --version` prints and what the
 // TUI header shows.
-const version = "0.1.0-dev"
+const version = "0.1.0"
 
 func main() {
 	scaffoldConfigTree()

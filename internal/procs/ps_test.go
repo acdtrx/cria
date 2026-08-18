@@ -406,3 +406,51 @@ func TestIdentitySameProcess(t *testing.T) {
 		t.Error("two answers that were never obtained matched each other")
 	}
 }
+
+// A process that rewrites its own argv[0] is still that process. mlx_lm.server
+// does it on every launch: the shebang runs the venv's python, and macOS re-execs
+// framework Python through Python.app a few milliseconds later — same pid, same
+// start time, a different program path in `ps`.
+func TestIdentitySameProcessAcrossReexec(t *testing.T) {
+	const started = "Tue Aug 18 18:04:08 2026"
+	const args = "/Users/me/.local/bin/mlx_lm.server --model mlx-community/Qwen2.5-0.5B-Instruct-4bit --host 0.0.0.0 --port 18081"
+
+	recorded := Identity{Command: "/Users/me/.local/share/uv/tools/mlx-lm/bin/python " + args, StartedAt: started}
+	reexeced := Identity{
+		Command:   "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python " + args,
+		StartedAt: started,
+	}
+
+	if !recorded.SameProcess(reexeced) {
+		t.Error("a re-exec through Python.app read as a different process")
+	}
+	if !reexeced.SameProcess(recorded) {
+		t.Error("the comparison is not symmetric")
+	}
+
+	restarted := reexeced
+	restarted.StartedAt = "Tue Aug 18 18:09:11 2026"
+	if recorded.SameProcess(restarted) {
+		t.Error("the same arguments started again matched; the start time must still decide")
+	}
+
+	otherArgs := reexeced
+	otherArgs.Command = "/opt/homebrew/bin/llama-server --host 0.0.0.0 --port 18081"
+	if recorded.SameProcess(otherArgs) {
+		t.Error("a pid running other arguments matched")
+	}
+}
+
+// Two programs that take no arguments share no arguments to be judged on, so the
+// whole command has to agree.
+func TestIdentitySameProcessWithoutArguments(t *testing.T) {
+	const started = "Tue Aug 18 14:57:30 2026"
+
+	shell := Identity{Command: "/bin/zsh", StartedAt: started}
+	if !shell.SameProcess(Identity{Command: "/bin/zsh", StartedAt: started}) {
+		t.Error("a command with no arguments did not match itself")
+	}
+	if shell.SameProcess(Identity{Command: "/usr/bin/vim", StartedAt: started}) {
+		t.Error("two argument-less commands matched on having no arguments")
+	}
+}
