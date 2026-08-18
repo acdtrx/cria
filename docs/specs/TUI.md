@@ -38,6 +38,20 @@ keybinds get detailed as they are built.
   before the keypress.
 - **The tools report is a pane toggled by a global keybind**, hidden by default
   (`docs/specs/TOOLS.md` owns its content).
+- **The notice line is one permanently reserved row** under the status box
+  (settled 2026-08-18): it carries only what the boxes cannot show — refusals,
+  errors, outcomes with information (bytes reclaimed, a freed port), and the
+  question a server key asks — never a restatement of visible state (started/
+  stopped confirmations and in-flight action text are the box's job on the next
+  tick). esc dismisses a visible notice; its order is overlay, then notice,
+  then back out of the cache view, and the bar names whichever is next.
+- **A server key with several eligible targets asks which** (settled
+  2026-08-18, user-designed): stop/kill/log/dismiss with more than one
+  candidate move the selection into the status box itself — eligible rows only
+  (stop/kill: live; dismiss: exited; log: any) — j/k to pick, ⏎ runs the armed
+  action, esc cancels; the notice line prompts ("which server to stop") and the
+  keyboard returns to the view it left. One candidate acts immediately, as
+  before; restart keeps acting on the last-started entry.
 - **UI preferences are state, not config**: active backend and last-started entry
   live in a small file under `~/.local/state/cria/`. The config tree stays
   human-owned; cria never records preferences there.

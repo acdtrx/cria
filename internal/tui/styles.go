@@ -77,6 +77,7 @@ var palette = []swatch{
 
 	{name: "band ink", hex: inkHex, on: bandHex, floor: textFloor},
 	{name: "band green", hex: greenHex, on: bandHex, floor: textFloor},
+	{name: "band yellow", hex: yellowHex, on: bandHex, floor: textFloor},
 	{name: "band dim", hex: bandDimHex, on: bandHex, floor: textFloor},
 	{name: "band amber", hex: amberHex, on: bandHex, floor: textFloor},
 	{name: "band red", hex: redHex, on: bandHex, floor: textFloor},
@@ -190,6 +191,28 @@ func (p rowPaint) broken() lipgloss.Style {
 		return bandAlarmStyle
 	}
 	return brokenStyle
+}
+
+// alarm is a row reporting something that went wrong — a crash report, which is
+// drawn in it whole rather than by the phase word alone (see statusRow).
+func (p rowPaint) alarm() lipgloss.Style {
+	if p.cursor {
+		return bandAlarmStyle
+	}
+	return alarmStyle
+}
+
+// phase is a phase word in the colour that phase is spelled in, painted like the
+// row. The one phase drawn as context rather than as a state — a word cria does
+// not know — takes the band's own dim tone, the only grey legible there.
+func (p rowPaint) phase(phase serve.Phase) lipgloss.Style {
+	if !p.cursor {
+		return phaseTone(phase)
+	}
+	if phaseColor(phase) == dim {
+		return bandQuietStyle
+	}
+	return phaseTone(phase).Background(band)
 }
 
 // size is a number of bytes, which every list quotes in the accent so the

@@ -38,10 +38,11 @@ func liveStatus(phase serve.Phase) serve.Status {
 	}
 }
 
-// box is the status box's plain text, one line per line.
+// box is the status box's plain text, one line per line, drawn the way it is
+// whenever no key is asking which server it means (pick.go).
 func box(listing serve.StatusListing, saved prefs) []string {
 	var lines []string
-	for _, line := range statusLines(listing, saved, newProgressBar()) {
+	for _, line := range statusLines(listing, saved, newProgressBar(), boxCursor{}) {
 		lines = append(lines, plain(line))
 	}
 	return lines
@@ -255,12 +256,12 @@ func TestPhaseToneMapping(t *testing.T) {
 // The colours are actually applied: a running server's phase word is green on
 // screen, and an exited record's whole line is drawn as a crash report.
 func TestPhaseColoursReachTheLine(t *testing.T) {
-	running := statusLines(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning)}}, defaultPrefs(), newProgressBar())
+	running := statusLines(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning)}}, defaultPrefs(), newProgressBar(), boxCursor{})
 	if !strings.Contains(running[0], lipgloss.NewStyle().Foreground(green).Render("running")) {
 		t.Errorf("the running line does not draw its phase in green: %q", running[0])
 	}
 
-	exited := statusLines(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseExited)}}, defaultPrefs(), newProgressBar())
+	exited := statusLines(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseExited)}}, defaultPrefs(), newProgressBar(), boxCursor{})
 	if !strings.HasPrefix(exited[0], opener(alarmStyle)) {
 		t.Errorf("the exited line does not open in the crash-report colour: %q", exited[0])
 	}

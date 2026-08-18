@@ -60,8 +60,11 @@ func TestStartLaunchesTheSelectedEntry(t *testing.T) {
 	frame, _, root := startFrame(t, fake)
 
 	frame, cmd := press(t, frame, enter)
-	if !strings.Contains(frame.alert.text, "starting qwen") {
-		t.Errorf("the frame says %q while starting, want it to name what it is doing", frame.alert.text)
+	// Nothing is said while the start runs: what it will have changed is what
+	// the status box says when it lands, and the line is for what the boxes
+	// cannot show (tui.go).
+	if frame.alert.text != "" {
+		t.Errorf("the frame says %q while starting, want the line empty", frame.alert.text)
 	}
 	frame = answer(t, frame, cmd)
 
@@ -274,28 +277,26 @@ func TestRefusedEntryCannotStart(t *testing.T) {
 }
 
 // Stop, kill and dismiss act on what the status box shows, whatever the list
-// selection is (docs/specs/TUI.md).
+// selection is (docs/specs/TUI.md). One server the key can act on is the whole
+// answer, so the key acts on it and asks nothing (pick.go).
 func TestServerKeysActOnTheStatusBox(t *testing.T) {
 	cases := []struct {
-		name    string
-		phase   serve.Phase
-		key     tea.KeyPressMsg
-		acted   func(*fakeServers) []string
-		waiting string
+		name  string
+		phase serve.Phase
+		key   tea.KeyPressMsg
+		acted func(*fakeServers) []string
 	}{
 		{
-			name:    "stop",
-			phase:   serve.PhaseRunning,
-			key:     typed('s'),
-			acted:   func(f *fakeServers) []string { return f.stopped },
-			waiting: "stopping qwen…",
+			name:  "stop",
+			phase: serve.PhaseRunning,
+			key:   typed('s'),
+			acted: func(f *fakeServers) []string { return f.stopped },
 		},
 		{
-			name:    "kill",
-			phase:   serve.PhaseRunning,
-			key:     typed('K'),
-			acted:   func(f *fakeServers) []string { return f.killed },
-			waiting: "killing qwen…",
+			name:  "kill",
+			phase: serve.PhaseRunning,
+			key:   typed('K'),
+			acted: func(f *fakeServers) []string { return f.killed },
 		},
 		{
 			name:  "dismiss",
@@ -312,8 +313,13 @@ func TestServerKeysActOnTheStatusBox(t *testing.T) {
 			frame = frame.observed(snapshotMsg{listing: fake.listing})
 
 			frame, cmd := press(t, frame, test.key)
-			if test.waiting != "" && frame.alert.text != test.waiting {
-				t.Errorf("the frame says %q while acting, want %q", frame.alert.text, test.waiting)
+			if frame.pick != nil {
+				t.Errorf("the key asked which server with only one to act on: %+v", frame.pick)
+			}
+			// The action says nothing while it runs: the box shows what it did
+			// on the next tick (tui.go).
+			if frame.alert.text != "" {
+				t.Errorf("the frame says %q while acting, want the line empty", frame.alert.text)
 			}
 			frame = answer(t, frame, cmd)
 
@@ -353,8 +359,8 @@ func TestRestartStopsThenStarts(t *testing.T) {
 	frame = frame.observed(snapshotMsg{listing: fake.listing})
 
 	frame, cmd := press(t, frame, typed('r'))
-	if !strings.Contains(frame.alert.text, "restarting qwen") {
-		t.Errorf("the frame says %q while restarting, want it to name what it is doing", frame.alert.text)
+	if frame.alert.text != "" {
+		t.Errorf("the frame says %q while restarting, want the line empty", frame.alert.text)
 	}
 	frame = answer(t, frame, cmd)
 

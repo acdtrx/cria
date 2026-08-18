@@ -91,14 +91,13 @@ const (
 
 // alert is the one line under the status box, and it carries what the boxes
 // cannot show: a refusal, an error, an outcome that leaves no trace on screen —
-// bytes reclaimed, a port that has just come free. It never restates visible
-// state. "started qwen", "stopped qwen", "backend mlx" are all readable from
-// the status box and the pane titles a moment later, and a line repeating them
-// is one more thing to read that is already true, still sitting there three
-// keypresses on.
-//
-// An action that blocks says so while it blocks — that is not visible anywhere
-// — and the line clears when the action lands, because the box then shows it.
+// bytes reclaimed, a port that has just come free — and the question a server
+// key asks when several servers could answer it (pick.go). It never restates
+// visible state. "started qwen", "stopped qwen", "backend mlx" are all readable
+// from the status box and the pane titles a moment later, and a line repeating
+// them is one more thing to read that is already true, still sitting there three
+// keypresses on. An action cria is in the middle of is no different: what it
+// will have changed is what the box says when it lands.
 type alert struct {
 	text string
 	bad  bool // cria could not do the thing, rather than merely did it
@@ -155,6 +154,7 @@ type model struct {
 
 	modal     *modal    // the refusal a start came back with; nil when there is none
 	confirm   *deletion // the delete waiting for its answer; nil when none is
+	pick      *pick     // the server key waiting for the server it means; nil when none is
 	toolsOpen bool      // the tools report is up, over whichever view is behind it
 	log       logScreen
 
@@ -336,9 +336,11 @@ func (m model) loaded(msg entriesMsg) model {
 	return m.reselect(m.cursor())
 }
 
-// press routes one keystroke. A modal, the tools report and the log screen each
-// take the keyboard while they are up: what they offer is what the bar draws,
-// and every other key would act on something the user is no longer looking at.
+// press routes one keystroke. A modal, the tools report, the log screen and a
+// server key waiting for its target each take the keyboard while they are up:
+// what they offer is what the bar draws, and every other key would act on
+// something the user is no longer looking at — or answer a question they are in
+// the middle of.
 func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// esc means what is on screen right now, whatever path set the alert.
 	m = m.syncEscScope()
@@ -351,6 +353,8 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.pressInTools(pressed)
 	case m.log.open:
 		return m.pressInLog(pressed)
+	case m.pick != nil:
+		return m.pressInPick(pressed)
 	}
 
 	switch {
@@ -380,15 +384,15 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(pressed, m.keys.remove):
 		return m.deleteSelected()
 	case key.Matches(pressed, m.keys.stop):
-		return m.stopShownServer()
+		return m.aim(pickStop)
 	case key.Matches(pressed, m.keys.forceKill):
-		return m.killShownServer()
+		return m.aim(pickKill)
 	case key.Matches(pressed, m.keys.log):
-		return m.openLog()
+		return m.aim(pickLog)
 	case key.Matches(pressed, m.keys.restart):
 		return m.restartShownEntry()
 	case key.Matches(pressed, m.keys.dismiss):
-		return m.dismissShownRecord()
+		return m.aim(pickDismiss)
 	}
 	return m, nil
 }
@@ -577,7 +581,7 @@ func (m model) View() tea.View {
 // missing either is unreadable rather than merely smaller.
 func (m model) frame() string {
 	width := m.frameWidth()
-	top := append([]string{pane(paneTitle(statusTitle), width, statusLines(m.listing, m.prefs, m.bar))}, m.notes(width)...)
+	top := append([]string{pane(paneTitle(statusTitle), width, statusLines(m.listing, m.prefs, m.bar, m.boxCursor()))}, m.notes(width)...)
 	bar := renderKeybar(width, m.groups()...)
 
 	rows := m.screenRows(top, bar)
@@ -655,9 +659,9 @@ func (m model) screen(width, rows int) string {
 // — what the highlighted item does, what the running server does, where to go
 // (docs/specs/TUI.md).
 //
-// A modal and the log tail hold the keyboard, so the bar reads what they offer:
-// the bar is the map of what works right now, and it must never draw a key the
-// screen in front of the user does not answer to.
+// A modal, the log tail and an armed server key hold the keyboard, so the bar
+// reads what they offer: the bar is the map of what works right now, and it must
+// never draw a key the screen in front of the user does not answer to.
 func (m model) groups() []keyGroup {
 	// The bar is drawn from this frame's truth, whatever path set the alert.
 	m = m.syncEscScope()
@@ -671,6 +675,8 @@ func (m model) groups() []keyGroup {
 		return []keyGroup{{label: toolsScope, bindings: []key.Binding{m.keys.leaveTools}}, global}
 	case m.log.open:
 		return []keyGroup{{label: logScope, bindings: []key.Binding{m.keys.leaveLog}}, global}
+	case m.pick != nil:
+		return []keyGroup{{label: m.pick.action.scope(), bindings: []key.Binding{m.keys.runPick, m.keys.cancelPick}}, global}
 	}
 
 	return []keyGroup{
@@ -719,12 +725,22 @@ type keymap struct {
 	cancelDelete  key.Binding
 	leaveTools    key.Binding
 	leaveLog      key.Binding
+
+	pickUp     key.Binding
+	pickDown   key.Binding
+	runPick    key.Binding
+	cancelPick key.Binding
 }
 
 // newKeymap is the frame's keys as they are bound and as the bar spells them.
 // The cursor keys are bound but never drawn: arrows and jk are what a list is
 // moved with everywhere, and spelling them out would push the keys that are not
-// obvious off a narrow bar.
+// obvious off a narrow bar. The status box has its own pair rather than sharing
+// them: the list's pair is live only where a list has rows, and the box is a
+// picker whether or not the view behind it is showing anything (pick.go).
+//
+// What ⏎ answers while a key is armed is that key's own word, so the binding is
+// spelled when the action is armed rather than here.
 func newKeymap() keymap {
 	return keymap{
 		start:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "start")),
@@ -748,6 +764,10 @@ func newKeymap() keymap {
 		cancelDelete:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 		leaveTools:    key.NewBinding(key.WithKeys("esc", "t"), key.WithHelp("esc", "close")),
 		leaveLog:      key.NewBinding(key.WithKeys("esc", "l"), key.WithHelp("esc", "close")),
+		pickUp:        key.NewBinding(key.WithKeys("up", "k")),
+		pickDown:      key.NewBinding(key.WithKeys("down", "j")),
+		runPick:       key.NewBinding(key.WithKeys("enter")),
+		cancelPick:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 	}
 }
 

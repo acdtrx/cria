@@ -6,6 +6,8 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+
+	"cria/internal/serve"
 )
 
 // The log screen is the crash evidence and the only thing cria shows that it did
@@ -35,19 +37,10 @@ type logScreen struct {
 	err     error
 }
 
-// openLog is l: show the log of what the status box is targeting — the running
-// server's, or the log of the record that crashed, which is the whole point of
-// keeping an exited record around (docs/specs/SERVE.md).
-func (m model) openLog() (tea.Model, tea.Cmd) {
-	record, live := m.liveRecord()
-	if !live {
-		exited, kept := m.exitedRecord()
-		if !kept {
-			return m, nil
-		}
-		record = exited
-	}
-
+// showLog is l on the record it landed on: that server's log, running or
+// crashed — reading the crash is the whole point of keeping an exited record
+// around (docs/specs/SERVE.md).
+func (m model) showLog(record serve.Record) (tea.Model, tea.Cmd) {
 	m.log = logScreen{open: true, entryID: record.EntryID, path: record.LogPath}
 	m.alert = alert{}
 	return m, m.readLog

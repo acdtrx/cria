@@ -27,6 +27,19 @@ const factSeparator = "  "
 // the terminal would push them around every resize.
 const barWidth = 24
 
+// boxCursor is the pick cursor as the box draws it: a server key that could mean
+// more than one server turns the box into that key's picker, and this says which
+// row the answer is standing on and how wide the band under it reaches (pick.go).
+// The zero value is every other draw of the box — no marker column, no band.
+type boxCursor struct {
+	picking bool
+	row     int // the picked server, as a position in the listing
+	inner   int // the pane's inner width, so the band spans the box
+}
+
+// on reports whether the pick cursor is standing on the row at this position.
+func (c boxCursor) on(row int) bool { return c.picking && c.row == row }
+
 // statusLines is everything the persistent box shows, one line per fact worth a
 // line. Every display state docs/specs/TUI.md names is decided here.
 //
@@ -35,7 +48,7 @@ const barWidth = 24
 // across sessions. An exited record is *not* that state — it is a crash report
 // cria still holds, and it stays on screen until it is dismissed or the entry
 // starts again.
-func statusLines(listing serve.StatusListing, saved prefs, bar progress.Model) []string {
+func statusLines(listing serve.StatusListing, saved prefs, bar progress.Model, cursor boxCursor) []string {
 	if len(listing.Servers) == 0 && len(listing.Broken) == 0 {
 		return []string{stoppedLine(saved)}
 	}
@@ -46,13 +59,19 @@ func statusLines(listing serve.StatusListing, saved prefs, bar progress.Model) [
 	// re-parsed per line. A single server is the same table with one row.
 	rows := make([]serverRow, len(listing.Servers))
 	for i, status := range listing.Servers {
-		rows[i] = statusRow(status)
+		rows[i] = statusRow(status, paintFor(cursor.on(i)))
 	}
 	widths := columnWidths(rows)
 
 	var lines []string
 	for i, row := range rows {
-		lines = append(lines, row.line(widths))
+		line := row.line(widths)
+		if cursor.picking {
+			// Every row keeps the two cells the marker sits in while the box is
+			// a picker, so the table does not shift as the cursor moves down it.
+			line = row.paint.fill(row.paint.marker()+line, cursor.inner)
+		}
+		lines = append(lines, line)
 		if listing.Servers[i].Phase == serve.PhaseDownloading {
 			lines = append(lines, downloadLine(listing.Servers[i].Progress, bar))
 		}
@@ -73,6 +92,7 @@ func statusLines(listing serve.StatusListing, saved prefs, bar progress.Model) [
 type serverRow struct {
 	cells []cell
 	tail  string
+	paint rowPaint // as the palette stands, or on the pick cursor's band
 }
 
 // cell is one column of a server's line: the text and the style it is drawn in.
@@ -87,28 +107,29 @@ type cell struct {
 // during a run, and the phase is what says which. An exited row is the crash
 // report: nothing is claimed about what it costs or answers — cria never
 // collected its exit status, and the log is the evidence (docs/specs/SERVE.md).
-func statusRow(status serve.Status) serverRow {
+func statusRow(status serve.Status, paint rowPaint) serverRow {
 	if status.Phase == serve.PhaseExited {
 		return serverRow{
+			paint: paint,
 			cells: []cell{
-				{status.EntryID, alarmStyle},
-				{string(status.Phase), alarmStyle},
-				{string(status.Backend), alarmStyle},
-				{format.HubReference(status.Repo, status.Quant), alarmStyle},
+				{status.EntryID, paint.alarm()},
+				{string(status.Phase), paint.alarm()},
+				{string(status.Backend), paint.alarm()},
+				{format.HubReference(status.Repo, status.Quant), paint.alarm()},
 			},
-			tail: alarmStyle.Render(fmt.Sprintf("pid %d is gone", status.PID) +
+			tail: paint.alarm().Render(fmt.Sprintf("pid %d is gone", status.PID) +
 				factSeparator + "launched " + status.LaunchedAt.Format(time.DateTime)),
 		}
 	}
 
-	row := serverRow{cells: []cell{
-		{status.EntryID, factStyle},
-		{string(status.Phase), phaseTone(status.Phase)},
-		{string(status.Backend), quietStyle},
-		{format.HubReference(status.Repo, status.Quant), factStyle},
-		{fmt.Sprintf("pid %d", status.PID), quietStyle},
-		{fmt.Sprintf(":%d", status.Port), quietStyle},
-		{"up " + status.Uptime.Round(time.Second).String(), quietStyle},
+	row := serverRow{paint: paint, cells: []cell{
+		{status.EntryID, paint.fact()},
+		{string(status.Phase), paint.phase(status.Phase)},
+		{string(status.Backend), paint.quiet()},
+		{format.HubReference(status.Repo, status.Quant), paint.fact()},
+		{fmt.Sprintf("pid %d", status.PID), paint.quiet()},
+		{fmt.Sprintf(":%d", status.Port), paint.quiet()},
+		{"up " + status.Uptime.Round(time.Second).String(), paint.quiet()},
 	}}
 
 	// What the process table had to say, when it had anything: a pid it could
@@ -121,9 +142,9 @@ func statusRow(status serve.Status) serverRow {
 	if status.Stats.CPUPercent > 0 {
 		cpu = fmt.Sprintf("%.1f%% cpu", status.Stats.CPUPercent)
 	}
-	row.cells = append(row.cells, cell{rss, quietStyle}, cell{cpu, quietStyle})
+	row.cells = append(row.cells, cell{rss, paint.quiet()}, cell{cpu, paint.quiet()})
 	if status.Health.Detail != "" {
-		row.tail = quietStyle.Render(status.Health.Detail)
+		row.tail = paint.quiet().Render(status.Health.Detail)
 	}
 	return row
 }
@@ -145,19 +166,20 @@ func columnWidths(rows []serverRow) []int {
 
 // line draws one row on the grid: each cell padded to its column, the tail as
 // it is. Empty trailing columns collapse rather than leaving a gap before the
-// tail.
+// tail. The row's own paint carries the separators and the padding, so a row on
+// the band reads as one lit line rather than as lit words.
 func (r serverRow) line(widths []int) string {
 	var facts []string
 	for i, c := range r.cells {
 		if c.text == "" && i >= len(r.cells)-2 && widths[i] == 0 {
 			continue
 		}
-		facts = append(facts, c.style.Render(c.text)+strings.Repeat(" ", widths[i]-lipgloss.Width(c.text)))
+		facts = append(facts, r.paint.cell(c.text, c.style, widths[i]))
 	}
 	if r.tail != "" {
 		facts = append(facts, r.tail)
 	}
-	return strings.TrimRight(strings.Join(facts, factSeparator), " ")
+	return strings.TrimRight(strings.Join(facts, r.paint.pad(factSeparator)), " ")
 }
 
 // brokenLines is a record file cria refused. It names a pid cria started, so it
@@ -209,10 +231,12 @@ func newProgressBar() progress.Model {
 
 // boxTarget is what the status box is showing, which is what the server keys
 // act on — whatever the list selection is (docs/specs/TUI.md). The keybar reads
-// it, so a key is only offered when there is something for it to do.
+// it, so a key is only offered when there is something for it to do: at least
+// one of the rows the box shows. Which one a key means when there are several is
+// the user's answer to give (pick.go), not the bar's.
 type boxTarget struct {
-	live   bool // a server cria can still see: stop and log have something to act on
-	exited bool // a crash report is on screen: there is something to dismiss
+	live   bool // at least one server cria can still see: stop, kill and log have something to act on
+	exited bool // at least one crash report is on screen: there is something to dismiss
 	shown  bool // the box names an entry at all, live, exited or merely last-started
 }
 

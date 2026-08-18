@@ -70,8 +70,6 @@ func (m model) startSelected() (tea.Model, tea.Cmd) {
 	if !ok || selected.broken != nil {
 		return m, nil
 	}
-
-	m.alert = alert{text: "starting " + selected.entry.ID + "…"}
 	return m, m.launch(selected.entry)
 }
 
@@ -159,18 +157,12 @@ func (m model) started(msg startedMsg) model {
 	return m
 }
 
-// stopShownServer is s: stop what the status box shows. Stop is global — it acts
-// on the running server whatever the list selection is (docs/specs/TUI.md).
-func (m model) stopShownServer() (tea.Model, tea.Cmd) {
-	record, live := m.liveRecord()
-	if !live {
-		return m, nil
-	}
-
-	// Stop blocks for as long as the grace period plus the kill confirmation
-	// (docs/specs/SERVE.md), so the line says what cria is doing while it does
-	// it — and the ticker keeps redrawing behind it.
-	m.alert = alert{text: "stopping " + record.EntryID + "…"}
+// stopServer is s on the server it landed on. Stop is global — it acts on a
+// running server whatever the list selection is (docs/specs/TUI.md) — and it
+// blocks for as long as the grace period plus the kill confirmation lasts
+// (docs/specs/SERVE.md), which is why it runs as a command with the ticker
+// redrawing behind it.
+func (m model) stopServer(record serve.Record) (tea.Model, tea.Cmd) {
 	servers := m.host.servers
 	return m, func() tea.Msg {
 		if err := servers.Stop(record); err != nil {
@@ -180,16 +172,9 @@ func (m model) stopShownServer() (tea.Model, tea.Cmd) {
 	}
 }
 
-// killShownServer is K: the same stop without the grace period, for a server
-// that is wedged or that the user does not want to wait for
-// (docs/specs/SERVE.md).
-func (m model) killShownServer() (tea.Model, tea.Cmd) {
-	record, live := m.liveRecord()
-	if !live {
-		return m, nil
-	}
-
-	m.alert = alert{text: "killing " + record.EntryID + "…"}
+// killServer is K: the same stop without the grace period, for a server that is
+// wedged or that the user does not want to wait for (docs/specs/SERVE.md).
+func (m model) killServer(record serve.Record) (tea.Model, tea.Cmd) {
 	servers := m.host.servers
 	return m, func() tea.Msg {
 		if err := servers.Kill(record); err != nil {
@@ -199,14 +184,9 @@ func (m model) killShownServer() (tea.Model, tea.Cmd) {
 	}
 }
 
-// dismissShownRecord is d: clear the crash report the box is showing, once the
-// user is done reading it (docs/specs/SERVE.md).
-func (m model) dismissShownRecord() (tea.Model, tea.Cmd) {
-	record, exited := m.exitedRecord()
-	if !exited {
-		return m, nil
-	}
-
+// dismissRecord is d: clear a crash report the box is showing, once the user is
+// done reading it (docs/specs/SERVE.md).
+func (m model) dismissRecord(record serve.Record) (tea.Model, tea.Cmd) {
 	servers := m.host.servers
 	return m, func() tea.Msg {
 		if err := servers.Dismiss(record); err != nil {
@@ -232,7 +212,6 @@ func (m model) restartShownEntry() (tea.Model, tea.Cmd) {
 	}
 
 	record, live := m.liveRecord()
-	m.alert = alert{text: "restarting " + id + "…"}
 	settings := m.settings()
 	check, servers := m.host.tools, m.host.servers
 	return m, func() tea.Msg {
@@ -337,10 +316,11 @@ func orUnreadable(value string) string {
 	return value
 }
 
-// liveRecord is the server the server keys act on: the first one the box shows
-// that cria can still see. Several at once is entries declaring different ports
-// (docs/cria.md, v1 surface), and the box lists them in entry order, so the
-// first is the one being read at the top.
+// liveRecord is the first server the box shows that cria can still see. Several
+// at once is entries declaring different ports (docs/cria.md, v1 surface), and
+// the box lists them in entry order, so the first is the one being read at the
+// top — which is the one restart-last means (docs/specs/TUI.md). The keys that
+// could mean any of them ask which instead (pick.go).
 func (m model) liveRecord() (serve.Record, bool) {
 	for _, status := range m.listing.Servers {
 		if status.Phase != serve.PhaseExited {
@@ -350,7 +330,8 @@ func (m model) liveRecord() (serve.Record, bool) {
 	return serve.Record{}, false
 }
 
-// exitedRecord is the crash report the box is showing, if it is showing one.
+// exitedRecord is the first crash report the box is showing, if it is showing
+// one.
 func (m model) exitedRecord() (serve.Record, bool) {
 	for _, status := range m.listing.Servers {
 		if status.Phase == serve.PhaseExited {
