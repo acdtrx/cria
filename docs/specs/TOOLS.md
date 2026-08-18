@@ -29,9 +29,11 @@ each one's absence disables.
 ## The llama-server cache check (settled 2026-08-18)
 
 - Verified by querying `llama-server --version` and comparing against the first
-  build that stores `-hf` downloads in the standard hub cache (2026+ llama.cpp;
-  the exact threshold build is pinned at implementation — older builds kept a
-  private `~/.cache/llama.cpp`).
+  build that stores `-hf` downloads in the standard hub cache: **b8498**
+  (2026-03-24), the release of PR
+  [ggml-org/llama.cpp#20775](https://github.com/ggml-org/llama.cpp/pull/20775)
+  "common : add standard Hugging Face cache support" — older builds kept a
+  private `~/.cache/llama.cpp` (pinned 2026-08-18).
 - A too-old build **disables llama serving entirely**, not just a warning: with a
   private download cache, launching by Hub reference would put bytes where cria's
   cache view, download progress and surgery cannot see them — breaking the

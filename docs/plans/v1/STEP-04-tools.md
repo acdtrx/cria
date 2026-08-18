@@ -1,6 +1,16 @@
 # Step 4 — tool detection and the cache-age check
 
-**Phase 2 · Status: not started**
+**Phase 2 · Status: done (2026-08-18)** — suite green, all gates pass.
+Threshold pinned: **b8498** (PR ggml-org/llama.cpp#20775, verified via GitHub
+tags), recorded in TOOLS.md in the same change. Planning correction found
+during implementation: `llama-server --version` never prints `bNNNN` — the
+binary prints `version: 8498 (…)` (old shape) or
+`version: X (build 10450, commit …)` (current shape), on **stderr**; the parser
+reads only those two documented positions, anything else is "unverified".
+Real-Mac check: llama-server b10450 (`/opt/homebrew/bin`, hub cache ok),
+mlx_lm.server found (`~/.local/bin`), hf found. CLI rendering deliberately not
+added (CLI.md defines none; the report routes to the TUI pane and refused
+starts).
 
 ## Intent
 
