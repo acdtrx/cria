@@ -146,34 +146,59 @@ func (m model) serveTitle() string {
 }
 
 // listLines is the entry list, drawn to fill exactly the rows it was given.
+//
+// The list is a table: the id column is as wide as the widest id on it, so the
+// models line up under each other and a row is read across rather than parsed.
 func (m model) listLines(inner, capacity int) []string {
 	rows := m.rows()
 	if len(rows) == 0 {
 		return sizeLines(m.emptyList(), capacity)
 	}
 
+	column := idColumn(rows)
 	lines := make([]string, 0, len(rows))
 	for i, listed := range rows {
-		lines = append(lines, m.rowLine(listed, i == m.selected, inner))
+		lines = append(lines, m.rowLine(listed, i == m.selected, inner, column))
 	}
 	return sizeLines(window(lines, m.selected, capacity), capacity)
+}
+
+// idColumn is how wide the id column has to be for every id on the list to fit
+// in it. A refused file counts too: its id is a column of the same table.
+func idColumn(rows []row) int {
+	column := 0
+	for _, listed := range rows {
+		column = max(column, lipgloss.Width(listed.id()))
+	}
+	return column
+}
+
+// id is what the list calls a row, whether cria could read the file or not.
+func (r row) id() string {
+	if r.broken != nil {
+		return r.broken.ID
+	}
+	return r.entry.ID
 }
 
 // rowLine is one entry as the list reads it: whether it is on disk, its id, the
 // model it serves, and the port when that port is the entry's own choice rather
 // than the tree's default (docs/specs/CONFIG.md). The row the cursor is on is
 // drawn on the band, marker included.
-func (m model) rowLine(listed row, selected bool, inner int) string {
+func (m model) rowLine(listed row, selected bool, inner, column int) string {
 	paint := paintFor(selected)
 	if listed.broken != nil {
+		// A refused file has nothing to say about the cache, so its dot column
+		// is blank — the table still lines up under it.
 		return paint.fill(paint.marker()+paint.join(
-			paint.broken().Render(listed.broken.ID),
+			paint.pad(" "),
+			paint.cell(listed.broken.ID, paint.broken(), column),
 			paint.broken().Render(listed.broken.Err.Error())), inner)
 	}
 
 	facts := []string{
 		m.presenceMark(listed.entry, paint),
-		paint.name().Render(listed.entry.ID),
+		paint.cell(listed.entry.ID, paint.name(), column),
 		paint.quiet().Render(format.HubReference(listed.entry.Repo, listed.entry.Quant)),
 	}
 	if listed.entry.Port != m.tree.Settings.DefaultPort {
@@ -191,7 +216,10 @@ func (m model) presenceMark(entry config.Entry, paint rowPaint) string {
 	case m.cache == nil:
 		return paint.quiet().Render(unknownMark)
 	case m.cache.Presence(entry).Cached:
-		return paint.fact().Render(cachedMark)
+		// Green, the colour a server that answers is drawn in: this one would
+		// serve now. A dot that differed from the absent one only by glyph and
+		// by a shade of grey read as one dot that never changed.
+		return paint.ready().Render(cachedMark)
 	}
 	return paint.quiet().Render(absentMark)
 }
@@ -243,8 +271,15 @@ func (m model) entryDetail(entry config.Entry, inner int) []string {
 	}
 	add("port", strconv.Itoa(entry.Port), factStyle)
 	add("host", entry.Host, factStyle)
-	if len(entry.Args) > 0 {
-		add("args", strings.Join(entry.Args, " "), factStyle)
+	// Args go one flag to a line, verbatim: a file's args list is read to check
+	// what this entry sets, and a single wrapped string hides where one flag
+	// ends and the next begins.
+	for i, arg := range argRows(entry.Args) {
+		label := "args"
+		if i > 0 {
+			label = ""
+		}
+		add(label, arg, factStyle)
 	}
 	add("cached", m.cachedWord(entry), factStyle)
 
@@ -280,6 +315,21 @@ func (m model) composedCommand(entry config.Entry) (string, bool) {
 		return err.Error(), true
 	}
 	return strings.Join(command, " "), false
+}
+
+// argRows groups an args list the way it was written: each flag with the values
+// that follow it, so `--ctx-size 16384` is one line and `--jinja` is another.
+// Nothing is reformatted — the tokens are the file's own, in the file's order.
+func argRows(args []string) []string {
+	var rows []string
+	for _, arg := range args {
+		if len(rows) == 0 || strings.HasPrefix(arg, "-") {
+			rows = append(rows, arg)
+			continue
+		}
+		rows[len(rows)-1] += " " + arg
+	}
+	return rows
 }
 
 // brokenDetail is an entry file cria refused: which file, which key, and the one

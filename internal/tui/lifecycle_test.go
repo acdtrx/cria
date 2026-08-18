@@ -71,8 +71,10 @@ func TestStartLaunchesTheSelectedEntry(t *testing.T) {
 	if len(fake.asked) != 1 || fake.asked[0] != 8080 {
 		t.Errorf("the start asked about ports %v, want the entry's port before anything was spawned", fake.asked)
 	}
-	if want := "started qwen (pid 4242)"; frame.alert.text != want {
-		t.Errorf("the frame says %q, want %q", frame.alert.text, want)
+	// A landed start says nothing: the status box shows the server on the next
+	// tick, and the alert line carries only what the boxes cannot (tui.go).
+	if frame.alert.text != "" {
+		t.Errorf("the frame says %q after a successful start, want the line empty", frame.alert.text)
 	}
 
 	saved, err := loadPrefs(root)
@@ -250,7 +252,6 @@ func TestServerKeysActOnTheStatusBox(t *testing.T) {
 		phase   serve.Phase
 		key     tea.KeyPressMsg
 		acted   func(*fakeServers) []string
-		wanted  string
 		waiting string
 	}{
 		{
@@ -258,7 +259,6 @@ func TestServerKeysActOnTheStatusBox(t *testing.T) {
 			phase:   serve.PhaseRunning,
 			key:     typed('s'),
 			acted:   func(f *fakeServers) []string { return f.stopped },
-			wanted:  "stopped qwen",
 			waiting: "stopping qwen…",
 		},
 		{
@@ -266,15 +266,13 @@ func TestServerKeysActOnTheStatusBox(t *testing.T) {
 			phase:   serve.PhaseRunning,
 			key:     typed('K'),
 			acted:   func(f *fakeServers) []string { return f.killed },
-			wanted:  "killed qwen",
 			waiting: "killing qwen…",
 		},
 		{
-			name:   "dismiss",
-			phase:  serve.PhaseExited,
-			key:    typed('d'),
-			acted:  func(f *fakeServers) []string { return f.dismissed },
-			wanted: "dismissed the exited record of qwen",
+			name:  "dismiss",
+			phase: serve.PhaseExited,
+			key:   typed('d'),
+			acted: func(f *fakeServers) []string { return f.dismissed },
 		},
 	}
 
@@ -293,8 +291,10 @@ func TestServerKeysActOnTheStatusBox(t *testing.T) {
 			if acted := test.acted(fake); len(acted) != 1 || acted[0] != "qwen" {
 				t.Fatalf("the key acted on %q, want qwen once", acted)
 			}
-			if frame.alert.text != test.wanted {
-				t.Errorf("the frame says %q, want %q", frame.alert.text, test.wanted)
+			// A landed action says nothing — the box shows the result on the
+			// next tick; the line is for what the boxes cannot show (tui.go).
+			if frame.alert.text != "" {
+				t.Errorf("the frame says %q after the action landed, want the line empty", frame.alert.text)
 			}
 		})
 	}
@@ -335,8 +335,9 @@ func TestRestartStopsThenStarts(t *testing.T) {
 	if len(fake.started) != 1 || fake.started[0] != "qwen" {
 		t.Errorf("the restart started %q, want qwen after the stop", fake.started)
 	}
-	if !strings.Contains(frame.alert.text, "started qwen") {
-		t.Errorf("the frame says %q, want the server it brought back", frame.alert.text)
+	// The landed restart says nothing; the box shows the fresh server (tui.go).
+	if frame.alert.text != "" {
+		t.Errorf("the frame says %q after the restart landed, want the line empty", frame.alert.text)
 	}
 }
 

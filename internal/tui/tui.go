@@ -88,9 +88,16 @@ const (
 	viewCache
 )
 
-// alert is the one line under the status box that says what just happened: what
-// a keypress did, or what it could not do. The next keypress replaces it — it
-// reports an action, and only the newest action is still being asked about.
+// alert is the one line under the status box, and it carries what the boxes
+// cannot show: a refusal, an error, an outcome that leaves no trace on screen —
+// bytes reclaimed, a port that has just come free. It never restates visible
+// state. "started qwen", "stopped qwen", "backend mlx" are all readable from
+// the status box and the pane titles a moment later, and a line repeating them
+// is one more thing to read that is already true, still sitting there three
+// keypresses on.
+//
+// An action that blocks says so while it blocks — that is not visible anywhere
+// — and the line clears when the action lands, because the box then shows it.
 type alert struct {
 	text string
 	bad  bool // cria could not do the thing, rather than merely did it

@@ -41,6 +41,16 @@ func serveFrame(t *testing.T) (model, *testHost) {
 // enough that no row is truncated, so what a test reads is the whole row.
 const listWidth = 76
 
+// runeColumn is the column a substring starts at, counted in runes — the cell
+// arithmetic a reader's eye does, which byte indexes misstate around glyphs.
+func runeColumn(line, substring string) int {
+	at := strings.Index(line, substring)
+	if at < 0 {
+		return -1
+	}
+	return len([]rune(line[:at]))
+}
+
 // list is the entry list as a person reads it, one line per row.
 func list(frame model, capacity int) []string {
 	var lines []string
@@ -71,11 +81,17 @@ func TestEntryListShowsTheActiveBackend(t *testing.T) {
 	}
 	// qwen sits on the tree's default port, so its row does not repeat it: a
 	// port is worth a column exactly when it is the entry's own choice.
-	if want := cachedMark + "  qwen  unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL"; !strings.Contains(lines[1], want) {
-		t.Errorf("the qwen row reads %q, want %q", lines[1], want)
+	if want := cachedMark + "  qwen"; !strings.Contains(lines[1], want) {
+		t.Errorf("the qwen row reads %q, want it to open with %q", lines[1], want)
 	}
 	if strings.Contains(lines[1], ":8080") {
 		t.Errorf("the qwen row repeats the tree's default port: %q", lines[1])
+	}
+	// The list is a table: the model column starts at one x for every row, the
+	// widest id (gemma) setting the column that shorter ids pad out to. Runes,
+	// not bytes — the cursor glyph is one cell but three bytes.
+	if g, q := runeColumn(lines[0], "unsloth/"), runeColumn(lines[1], "unsloth/"); g != q || g < 0 {
+		t.Errorf("the model column is not aligned: gemma at %d, qwen at %d\n%q\n%q", g, q, lines[0], lines[1])
 	}
 
 	frame, _ = press(t, frame, tea.KeyPressMsg{Code: tea.KeyTab})
@@ -98,7 +114,7 @@ func TestRefusedEntryFilesStayVisible(t *testing.T) {
 	}
 
 	rows := frame.rows()
-	drawn := frame.rowLine(rows[len(rows)-1], false, listWidth)
+	drawn := frame.rowLine(rows[len(rows)-1], false, listWidth, idColumn(rows))
 	if !strings.HasPrefix(strings.TrimLeft(drawn, " "), opener(brokenStyle)) {
 		t.Errorf("the refused row is not drawn as one cria cannot act on: %q", drawn)
 	}
@@ -132,13 +148,14 @@ func TestSelectionMoves(t *testing.T) {
 
 	// The highlighted row is the one drawn as highlighted.
 	rows := frame.rows()
-	if !strings.Contains(frame.rowLine(rows[0], true, listWidth), cursorMark) {
-		t.Errorf("the selected row carries no cursor: %q", frame.rowLine(rows[0], true, listWidth))
+	column := idColumn(rows)
+	if !strings.Contains(frame.rowLine(rows[0], true, listWidth, column), cursorMark) {
+		t.Errorf("the selected row carries no cursor: %q", frame.rowLine(rows[0], true, listWidth, column))
 	}
-	if strings.Contains(frame.rowLine(rows[1], false, listWidth), cursorMark) {
-		t.Errorf("an unselected row carries the cursor: %q", frame.rowLine(rows[1], false, listWidth))
+	if strings.Contains(frame.rowLine(rows[1], false, listWidth, column), cursorMark) {
+		t.Errorf("an unselected row carries the cursor: %q", frame.rowLine(rows[1], false, listWidth, column))
 	}
-	assertBanded(t, frame.rowLine(rows[0], true, listWidth), frame.rowLine(rows[1], false, listWidth), listWidth)
+	assertBanded(t, frame.rowLine(rows[0], true, listWidth, column), frame.rowLine(rows[1], false, listWidth, column), listWidth)
 }
 
 // A list longer than the pane scrolls with the cursor rather than losing it.

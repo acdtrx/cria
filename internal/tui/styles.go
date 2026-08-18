@@ -76,6 +76,7 @@ var palette = []swatch{
 	{name: "key", hex: keyHex, on: terminalBG, floor: textFloor},
 
 	{name: "band ink", hex: inkHex, on: bandHex, floor: textFloor},
+	{name: "band green", hex: greenHex, on: bandHex, floor: textFloor},
 	{name: "band dim", hex: bandDimHex, on: bandHex, floor: textFloor},
 	{name: "band amber", hex: amberHex, on: bandHex, floor: textFloor},
 	{name: "band red", hex: redHex, on: bandHex, floor: textFloor},
@@ -106,6 +107,7 @@ var (
 // alarm colour because a file cria refused is exactly that.
 var (
 	frameStyle  = lipgloss.NewStyle().Foreground(border)
+	readyStyle  = lipgloss.NewStyle().Foreground(green)
 	titleStyle  = lipgloss.NewStyle().Foreground(dim).Bold(true)
 	factStyle   = lipgloss.NewStyle().Foreground(ink)
 	labelStyle  = lipgloss.NewStyle().Foreground(blue)
@@ -125,6 +127,7 @@ var (
 var (
 	bandStyle       = lipgloss.NewStyle().Background(band)
 	bandNameStyle   = lipgloss.NewStyle().Foreground(amber).Background(band).Bold(true)
+	bandReadyStyle  = lipgloss.NewStyle().Foreground(green).Background(band)
 	bandFactStyle   = lipgloss.NewStyle().Foreground(ink).Background(band)
 	bandQuietStyle  = lipgloss.NewStyle().Foreground(bandDim).Background(band)
 	bandNoticeStyle = lipgloss.NewStyle().Foreground(amber).Background(band)
@@ -145,6 +148,16 @@ func (p rowPaint) name() lipgloss.Style {
 		return bandNameStyle
 	}
 	return factStyle
+}
+
+// ready is a row that could be acted on now rather than after a download: the
+// cached dot, in the same green a running server's phase is drawn in. The two
+// greys it used to be told apart by read as one dot at a glyph's size.
+func (p rowPaint) ready() lipgloss.Style {
+	if p.cursor {
+		return bandReadyStyle
+	}
+	return readyStyle
 }
 
 // fact is something the row states outright.
@@ -194,6 +207,12 @@ func (p rowPaint) marker() string {
 		return bandNameStyle.Render(cursorMark)
 	}
 	return nothingHere
+}
+
+// cell is one column of a row: its text in its own style, padded to the column's
+// width with the row's own background so the columns line up down the list.
+func (p rowPaint) cell(text string, style lipgloss.Style, width int) string {
+	return style.Render(text) + p.pad(strings.Repeat(" ", max(width-lipgloss.Width(text), 0)))
 }
 
 // pad is plain space painted like the row, so the band runs unbroken across the

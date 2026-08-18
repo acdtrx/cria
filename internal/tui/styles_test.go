@@ -114,6 +114,7 @@ func TestStylesDrawFromThePalette(t *testing.T) {
 
 	for name, style := range map[string]lipgloss.Style{
 		"frame":  frameStyle,
+		"ready":  readyStyle,
 		"title":  titleStyle,
 		"fact":   factStyle,
 		"label":  labelStyle,
@@ -126,6 +127,7 @@ func TestStylesDrawFromThePalette(t *testing.T) {
 		"broken": brokenStyle,
 
 		"band name":   bandNameStyle,
+		"band ready":  bandReadyStyle,
 		"band fact":   bandFactStyle,
 		"band quiet":  bandQuietStyle,
 		"band notice": bandNoticeStyle,

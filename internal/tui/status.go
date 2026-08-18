@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/progress"
+	"charm.land/lipgloss/v2"
 
 	"cria/internal/format"
 	"cria/internal/serve"
@@ -40,10 +41,24 @@ func statusLines(listing serve.StatusListing, saved prefs, bar progress.Model) [
 	}
 
 	// Several servers at once is entries declaring different ports (docs/cria.md,
-	// v1 surface): rare, and worth no more than stacking their lines.
+	// v1 surface). Their lines are a table: each fact is a column as wide as
+	// that fact on any row, so two servers are compared down the box rather than
+	// re-parsed per line. A single server is the same table with one row.
+	rows := make([]serverRow, len(listing.Servers))
+	for i, status := range listing.Servers {
+		rows[i] = statusRow(status)
+	}
+	widths := columnWidths(rows)
+
 	var lines []string
-	for _, status := range listing.Servers {
-		lines = append(lines, serverLines(status, bar)...)
+	for i, row := range rows {
+		lines = append(lines, row.line(widths))
+		if listing.Servers[i].Phase == serve.PhaseDownloading {
+			lines = append(lines, downloadLine(listing.Servers[i].Progress, bar))
+		}
+		if listing.Servers[i].Phase == serve.PhaseExited {
+			lines = append(lines, quietStyle.Render("log "+listing.Servers[i].LogPath))
+		}
 	}
 	for _, broken := range listing.Broken {
 		lines = append(lines, brokenLines(broken)...)
@@ -51,65 +66,98 @@ func statusLines(listing serve.StatusListing, saved prefs, bar progress.Model) [
 	return lines
 }
 
-// serverLines is one record's place in the box.
-func serverLines(status serve.Status, bar progress.Model) []string {
-	if status.Phase == serve.PhaseExited {
-		return exitedLines(status)
-	}
-	lines := []string{liveLine(status)}
-	if status.Phase == serve.PhaseDownloading {
-		lines = append(lines, downloadLine(status.Progress, bar))
-	}
-	return lines
+// serverRow is one server's line as columns plus an uncolumned tail. Live and
+// exited rows share their first columns (entry, phase, backend, model), so the
+// box lines up across states; what follows differs too much between the two to
+// be worth forcing into one grid.
+type serverRow struct {
+	cells []cell
+	tail  string
 }
 
-// liveLine is a server cria can still see: what it is, what it costs, and what
-// it last answered. The phase word carries the colour, so every other fact is
-// spelled in the same weight whatever the phase — a probe that says "connection
-// refused" is normal during a start and alarming during a run, and the phase is
-// what says which.
-func liveLine(status serve.Status) string {
-	facts := []string{
-		factStyle.Render(status.EntryID),
-		phaseTone(status.Phase).Render(string(status.Phase)),
-		quietStyle.Render(string(status.Backend)),
-		factStyle.Render(format.HubReference(status.Repo, status.Quant)),
-		quietStyle.Render(fmt.Sprintf("pid %d", status.PID)),
-		quietStyle.Render(fmt.Sprintf(":%d", status.Port)),
-		quietStyle.Render("up " + status.Uptime.Round(time.Second).String()),
+// cell is one column of a server's line: the text and the style it is drawn in.
+type cell struct {
+	text  string
+	style lipgloss.Style
+}
+
+// statusRow is a server's place in the box. The phase word carries the colour,
+// so every other fact is spelled in the same weight whatever the phase — a
+// probe that says "connection refused" is normal during a start and alarming
+// during a run, and the phase is what says which. An exited row is the crash
+// report: nothing is claimed about what it costs or answers — cria never
+// collected its exit status, and the log is the evidence (docs/specs/SERVE.md).
+func statusRow(status serve.Status) serverRow {
+	if status.Phase == serve.PhaseExited {
+		return serverRow{
+			cells: []cell{
+				{status.EntryID, alarmStyle},
+				{string(status.Phase), alarmStyle},
+				{string(status.Backend), alarmStyle},
+				{format.HubReference(status.Repo, status.Quant), alarmStyle},
+			},
+			tail: alarmStyle.Render(fmt.Sprintf("pid %d is gone", status.PID) +
+				factSeparator + "launched " + status.LaunchedAt.Format(time.DateTime)),
+		}
 	}
+
+	row := serverRow{cells: []cell{
+		{status.EntryID, factStyle},
+		{string(status.Phase), phaseTone(status.Phase)},
+		{string(status.Backend), quietStyle},
+		{format.HubReference(status.Repo, status.Quant), factStyle},
+		{fmt.Sprintf("pid %d", status.PID), quietStyle},
+		{fmt.Sprintf(":%d", status.Port), quietStyle},
+		{"up " + status.Uptime.Round(time.Second).String(), quietStyle},
+	}}
 
 	// What the process table had to say, when it had anything: a pid it could
-	// not find costs the line its two numbers rather than reporting zero.
+	// not find costs the line its two numbers rather than reporting zero. The
+	// columns stay (empty), so the rows behind this one keep their places.
+	rss, cpu := "", ""
 	if status.Stats.RSSBytes > 0 {
-		facts = append(facts, quietStyle.Render(format.Bytes(status.Stats.RSSBytes)))
+		rss = format.Bytes(status.Stats.RSSBytes)
 	}
 	if status.Stats.CPUPercent > 0 {
-		facts = append(facts, quietStyle.Render(fmt.Sprintf("%.1f%% cpu", status.Stats.CPUPercent)))
+		cpu = fmt.Sprintf("%.1f%% cpu", status.Stats.CPUPercent)
 	}
+	row.cells = append(row.cells, cell{rss, quietStyle}, cell{cpu, quietStyle})
 	if status.Health.Detail != "" {
-		facts = append(facts, quietStyle.Render(status.Health.Detail))
+		row.tail = quietStyle.Render(status.Health.Detail)
 	}
-	return strings.Join(facts, factSeparator)
+	return row
 }
 
-// exitedLines is the crash report: what died, when it was launched, and the log
-// that says why. Nothing is claimed about what it costs or what it answers —
-// cria never collected its exit status, and the log is the evidence
-// (docs/specs/SERVE.md).
-func exitedLines(status serve.Status) []string {
-	facts := []string{
-		status.EntryID,
-		string(status.Phase),
-		string(status.Backend),
-		format.HubReference(status.Repo, status.Quant),
-		fmt.Sprintf("pid %d is gone", status.PID),
-		"launched " + status.LaunchedAt.Format(time.DateTime),
+// columnWidths is how wide each column has to be for that column's widest text
+// on any row — the table's grid. A row's tail is not a column and sets nothing.
+func columnWidths(rows []serverRow) []int {
+	var widths []int
+	for _, row := range rows {
+		for i, c := range row.cells {
+			if i == len(widths) {
+				widths = append(widths, 0)
+			}
+			widths[i] = max(widths[i], lipgloss.Width(c.text))
+		}
 	}
-	return []string{
-		alarmStyle.Render(strings.Join(facts, factSeparator)),
-		quietStyle.Render("log " + status.LogPath),
+	return widths
+}
+
+// line draws one row on the grid: each cell padded to its column, the tail as
+// it is. Empty trailing columns collapse rather than leaving a gap before the
+// tail.
+func (r serverRow) line(widths []int) string {
+	var facts []string
+	for i, c := range r.cells {
+		if c.text == "" && i >= len(r.cells)-2 && widths[i] == 0 {
+			continue
+		}
+		facts = append(facts, c.style.Render(c.text)+strings.Repeat(" ", widths[i]-lipgloss.Width(c.text)))
 	}
+	if r.tail != "" {
+		facts = append(facts, r.tail)
+	}
+	return strings.TrimRight(strings.Join(facts, factSeparator), " ")
 }
 
 // brokenLines is a record file cria refused. It names a pid cria started, so it

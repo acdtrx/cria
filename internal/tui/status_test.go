@@ -178,6 +178,34 @@ func TestSeveralServersStack(t *testing.T) {
 	if !strings.Contains(lines[0], "qwen") || !strings.Contains(lines[1], "gemma") {
 		t.Errorf("the box reads %q, want one line per server", lines)
 	}
+
+	// The lines are one table: every shared fact starts at the same column on
+	// both rows, however long the ids and phases above it were.
+	for _, fact := range []string{"running", "llama", "unsloth/", "pid ", "up "} {
+		if a, b := runeColumn(lines[0], fact), runeColumn(lines[1], fact); a != b || a < 0 {
+			t.Errorf("column %q is not aligned: %d vs %d\n%q\n%q", fact, a, b, lines[0], lines[1])
+		}
+	}
+}
+
+// The table holds across states: an exited server's first columns line up under
+// a live one's, so the box reads as one grid however the servers are doing.
+func TestTheTableHoldsAcrossPhases(t *testing.T) {
+	dead := liveStatus(serve.PhaseExited)
+	dead.EntryID = "gemma-27b"
+
+	lines := box(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning), dead}}, defaultPrefs())
+	if len(lines) != 3 {
+		t.Fatalf("a live and an exited server drew %d lines, want 3 (the crash log line included): %q", len(lines), lines)
+	}
+	for _, fact := range []string{"llama", "unsloth/"} {
+		if a, b := runeColumn(lines[0], fact), runeColumn(lines[1], fact); a != b || a < 0 {
+			t.Errorf("column %q is not aligned across phases: %d vs %d\n%q\n%q", fact, a, b, lines[0], lines[1])
+		}
+	}
+	if !strings.Contains(lines[1], "pid 4242 is gone") || !strings.Contains(lines[2], "log ") {
+		t.Errorf("the exited row lost its crash report: %q", lines[1:])
+	}
 }
 
 // A record file cria refused names a pid cria started: it is shown, with the one

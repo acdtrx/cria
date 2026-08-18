@@ -34,9 +34,10 @@ type (
 		holders []serve.Holder
 		err     error
 	}
-	// actedMsg is what a stop, a kill or a dismiss had to report. All three end
-	// in one line under the box, because all three are answered by the status
-	// box itself on the next refresh.
+	// actedMsg is what a stop, a kill or a dismiss had to report — which is
+	// nothing at all when it worked: the status box shows the result on the
+	// next refresh, and the alert line is for what the box cannot show (tui.go).
+	// A failure is exactly that, so it travels here.
 	actedMsg struct {
 		text string
 		bad  bool
@@ -138,8 +139,10 @@ func (m model) started(msg startedMsg) model {
 		return m
 	}
 
+	// The server is up and the status box says so on the next tick; the line
+	// that reported the start would only repeat it (tui.go).
 	m.prefs.LastStarted = msg.record.EntryID
-	m.alert = alert{text: fmt.Sprintf("started %s (pid %d)", msg.record.EntryID, msg.record.PID)}
+	m.alert = alert{}
 	if err := savePrefs(m.root, m.prefs); err != nil {
 		m.alert = alert{text: err.Error(), bad: true}
 	}
@@ -164,7 +167,7 @@ func (m model) stopShownServer() (tea.Model, tea.Cmd) {
 		if err := servers.Stop(record); err != nil {
 			return actedMsg{text: err.Error(), bad: true}
 		}
-		return actedMsg{text: "stopped " + record.EntryID}
+		return actedMsg{}
 	}
 }
 
@@ -183,7 +186,7 @@ func (m model) killShownServer() (tea.Model, tea.Cmd) {
 		if err := servers.Kill(record); err != nil {
 			return actedMsg{text: err.Error(), bad: true}
 		}
-		return actedMsg{text: "killed " + record.EntryID}
+		return actedMsg{}
 	}
 }
 
@@ -200,7 +203,7 @@ func (m model) dismissShownRecord() (tea.Model, tea.Cmd) {
 		if err := servers.Dismiss(record); err != nil {
 			return actedMsg{text: err.Error(), bad: true}
 		}
-		return actedMsg{text: "dismissed the exited record of " + record.EntryID}
+		return actedMsg{}
 	}
 }
 
