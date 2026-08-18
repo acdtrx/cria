@@ -1,6 +1,10 @@
 # Step 1 — module scaffold and CLI dispatch
 
-**Phase 1 · Status: not started**
+**Phase 1 · Status: done (2026-08-18)** — all gates green (build, gofmt, vet,
+test, linux cross-compile); manual transcript verified. Decisions taken during
+implementation: unknown subcommand exits 2 (usage error, distinct from a failed
+operation's 1); no `--help` surface (not in CLI.md); version placeholder
+`0.1.0-dev` until step 15 tags.
 
 ## Intent
 
