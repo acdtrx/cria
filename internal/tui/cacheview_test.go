@@ -7,6 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"cria/internal/format"
 	"cria/internal/hubcache"
 	"cria/internal/serve"
 )
@@ -149,6 +150,26 @@ func TestCacheListDrawsEverythingTheCacheHolds(t *testing.T) {
 	}
 }
 
+// The row under the cursor is a band across the pane, the size column included,
+// and the row beside it is drawn plain.
+func TestCacheCursorRowIsABand(t *testing.T) {
+	frame, _ := cacheFrame(t)
+	frame = frame.reselect(1)
+
+	rows := frame.cacheRows()
+	column := sizeColumn(rows)
+	assertBanded(t,
+		frame.cacheRowLine(rows[1], true, listWidth, column),
+		frame.cacheRowLine(rows[0], false, listWidth, column), listWidth)
+
+	// The size is inside the band rather than beyond its end: the row is one
+	// object, and what it occupies is part of it.
+	banded := frame.cacheRowLine(rows[1], true, listWidth, column)
+	if !strings.HasSuffix(plain(banded), format.Bytes(rowBytes(rows[1]))) {
+		t.Errorf("the banded row does not end in its size: %q", plain(banded))
+	}
+}
+
 // Names are the provider's, exactly: unsloth's UD- prefix is part of the tag the
 // repo publishes, and cria never prettifies it (docs/specs/CACHE.md).
 func TestCacheListSpellsNamesTheWayTheHubDoes(t *testing.T) {
@@ -198,8 +219,8 @@ func TestCacheSelectionWalksTheUnits(t *testing.T) {
 	if frame.cacheSelected != 2 || frame.selected != 0 {
 		t.Errorf("the cache cursor is on %d and the entry cursor on %d, want 2 and 0", frame.cacheSelected, frame.selected)
 	}
-	back, _ := press(t, frame, typed('v'))
-	again, _ := press(t, back, typed('v'))
+	back, _ := press(t, frame, escape)
+	again, _ := press(t, back, typed('c'))
 	if again.cacheSelected != 2 {
 		t.Errorf("the cache view came back on row %d, want the row it was left on", again.cacheSelected)
 	}

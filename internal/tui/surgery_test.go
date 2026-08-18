@@ -91,7 +91,7 @@ func cacheFrame(t *testing.T) (model, *testHost) {
 func onRow(t *testing.T, frame model, what string) model {
 	t.Helper()
 	for i, listed := range frame.cacheRows() {
-		if strings.Contains(plain(rowFacts(listed, false)), what) {
+		if strings.Contains(plain(rowFacts(listed, paintFor(false))), what) {
 			return frame.reselect(i)
 		}
 	}
@@ -344,7 +344,7 @@ func TestDeleteKeyIsTheCacheViewsAlone(t *testing.T) {
 		t.Errorf("the cache view lost the server keys: %q", bar)
 	}
 
-	back, _ := press(t, frame, typed('v'))
+	back, _ := press(t, frame, escape)
 	if bar := plain(renderKeybar(200, back.groups()...)); strings.Contains(bar, "x delete") {
 		t.Errorf("the entry list offers the cache view's delete: %q", bar)
 	}

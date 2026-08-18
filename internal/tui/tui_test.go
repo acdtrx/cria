@@ -246,14 +246,14 @@ func TestFrameDrawsBoxScreenAndKeybar(t *testing.T) {
 	}
 }
 
-// The view key switches screens, and the status box stays: it appears in every
-// view, the cache view included (docs/specs/TUI.md).
-func TestViewKeySwitchesScreens(t *testing.T) {
+// c opens the cache and esc comes back, and the status box stays: it appears in
+// every view, the cache view included (docs/specs/TUI.md).
+func TestViewKeysSwitchScreens(t *testing.T) {
 	frame, _ := testFrame(t, &fakeServers{})
 
-	frame, _ = press(t, frame, typed('v'))
+	frame, _ = press(t, frame, typed('c'))
 	if frame.view != viewCache {
-		t.Fatalf("the view key left the frame on %v, want the cache view", frame.view)
+		t.Fatalf("the cache key left the frame on %v, want the cache view", frame.view)
 	}
 	drawn := plain(frame.View().Content)
 	if !strings.Contains(drawn, "cache") {
@@ -263,9 +263,9 @@ func TestViewKeySwitchesScreens(t *testing.T) {
 		t.Errorf("the status box is missing from the cache view:\n%s", drawn)
 	}
 
-	frame, _ = press(t, frame, typed('v'))
+	frame, _ = press(t, frame, escape)
 	if frame.view != viewServe {
-		t.Errorf("the view key left the frame on %v, want it back on the serve view", frame.view)
+		t.Errorf("esc left the frame on %v, want it back on the serve view", frame.view)
 	}
 }
 
@@ -293,6 +293,95 @@ func TestBackendToggleIsWrittenDown(t *testing.T) {
 	frame, _ = press(t, frame, tea.KeyPressMsg{Code: tea.KeyTab})
 	if frame.prefs.Backend != config.BackendLlama {
 		t.Errorf("the toggle left the backend at %q, want it back on %q", frame.prefs.Backend, config.BackendLlama)
+	}
+}
+
+// The toggle says nothing under the status box: the pane title already names the
+// backend, in that backend's own colour, and a line reporting the change would
+// still be sitting there long after it (docs/specs/TUI.md).
+func TestBackendToggleReportsItselfInTheTitle(t *testing.T) {
+	frame, world, _ := testFrameOn(t, newTestHost(&fakeServers{}))
+	world.tree = testTree()
+	frame = load(t, frame)
+
+	frame, _ = press(t, frame, tea.KeyPressMsg{Code: tea.KeyTab})
+	if frame.alert.text != "" {
+		t.Errorf("the toggle left %q under the status box, want the title to carry the change alone", frame.alert.text)
+	}
+
+	// The two backends are told apart by colour, not only by the word.
+	title := frame.serveTitle()
+	if !strings.Contains(title, backendTone(config.BackendMLX).Render("mlx")) {
+		t.Errorf("the title does not spell mlx in the mlx colour: %q", title)
+	}
+	if plain(title) != "serve · mlx" {
+		t.Errorf("the title reads %q, want %q", plain(title), "serve · mlx")
+	}
+	if backendTone(config.BackendLlama).GetForeground() == backendTone(config.BackendMLX).GetForeground() {
+		t.Error("both backends are drawn in one colour; the active one has to be recognisable at a glance")
+	}
+
+	// And an alert already on screen goes with the keypress rather than
+	// outliving it.
+	frame.alert = alert{text: "stopped qwen"}
+	frame, _ = press(t, frame, tea.KeyPressMsg{Code: tea.KeyTab})
+	if frame.alert.text != "" {
+		t.Errorf("the toggle kept %q from the keypress before it", frame.alert.text)
+	}
+}
+
+// Navigation is one key each way, and the bar offers exactly the one that works
+// where the user is standing (docs/specs/TUI.md).
+func TestNavigationKeysAreScopedToTheView(t *testing.T) {
+	frame, _ := testFrame(t, &fakeServers{})
+
+	bar := plain(renderKeybar(200, frame.groups()...))
+	if !strings.Contains(bar, "c cache") {
+		t.Errorf("the serve view's keybar reads %q, want the key that opens the cache", bar)
+	}
+	if strings.Contains(bar, "esc back") || strings.Contains(bar, "v view") {
+		t.Errorf("the serve view's keybar offers a way back from where it is: %q", bar)
+	}
+
+	frame, _ = press(t, frame, typed('c'))
+	bar = plain(renderKeybar(200, frame.groups()...))
+	if !strings.Contains(bar, "esc back") {
+		t.Errorf("the cache view's keybar reads %q, want esc to come back", bar)
+	}
+	if strings.Contains(bar, "c cache") {
+		t.Errorf("the cache view offers the key that opens it: %q", bar)
+	}
+
+	// The key that is gone is gone: v does nothing in either view.
+	frame, _ = press(t, frame, typed('v'))
+	if frame.view != viewCache {
+		t.Errorf("v moved the frame to %v; the view key is c now", frame.view)
+	}
+}
+
+// esc closes whatever has the keyboard before it means "back": a pane over the
+// cache view is what the key is reached for there.
+func TestEscapeClosesOverlaysBeforeLeavingTheCacheView(t *testing.T) {
+	frame, _ := testFrame(t, &fakeServers{})
+	frame, _ = press(t, frame, typed('c'))
+
+	frame, cmd := press(t, frame, typed('t'))
+	frame = answer(t, frame, cmd)
+	if !frame.toolsOpen {
+		t.Fatal("the tools pane did not open over the cache view")
+	}
+
+	frame, _ = press(t, frame, escape)
+	if frame.toolsOpen {
+		t.Error("esc left the tools pane up")
+	}
+	if frame.view != viewCache {
+		t.Errorf("esc closed the pane and left the view too: %v", frame.view)
+	}
+
+	frame, _ = press(t, frame, escape)
+	if frame.view != viewServe {
+		t.Errorf("esc with nothing over the cache view left the frame on %v", frame.view)
 	}
 }
 

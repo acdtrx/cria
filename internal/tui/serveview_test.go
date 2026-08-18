@@ -37,10 +37,14 @@ func serveFrame(t *testing.T) (model, *testHost) {
 	return load(t, frame), world
 }
 
+// listWidth is the pane the list is drawn into by the assertions here: wide
+// enough that no row is truncated, so what a test reads is the whole row.
+const listWidth = 76
+
 // list is the entry list as a person reads it, one line per row.
 func list(frame model, capacity int) []string {
 	var lines []string
-	for _, line := range frame.listLines(capacity) {
+	for _, line := range frame.listLines(listWidth, capacity) {
 		if trimmed := strings.TrimRight(plain(line), " "); trimmed != "" {
 			lines = append(lines, trimmed)
 		}
@@ -94,7 +98,7 @@ func TestRefusedEntryFilesStayVisible(t *testing.T) {
 	}
 
 	rows := frame.rows()
-	drawn := frame.rowLine(rows[len(rows)-1], false)
+	drawn := frame.rowLine(rows[len(rows)-1], false, listWidth)
 	if !strings.HasPrefix(strings.TrimLeft(drawn, " "), opener(brokenStyle)) {
 		t.Errorf("the refused row is not drawn as one cria cannot act on: %q", drawn)
 	}
@@ -128,12 +132,13 @@ func TestSelectionMoves(t *testing.T) {
 
 	// The highlighted row is the one drawn as highlighted.
 	rows := frame.rows()
-	if !strings.Contains(frame.rowLine(rows[0], true), cursorMark) {
-		t.Errorf("the selected row carries no cursor: %q", frame.rowLine(rows[0], true))
+	if !strings.Contains(frame.rowLine(rows[0], true, listWidth), cursorMark) {
+		t.Errorf("the selected row carries no cursor: %q", frame.rowLine(rows[0], true, listWidth))
 	}
-	if strings.Contains(frame.rowLine(rows[1], false), cursorMark) {
-		t.Errorf("an unselected row carries the cursor: %q", frame.rowLine(rows[1], false))
+	if strings.Contains(frame.rowLine(rows[1], false, listWidth), cursorMark) {
+		t.Errorf("an unselected row carries the cursor: %q", frame.rowLine(rows[1], false, listWidth))
 	}
+	assertBanded(t, frame.rowLine(rows[0], true, listWidth), frame.rowLine(rows[1], false, listWidth), listWidth)
 }
 
 // A list longer than the pane scrolls with the cursor rather than losing it.
@@ -182,6 +187,30 @@ func TestDetailPaneCarriesTheWholeEntry(t *testing.T) {
 		if !strings.Contains(detail, fact) {
 			t.Errorf("the detail pane does not carry %q:\n%s", fact, detail)
 		}
+	}
+}
+
+// The detail pane is a label column and a value column, and they are told apart
+// by colour: the label says what the value is, so it is drawn as structure while
+// the value is body text.
+func TestDetailPaneColoursItsLabels(t *testing.T) {
+	frame, _ := serveFrame(t)
+	frame = frame.reselect(1) // qwen
+
+	detail := strings.Join(frame.detailLines(200, 30), "\n")
+	if !strings.Contains(detail, labelStyle.Render(fit("repo", detailLabelWidth))) {
+		t.Errorf("the detail pane does not draw its labels in the label colour:\n%s", detail)
+	}
+	if !strings.Contains(detail, factStyle.Render("unsloth/Qwen3-30B-A3B-GGUF")) {
+		t.Errorf("the detail pane does not draw its values as body text:\n%s", detail)
+	}
+	if labelStyle.GetForeground() == factStyle.GetForeground() {
+		t.Error("labels and values are drawn in one colour; the label is what makes the value readable")
+	}
+	// The backend is a value that carries its own colour, the same one the pane
+	// title spells it in.
+	if !strings.Contains(detail, backendTone(config.BackendLlama).Render("llama")) {
+		t.Errorf("the detail pane does not spell the backend in the backend's colour:\n%s", detail)
 	}
 }
 
@@ -239,7 +268,7 @@ func TestEmptyBackendPointsAtTheDocs(t *testing.T) {
 	world.tree = &config.Tree{Root: "/home/u/.config/cria"}
 	frame = load(t, frame)
 
-	drawn := plain(strings.Join(frame.listLines(6), "\n"))
+	drawn := plain(strings.Join(frame.listLines(listWidth, 6), "\n"))
 	for _, fact := range []string{"no llama entries", "/home/u/.config/cria/models", "cria docs"} {
 		if !strings.Contains(drawn, fact) {
 			t.Errorf("the empty list does not say %q:\n%s", fact, drawn)
@@ -296,7 +325,7 @@ func TestKeybarOffersStartForTheSelection(t *testing.T) {
 	// The cache view has a selection of its own (docs/specs/CACHE.md); the
 	// entry list's keys are not it.
 	frame = frame.reselect(0)
-	frame, _ = press(t, frame, typed('v'))
+	frame, _ = press(t, frame, typed('c'))
 	if bar := plain(renderKeybar(200, frame.groups()...)); strings.Contains(bar, "⏎ start") {
 		t.Errorf("the cache view offers the entry list's start: %q", bar)
 	}
@@ -399,7 +428,7 @@ func TestUnwalkedEntriesClaimNothing(t *testing.T) {
 	if !found {
 		t.Fatal("the test tree holds no qwen entry")
 	}
-	if mark := plain(frame.presenceMark(qwen)); mark != unknownMark {
+	if mark := plain(frame.presenceMark(qwen, paintFor(false))); mark != unknownMark {
 		t.Errorf("an entry the cache could not be asked about is marked %q, want %q", mark, unknownMark)
 	}
 	if drawn := plain(frame.View().Content); !strings.Contains(drawn, "cannot read the model cache") {

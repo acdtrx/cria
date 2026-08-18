@@ -164,7 +164,7 @@ func TestToolsPaneHoldsTheKeyboard(t *testing.T) {
 			if !strings.Contains(bar, toolsScope+" esc close") {
 				t.Errorf("the keybar reads %q, want the pane's own key while it is up", bar)
 			}
-			for _, hidden := range []string{"s stop", "⏎ start", "v view"} {
+			for _, hidden := range []string{"s stop", "⏎ start", "c cache"} {
 				if strings.Contains(bar, hidden) {
 					t.Errorf("the keybar offers %q from under the tools pane: %q", hidden, bar)
 				}

@@ -64,14 +64,14 @@ func (m model) pressInTools(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) toolsPanel(width, rows int) string {
 	inner := width - 4
 	if !m.reported {
-		return pane(toolsScope, width, sizeLines([]string{quietStyle.Render("asking the host what it has…")}, rows-2))
+		return pane(paneTitle(toolsScope), width, sizeLines([]string{quietStyle.Render("asking the host what it has…")}, rows-2))
 	}
 
 	var lines []string
 	for _, tool := range m.report.All() {
 		lines = append(lines, toolLines(tool, inner)...)
 	}
-	return pane(toolsScope, width, sizeLines(lines, rows-2))
+	return pane(paneTitle(toolsScope), width, sizeLines(lines, rows-2))
 }
 
 // toolLines is one tool's finding: where it resolved and what cria may do with

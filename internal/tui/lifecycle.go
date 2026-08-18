@@ -313,7 +313,7 @@ func (h modal) panel(width, rows int) string {
 	if h.note != "" {
 		lines = append(lines, noticeStyle.Render(h.note))
 	}
-	return pane("held port", width, sizeLines(lines, rows-2))
+	return pane(paneTitle(modalScope), width, sizeLines(lines, rows-2))
 }
 
 // orUnreadable keeps the refusal readable when one of a holder's two details

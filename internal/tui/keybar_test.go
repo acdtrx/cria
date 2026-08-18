@@ -40,6 +40,25 @@ func TestKeybarGroupsByScope(t *testing.T) {
 	}
 }
 
+// The key is the bright thing in the bar and what it does sits beside it in the
+// dim tone: the reader is scanning for a key, not for a sentence.
+func TestKeybarColoursTheKeysOnly(t *testing.T) {
+	bar := renderKeybar(120, keyGroup{label: serverScope, bindings: []key.Binding{binding("s", "s", "stop", true)}})
+
+	if !strings.Contains(bar, keyStyle.Render("s")) {
+		t.Errorf("the bar does not draw its key in the key colour: %q", bar)
+	}
+	if !strings.Contains(bar, hintStyle.Render("stop")) {
+		t.Errorf("the bar does not draw what the key does in the hint tone: %q", bar)
+	}
+	if !strings.Contains(bar, quietStyle.Render(serverScope)) {
+		t.Errorf("the bar does not draw its scope label quietly: %q", bar)
+	}
+	if keyStyle.GetForeground() == hintStyle.GetForeground() {
+		t.Error("the key and what it does are drawn in one colour; the key is what the reader is looking for")
+	}
+}
+
 // A key that does not apply right now is not drawn — pressing it does nothing,
 // and a bar that offered it would be making a promise cria does not keep.
 func TestKeybarHidesKeysThatDoNotApply(t *testing.T) {

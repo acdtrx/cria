@@ -6,42 +6,233 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"cria/internal/config"
 	"cria/internal/serve"
 )
 
-// The palette. cria's screens are mostly dim: the frame, the labels and the key
-// hints recede so that the few facts that change — a phase, a failure, the
-// server that is actually running — are the only bright things on screen.
+// The palette. cria's screens are read at a glance on a dark terminal, so colour
+// carries meaning and nothing else: a phase, a backend, a key, a field label,
+// the row the cursor is on. Everything else is body text or frame.
 //
-// 256-colour indices rather than hex, so the frame keeps its intent on a
-// terminal that cannot do more.
+// The values are truecolor hex rather than 256-colour indices — lipgloss
+// downgrades them on a terminal that cannot do more, and naming the exact
+// channels is what makes the contrast computable. Legibility is enforced rather
+// than judged: styles_test.go computes the WCAG relative-luminance ratio of
+// every colour below against the background it is read on and refuses anything
+// under AA (4.5:1), the frame excepted as chrome at 3:1.
+const (
+	inkHex    = "#c6cdd5" // the facts themselves
+	dimHex    = "#7d8590" // context: field values that are not the point, hints, scope labels
+	borderHex = "#586170" // the frame: a rule, not a word
+	greenHex  = "#4ac26b" // running: the server answers
+	yellowHex = "#d9a03d" // downloading: something is happening, nothing is wrong
+	amberHex  = "#e0a458" // starting, notices, sizes, and the llama backend
+	redHex    = "#f47067" // unhealthy, exited, and anything cria could not do
+	blueHex   = "#6cb6ff" // the labels of a detail pane, and the mlx backend
+	keyHex    = "#ff8f85" // the keys themselves, in the bar
+
+	// The cursor's row sits on a band: the amber accent at a low alpha over the
+	// terminal's own background. Body text and the accents clear AA on it as they
+	// stand; the dim tone does not, so the band carries its own.
+	bandHex    = "#2d2720"
+	bandDimHex = "#939ca6"
+)
+
+// terminalBG is the background cria is read against: a dark terminal, taken at
+// its darkest so a colour that clears AA here clears it on every darker-than-mid
+// theme too.
+const terminalBG = "#000000"
+
+// The floors every colour is held to. textFloor is WCAG AA for body-sized text;
+// chromeFloor is what a rule has to clear to be seen at all — the frame is drawn,
+// not read, and holding it to AA would make the boxes shout over their contents.
+const (
+	textFloor   = 4.5
+	chromeFloor = 3.0
+)
+
+// swatch is one colour of the palette with the background it is read on and the
+// ratio it has to clear there.
+type swatch struct {
+	name  string
+	hex   string
+	on    string
+	floor float64
+}
+
+// palette is every colour the frame draws with, declared once so the contrast
+// test can enumerate it: a colour that is not in this table is a colour no
+// screen may use. The band entries are the second reading of a colour that has
+// two — on the terminal's own background, and on the cursor's row.
+var palette = []swatch{
+	{name: "ink", hex: inkHex, on: terminalBG, floor: textFloor},
+	{name: "dim", hex: dimHex, on: terminalBG, floor: textFloor},
+	{name: "border", hex: borderHex, on: terminalBG, floor: chromeFloor},
+	{name: "green", hex: greenHex, on: terminalBG, floor: textFloor},
+	{name: "yellow", hex: yellowHex, on: terminalBG, floor: textFloor},
+	{name: "amber", hex: amberHex, on: terminalBG, floor: textFloor},
+	{name: "red", hex: redHex, on: terminalBG, floor: textFloor},
+	{name: "blue", hex: blueHex, on: terminalBG, floor: textFloor},
+	{name: "key", hex: keyHex, on: terminalBG, floor: textFloor},
+
+	{name: "band ink", hex: inkHex, on: bandHex, floor: textFloor},
+	{name: "band dim", hex: bandDimHex, on: bandHex, floor: textFloor},
+	{name: "band amber", hex: amberHex, on: bandHex, floor: textFloor},
+	{name: "band red", hex: redHex, on: bandHex, floor: textFloor},
+}
+
+// The palette as lipgloss reads it.
 var (
-	ink    = lipgloss.Color("252") // the facts themselves
-	muted  = lipgloss.Color("245") // labels and keys: readable, not loud
-	faint  = lipgloss.Color("240") // the frame, and everything that is only context
-	green  = lipgloss.Color("42")  // running: the server answers
-	yellow = lipgloss.Color("220") // downloading: something is happening, nothing is wrong
-	amber  = lipgloss.Color("214") // starting, and what a keypress just did
-	red    = lipgloss.Color("203") // unhealthy, exited, and anything cria could not do
+	ink     = lipgloss.Color(inkHex)
+	dim     = lipgloss.Color(dimHex)
+	border  = lipgloss.Color(borderHex)
+	green   = lipgloss.Color(greenHex)
+	yellow  = lipgloss.Color(yellowHex)
+	amber   = lipgloss.Color(amberHex)
+	red     = lipgloss.Color(redHex)
+	blue    = lipgloss.Color(blueHex)
+	keyRed  = lipgloss.Color(keyHex)
+	band    = lipgloss.Color(bandHex)
+	bandDim = lipgloss.Color(bandDimHex)
 )
 
 // The styles every screen draws with. One file holds them so a change of palette
 // is one edit rather than a hunt through the views.
-// selectedStyle is the highlighted row of a list, and brokenStyle a row that is
-// listed but cannot be acted on: dimmed red says "this file is yours to fix"
-// without borrowing the weight of a server that has crashed.
+//
+// labelStyle is a detail pane's left column and keyStyle the bar's keys: both
+// are structure rather than content, and both are coloured for it — the label
+// says "this is what the value is", the key says "this is what you press".
+// brokenStyle is a row that is listed but cannot be acted on; it borrows the
+// alarm colour because a file cria refused is exactly that.
 var (
-	frameStyle    = lipgloss.NewStyle().Foreground(faint)
-	titleStyle    = lipgloss.NewStyle().Foreground(muted).Bold(true)
-	factStyle     = lipgloss.NewStyle().Foreground(ink)
-	labelStyle    = lipgloss.NewStyle().Foreground(faint)
-	keyStyle      = lipgloss.NewStyle().Foreground(muted).Bold(true)
-	quietStyle    = lipgloss.NewStyle().Foreground(faint)
-	noticeStyle   = lipgloss.NewStyle().Foreground(amber)
-	alarmStyle    = lipgloss.NewStyle().Foreground(red)
-	selectedStyle = lipgloss.NewStyle().Foreground(ink).Bold(true)
-	brokenStyle   = lipgloss.NewStyle().Foreground(red).Faint(true)
+	frameStyle  = lipgloss.NewStyle().Foreground(border)
+	titleStyle  = lipgloss.NewStyle().Foreground(dim).Bold(true)
+	factStyle   = lipgloss.NewStyle().Foreground(ink)
+	labelStyle  = lipgloss.NewStyle().Foreground(blue)
+	keyStyle    = lipgloss.NewStyle().Foreground(keyRed).Bold(true)
+	hintStyle   = lipgloss.NewStyle().Foreground(dim)
+	quietStyle  = lipgloss.NewStyle().Foreground(dim)
+	noticeStyle = lipgloss.NewStyle().Foreground(amber)
+	sizeStyle   = lipgloss.NewStyle().Foreground(amber)
+	alarmStyle  = lipgloss.NewStyle().Foreground(red)
+	brokenStyle = lipgloss.NewStyle().Foreground(red)
 )
+
+// The same styles on the cursor's band. A row under the cursor is drawn on a
+// background, so every fragment of it — the separators and the padding included
+// — carries that background, and the dim tone is swapped for the one that stays
+// legible over it.
+var (
+	bandStyle       = lipgloss.NewStyle().Background(band)
+	bandNameStyle   = lipgloss.NewStyle().Foreground(amber).Background(band).Bold(true)
+	bandFactStyle   = lipgloss.NewStyle().Foreground(ink).Background(band)
+	bandQuietStyle  = lipgloss.NewStyle().Foreground(bandDim).Background(band)
+	bandNoticeStyle = lipgloss.NewStyle().Foreground(amber).Background(band)
+	bandAlarmStyle  = lipgloss.NewStyle().Foreground(red).Background(band)
+)
+
+// rowPaint is how one row of a list is drawn: in the palette as it stands, or on
+// the cursor's band. Both lists ask for it the same way, so the highlight is one
+// decision rather than one per view.
+type rowPaint struct{ cursor bool }
+
+// paintFor is the paint a row is drawn with.
+func paintFor(cursor bool) rowPaint { return rowPaint{cursor: cursor} }
+
+// name is the row's own identity: the entry id, the repo, the quant tag.
+func (p rowPaint) name() lipgloss.Style {
+	if p.cursor {
+		return bandNameStyle
+	}
+	return factStyle
+}
+
+// fact is something the row states outright.
+func (p rowPaint) fact() lipgloss.Style {
+	if p.cursor {
+		return bandFactStyle
+	}
+	return factStyle
+}
+
+// quiet is what the row carries as context.
+func (p rowPaint) quiet() lipgloss.Style {
+	if p.cursor {
+		return bandQuietStyle
+	}
+	return quietStyle
+}
+
+// notice is what the row flags: an unfinished download, an incomplete quant.
+func (p rowPaint) notice() lipgloss.Style {
+	if p.cursor {
+		return bandNoticeStyle
+	}
+	return noticeStyle
+}
+
+// broken is a row cria cannot act on.
+func (p rowPaint) broken() lipgloss.Style {
+	if p.cursor {
+		return bandAlarmStyle
+	}
+	return brokenStyle
+}
+
+// size is a number of bytes, which every list quotes in the accent so the
+// column reads as one thing down the screen.
+func (p rowPaint) size() lipgloss.Style {
+	if p.cursor {
+		return bandNoticeStyle
+	}
+	return sizeStyle
+}
+
+// marker is the cursor's own mark, in the two cells every row keeps for it.
+func (p rowPaint) marker() string {
+	if p.cursor {
+		return bandNameStyle.Render(cursorMark)
+	}
+	return nothingHere
+}
+
+// pad is plain space painted like the row, so the band runs unbroken across the
+// separators and the padding rather than showing the terminal through them.
+func (p rowPaint) pad(spaces string) string {
+	if !p.cursor {
+		return spaces
+	}
+	return bandStyle.Render(spaces)
+}
+
+// join holds a row's facts apart, the separator painted like the row.
+func (p rowPaint) join(facts ...string) string {
+	return strings.Join(facts, p.pad(factSeparator))
+}
+
+// fill makes a row exactly as wide as the pane it sits in, so the cursor's row
+// reads as a band across it rather than as a coloured word. A row that is not
+// the cursor's is left for the pane to pad.
+func (p rowPaint) fill(line string, width int) string {
+	if width < 1 {
+		return ""
+	}
+	if lipgloss.Width(line) > width {
+		return lipgloss.NewStyle().MaxWidth(width).Render(line)
+	}
+	return line + p.pad(strings.Repeat(" ", width-lipgloss.Width(line)))
+}
+
+// backendTone is the colour a backend's name is spelled in. The two are
+// different hues rather than two weights of one: which backend the lists are
+// showing is the one thing about the serve view that changes under the user,
+// and it has to be recognisable without reading (docs/specs/TUI.md).
+func backendTone(backend config.Backend) lipgloss.Style {
+	if backend == config.BackendMLX {
+		return lipgloss.NewStyle().Foreground(blue).Bold(true)
+	}
+	return lipgloss.NewStyle().Foreground(amber).Bold(true)
+}
 
 // phaseTone is the colour a phase is spelled in (docs/specs/SERVE.md names the
 // phases; this is the only place that decides what each one looks like).
@@ -67,7 +258,7 @@ func phaseColor(phase serve.Phase) color.Color {
 	case serve.PhaseUnhealthy, serve.PhaseExited:
 		return red
 	default:
-		return faint
+		return dim
 	}
 }
 
@@ -93,6 +284,11 @@ const (
 // pane draws one bordered box with its title sitting in the top border. Every
 // screen is one of these, which is what makes the status box read as the same
 // object in every view (docs/specs/TUI.md).
+//
+// The title arrives already rendered. Most are one word in the frame's title
+// tone, but the serve view's carries the active backend in that backend's own
+// colour, so what a title is spelled in belongs to the screen that names it
+// rather than to the box.
 func pane(title string, width int, lines []string) string {
 	if width < minWidth {
 		width = minWidth
@@ -113,6 +309,10 @@ func pane(title string, width int, lines []string) string {
 	return box.String()
 }
 
+// paneTitle is a box's name in the frame's own title tone — what a screen passes
+// to pane when its title is just a word.
+func paneTitle(name string) string { return titleStyle.Render(name) }
+
 // topBorder is the box's first line: the border with the title let into it. A
 // title too long for the box loses its tail rather than pushing the corner off
 // the screen, and a box too narrow to hold any of it is drawn plain.
@@ -128,8 +328,7 @@ func topBorder(border lipgloss.Border, title string, width int) string {
 	}
 
 	fill := width - lead - lipgloss.Width(title) - 2
-	return frameStyle.Render(border.TopLeft+border.Top+" ") +
-		titleStyle.Render(title) +
+	return frameStyle.Render(border.TopLeft+border.Top+" ") + title +
 		frameStyle.Render(" "+strings.Repeat(border.Top, fill)+border.TopRight)
 }
 

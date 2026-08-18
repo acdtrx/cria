@@ -211,7 +211,7 @@ func TestPhaseToneMapping(t *testing.T) {
 		serve.PhaseStarting:    amber,
 		serve.PhaseUnhealthy:   red,
 		serve.PhaseExited:      red,
-		serve.Phase("wedged"):  faint,
+		serve.Phase("wedged"):  dim,
 	}
 
 	for phase, want := range cases {

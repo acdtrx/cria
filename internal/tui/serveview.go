@@ -31,6 +31,10 @@ const (
 	// detailLabelWidth is the column the detail pane's labels occupy, values
 	// starting after it and wrapping into the same indent.
 	detailLabelWidth = 9
+
+	// titleSeparator holds a pane's name apart from what qualifies it — the
+	// active backend, the entry a log belongs to.
+	titleSeparator = " · "
 )
 
 // The marks in front of a row: whether starting it would download anything
@@ -111,14 +115,14 @@ func (m model) entryNamed(id string) (config.Entry, bool) {
 // Neither is dropped — a picker with no detail is a list of names cria has
 // already said are not worth memorising.
 func (m model) serveScreen(width, rows int) string {
-	title := "serve · " + string(m.prefs.Backend)
+	title := m.serveTitle()
 
 	if width >= sideBySideWidth {
 		listWidth := width / 2
 		detailWidth := width - listWidth
 		return lipgloss.JoinHorizontal(lipgloss.Top,
-			pane(title, listWidth, m.listLines(rows-2)),
-			pane(detailTitle, detailWidth, m.detailLines(detailWidth-4, rows-2)))
+			pane(title, listWidth, m.listLines(listWidth-4, rows-2)),
+			pane(paneTitle(detailTitle), detailWidth, m.detailLines(detailWidth-4, rows-2)))
 	}
 
 	detailRows := rows / 2
@@ -126,14 +130,23 @@ func (m model) serveScreen(width, rows int) string {
 	if detailRows < minPaneRows || listRows < minPaneRows {
 		// Too short to stack: the list is the half that can be acted on, so it
 		// is the half that stays.
-		return pane(title, width, m.listLines(rows-2))
+		return pane(title, width, m.listLines(width-4, rows-2))
 	}
-	return pane(title, width, m.listLines(listRows-2)) + "\n" +
-		pane(detailTitle, width, m.detailLines(width-4, detailRows-2))
+	return pane(title, width, m.listLines(width-4, listRows-2)) + "\n" +
+		pane(paneTitle(detailTitle), width, m.detailLines(width-4, detailRows-2))
+}
+
+// serveTitle names the list and says whose it is: the active backend in its own
+// colour, which is where the backend toggle shows up. The toggle says nothing
+// else — a line under the status box would report a change the title already
+// carries, and would still be sitting there three keypresses later
+// (docs/specs/TUI.md).
+func (m model) serveTitle() string {
+	return paneTitle("serve"+titleSeparator) + backendTone(m.prefs.Backend).Render(string(m.prefs.Backend))
 }
 
 // listLines is the entry list, drawn to fill exactly the rows it was given.
-func (m model) listLines(capacity int) []string {
+func (m model) listLines(inner, capacity int) []string {
 	rows := m.rows()
 	if len(rows) == 0 {
 		return sizeLines(m.emptyList(), capacity)
@@ -141,51 +154,46 @@ func (m model) listLines(capacity int) []string {
 
 	lines := make([]string, 0, len(rows))
 	for i, listed := range rows {
-		lines = append(lines, m.rowLine(listed, i == m.selected))
+		lines = append(lines, m.rowLine(listed, i == m.selected, inner))
 	}
 	return sizeLines(window(lines, m.selected, capacity), capacity)
 }
 
 // rowLine is one entry as the list reads it: whether it is on disk, its id, the
 // model it serves, and the port when that port is the entry's own choice rather
-// than the tree's default (docs/specs/CONFIG.md).
-func (m model) rowLine(listed row, selected bool) string {
-	cursor := nothingHere
-	if selected {
-		cursor = keyStyle.Render(cursorMark)
-	}
+// than the tree's default (docs/specs/CONFIG.md). The row the cursor is on is
+// drawn on the band, marker included.
+func (m model) rowLine(listed row, selected bool, inner int) string {
+	paint := paintFor(selected)
 	if listed.broken != nil {
-		return cursor + brokenStyle.Render(strings.Join(
-			[]string{listed.broken.ID, listed.broken.Err.Error()}, factSeparator))
+		return paint.fill(paint.marker()+paint.join(
+			paint.broken().Render(listed.broken.ID),
+			paint.broken().Render(listed.broken.Err.Error())), inner)
 	}
 
-	name := factStyle
-	if selected {
-		name = selectedStyle
-	}
 	facts := []string{
-		m.presenceMark(listed.entry),
-		name.Render(listed.entry.ID),
-		quietStyle.Render(format.HubReference(listed.entry.Repo, listed.entry.Quant)),
+		m.presenceMark(listed.entry, paint),
+		paint.name().Render(listed.entry.ID),
+		paint.quiet().Render(format.HubReference(listed.entry.Repo, listed.entry.Quant)),
 	}
 	if listed.entry.Port != m.tree.Settings.DefaultPort {
-		facts = append(facts, quietStyle.Render(":"+strconv.Itoa(listed.entry.Port)))
+		facts = append(facts, paint.quiet().Render(":"+strconv.Itoa(listed.entry.Port)))
 	}
-	return cursor + strings.Join(facts, factSeparator)
+	return paint.fill(paint.marker()+paint.join(facts...), inner)
 }
 
 // presenceMark is the cached dot: starting this entry serves what is already on
 // disk, or fetches it first (docs/specs/TUI.md). The answer is the cache walk's
 // own — the same read the cache view lists (docs/specs/CACHE.md), asked one
 // entry at a time.
-func (m model) presenceMark(entry config.Entry) string {
+func (m model) presenceMark(entry config.Entry, paint rowPaint) string {
 	switch {
 	case m.cache == nil:
-		return quietStyle.Render(unknownMark)
+		return paint.quiet().Render(unknownMark)
 	case m.cache.Presence(entry).Cached:
-		return factStyle.Render(cachedMark)
+		return paint.fact().Render(cachedMark)
 	}
-	return quietStyle.Render(absentMark)
+	return paint.quiet().Render(absentMark)
 }
 
 // emptyList is a backend with nothing declared for it. The tree is written by
@@ -224,9 +232,11 @@ func (m model) entryDetail(entry config.Entry, inner int) []string {
 		lines = append(lines, detailField(label, value, inner, style)...)
 	}
 
+	// Every value is body text: the labels beside them carry the structure, in
+	// their own colour, so nothing here has to be dimmed to stay out of the way.
 	add("name", entry.Name, factStyle)
-	add("file", entry.Path, quietStyle)
-	add("backend", string(entry.Backend), factStyle)
+	add("file", entry.Path, factStyle)
+	add("backend", string(entry.Backend), backendTone(entry.Backend))
 	add("repo", entry.Repo, factStyle)
 	if entry.Quant != "" {
 		add("quant", entry.Quant, factStyle)
@@ -236,7 +246,7 @@ func (m model) entryDetail(entry config.Entry, inner int) []string {
 	if len(entry.Args) > 0 {
 		add("args", strings.Join(entry.Args, " "), factStyle)
 	}
-	add("cached", m.cachedWord(entry), quietStyle)
+	add("cached", m.cachedWord(entry), factStyle)
 
 	command, refused := m.composedCommand(entry)
 	style := factStyle
@@ -275,9 +285,9 @@ func (m model) composedCommand(entry config.Entry) (string, bool) {
 // brokenDetail is an entry file cria refused: which file, which key, and the one
 // thing that clears it (docs/specs/CONFIG.md).
 func brokenDetail(broken config.BrokenEntry, inner int) []string {
-	lines := detailField("file", broken.Path, inner, quietStyle)
+	lines := detailField("file", broken.Path, inner, factStyle)
 	lines = append(lines, detailField("error", broken.Err.Error(), inner, brokenStyle)...)
-	return append(lines, detailField("fix", "edit that file; `cria docs` prints the schema", inner, quietStyle)...)
+	return append(lines, detailField("fix", "edit that file; `cria docs` prints the schema", inner, factStyle)...)
 }
 
 // detailField is one label and its value, wrapped into the label's indent so a

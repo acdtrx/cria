@@ -41,6 +41,13 @@ keybinds get detailed as they are built.
 - **UI preferences are state, not config**: active backend and last-started entry
   live in a small file under `~/.local/state/cria/`. The config tree stays
   human-owned; cria never records preferences there.
+- **Every text color clears WCAG AA (≥4.5:1) against a dark terminal ground,
+  enforced by a palette test** (settled 2026-08-18, after first real use found
+  the dim tones illegible): muted tones are muted by hue and saturation, never
+  by darkness; selection is a background band whose foreground pairs pass AA on
+  the band itself; color marks meaning — phase, backend, keys, field labels —
+  not decoration. The palette lives in one table that the styles are tested to
+  draw from exclusively.
 
 ## Open
 

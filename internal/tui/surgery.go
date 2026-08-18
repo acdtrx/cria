@@ -212,7 +212,7 @@ func (m model) confirmPanel(width, rows int) string {
 	if m.confirm.note != "" {
 		lines = append(lines, noticeStyle.Render(m.confirm.note))
 	}
-	return pane("delete", width, sizeLines(lines, rows-2))
+	return pane(paneTitle(deleteScope), width, sizeLines(lines, rows-2))
 }
 
 // removalWords is what a plan takes off the disk, counted the way it removes

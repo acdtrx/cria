@@ -88,14 +88,6 @@ const (
 	viewCache
 )
 
-// other is where the view key goes from here.
-func (v view) other() view {
-	if v == viewServe {
-		return viewCache
-	}
-	return viewServe
-}
-
 // alert is the one line under the status box that says what just happened: what
 // a keypress did, or what it could not do. The next keypress replaces it — it
 // reports an action, and only the newest action is still being asked about.
@@ -356,10 +348,10 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case key.Matches(pressed, m.keys.backend):
 		return m.switchBackend(), nil
-	case key.Matches(pressed, m.keys.view):
-		m.view = m.view.other()
-		m.alert = alert{}
-		return m.reselect(m.cursor()), nil
+	case key.Matches(pressed, m.keys.cache):
+		return m.show(viewCache), nil
+	case key.Matches(pressed, m.keys.back):
+		return m.show(viewServe), nil
 	case key.Matches(pressed, m.keys.tools):
 		return m.openTools()
 	case key.Matches(pressed, m.keys.up):
@@ -389,18 +381,31 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // (docs/specs/TUI.md). The list is another backend's now, so the cursor starts
 // at its top.
 //
-// A write that fails still switches the session's backend. The user asked for
-// this backend and cria can show it; what was lost is only the memory of it, and
-// that is what the alert says.
+// The toggle reports nothing: the serve pane's title already names the backend
+// it is showing, in that backend's own colour, and a line under the status box
+// would say the same thing while sitting there long after the change
+// (docs/specs/TUI.md). A write that fails is not the toggle succeeding, so that
+// one still speaks — the session has the backend the user asked for, and what
+// was lost is cria's memory of it.
 func (m model) switchBackend() model {
 	m.prefs.Backend = m.prefs.other()
-	m.alert = alert{text: "backend " + string(m.prefs.Backend)}
+	m.alert = alert{}
 	if err := savePrefs(m.root, m.prefs); err != nil {
 		m.alert = alert{text: err.Error(), bad: true}
 	}
 	// The entry list is another backend's now, so its cursor starts at the top.
 	// The cache list holds the same models either way and keeps its place.
 	m.selected = 0
+	return m.reselect(m.cursor())
+}
+
+// show routes the frame to one screen: c goes to the cache, esc comes back
+// (docs/specs/TUI.md). The alert goes with the old screen — it reported what a
+// keypress did there, and the answer to it is no longer on screen — and the
+// cursor is re-matched to the list that is, each view keeping its own place.
+func (m model) show(showing view) model {
+	m.view = showing
+	m.alert = alert{}
 	return m.reselect(m.cursor())
 }
 
@@ -415,7 +420,7 @@ func (m model) reselect(to int) model {
 	} else {
 		m.selected = clamped(to, len(m.rows()))
 	}
-	return m.rebindSelection()
+	return m.rebindContext()
 }
 
 // clamped keeps a cursor on a row that exists.
@@ -437,11 +442,13 @@ func (m model) cursor() int {
 	return m.selected
 }
 
-// rebindSelection matches the selection keys to the row the cursor is on. Each
-// view has its own selection and its own key — the entry list starts what it
-// highlights, the cache list deletes it (docs/specs/CACHE.md) — and a key the
-// bar does not draw does nothing when pressed.
-func (m model) rebindSelection() model {
+// rebindContext matches every key that depends on where the user is standing to
+// the screen in front of them: the selection keys to the row the cursor is on,
+// and the two navigation keys to the view they lead out of. Each view has its
+// own selection and its own key — the entry list starts what it highlights, the
+// cache list deletes it (docs/specs/CACHE.md) — and a key the bar does not draw
+// does nothing when pressed.
+func (m model) rebindContext() model {
 	entry, hasEntry := m.selectedRow()
 	_, hasCached := m.selectedCacheRow()
 	onEntryList := m.view == viewServe && hasEntry
@@ -451,6 +458,12 @@ func (m model) rebindSelection() model {
 	m.keys.down.SetEnabled(onEntryList || onCacheList)
 	m.keys.start.SetEnabled(onEntryList && entry.broken == nil)
 	m.keys.remove.SetEnabled(onCacheList)
+
+	// One of the two navigation keys is live at a time: c goes to the cache, esc
+	// comes back. esc closes whatever has the keyboard first — a screen over the
+	// view is what the key is reached for there (press).
+	m.keys.cache.SetEnabled(m.view == viewServe)
+	m.keys.back.SetEnabled(m.view == viewCache)
 	return m
 }
 
@@ -537,7 +550,7 @@ func (m model) View() tea.View {
 // missing either is unreadable rather than merely smaller.
 func (m model) frame() string {
 	width := m.frameWidth()
-	top := append([]string{pane(statusTitle, width, statusLines(m.listing, m.prefs, m.bar))}, m.notes(width)...)
+	top := append([]string{pane(paneTitle(statusTitle), width, statusLines(m.listing, m.prefs, m.bar))}, m.notes(width)...)
 	bar := renderKeybar(width, m.groups()...)
 
 	rows := m.screenRows(top, bar)
@@ -628,7 +641,7 @@ func (m model) groups() []keyGroup {
 	return []keyGroup{
 		{label: selectionScope, bindings: []key.Binding{m.keys.start, m.keys.remove}},
 		{label: serverScope, bindings: []key.Binding{m.keys.stop, m.keys.forceKill, m.keys.log, m.keys.restart, m.keys.dismiss}},
-		{label: globalScope, bindings: []key.Binding{m.keys.backend, m.keys.view, m.keys.tools, m.keys.quit}},
+		{label: globalScope, bindings: []key.Binding{m.keys.backend, m.keys.cache, m.keys.back, m.keys.tools, m.keys.quit}},
 	}
 }
 
@@ -659,7 +672,8 @@ type keymap struct {
 	dismiss   key.Binding
 
 	backend key.Binding
-	view    key.Binding
+	cache   key.Binding
+	back    key.Binding
 	tools   key.Binding
 	quit    key.Binding
 
@@ -687,7 +701,8 @@ func newKeymap() keymap {
 		restart:       key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
 		dismiss:       key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "dismiss")),
 		backend:       key.NewBinding(key.WithKeys("tab"), key.WithHelp("⇥", "backend")),
-		view:          key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "view")),
+		cache:         key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "cache")),
+		back:          key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 		tools:         key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "tools")),
 		quit:          key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 		killHolder:    key.NewBinding(key.WithKeys("k"), key.WithHelp("k", "kill it")),

@@ -117,7 +117,7 @@ func (l logScreen) panel(width, rows int) string {
 	for _, line := range tail {
 		lines = append(lines, factStyle.Render(line))
 	}
-	return pane(title, width, sizeLines(lines, capacity))
+	return pane(paneTitle(title), width, sizeLines(lines, capacity))
 }
 
 // tailLines reads the last count lines of a file.

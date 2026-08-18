@@ -53,6 +53,10 @@ func renderKeybar(width int, groups ...keyGroup) string {
 
 // hints is one scope: its label, then every key that applies. It is empty when
 // none does.
+//
+// The key itself is the only bright thing in the bar — it is what the reader is
+// looking for — and what it does sits beside it in the dim tone. The scope label
+// is quieter still: it groups the keys rather than naming an action.
 func (g keyGroup) hints() string {
 	var keys []string
 	for _, binding := range g.bindings {
@@ -60,10 +64,10 @@ func (g keyGroup) hints() string {
 			continue
 		}
 		help := binding.Help()
-		keys = append(keys, keyStyle.Render(help.Key)+" "+labelStyle.Render(help.Desc))
+		keys = append(keys, keyStyle.Render(help.Key)+" "+hintStyle.Render(help.Desc))
 	}
 	if len(keys) == 0 {
 		return ""
 	}
-	return quietStyle.Render(g.label) + " " + strings.Join(keys, labelStyle.Render(keySeparator))
+	return quietStyle.Render(g.label) + " " + strings.Join(keys, hintStyle.Render(keySeparator))
 }

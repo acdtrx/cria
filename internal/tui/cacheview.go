@@ -105,17 +105,17 @@ func (m model) cacheScreen(width, rows int) string {
 		listWidth := width / 2
 		detailWidth := width - listWidth
 		return lipgloss.JoinHorizontal(lipgloss.Top,
-			pane(cacheTitle, listWidth, m.cacheListLines(listWidth-4, rows-2)),
-			pane(cacheDetailTitle, detailWidth, m.cacheDetailLines(detailWidth-4, rows-2)))
+			pane(paneTitle(cacheTitle), listWidth, m.cacheListLines(listWidth-4, rows-2)),
+			pane(paneTitle(cacheDetailTitle), detailWidth, m.cacheDetailLines(detailWidth-4, rows-2)))
 	}
 
 	detailRows := rows / 2
 	listRows := rows - detailRows
 	if detailRows < minPaneRows || listRows < minPaneRows {
-		return pane(cacheTitle, width, m.cacheListLines(width-4, rows-2))
+		return pane(paneTitle(cacheTitle), width, m.cacheListLines(width-4, rows-2))
 	}
-	return pane(cacheTitle, width, m.cacheListLines(width-4, listRows-2)) + "\n" +
-		pane(cacheDetailTitle, width, m.cacheDetailLines(width-4, detailRows-2))
+	return pane(paneTitle(cacheTitle), width, m.cacheListLines(width-4, listRows-2)) + "\n" +
+		pane(paneTitle(cacheDetailTitle), width, m.cacheDetailLines(width-4, detailRows-2))
 }
 
 // cacheListLines is the whole list: the header the cache is read against, then
@@ -148,7 +148,7 @@ func (m model) cacheListLines(inner, capacity int) []string {
 // (docs/specs/CACHE.md).
 func (m model) cacheHeaderLines() []string {
 	totals := []string{
-		factStyle.Render(format.Bytes(m.cache.Bytes)),
+		sizeStyle.Render(format.Bytes(m.cache.Bytes)),
 		quietStyle.Render(fmt.Sprintf("%d repos", len(m.cache.Repos))),
 	}
 	if m.cache.PartialBytes > 0 {
@@ -164,40 +164,33 @@ func (m model) cacheHeaderLines() []string {
 // right. Every size sits in the same column, so the list reads as the table the
 // question "what is taking the disk" is answered from.
 func (m model) cacheRowLine(listed cacheRow, selected bool, inner, column int) string {
-	cursor := nothingHere
-	if selected {
-		cursor = keyStyle.Render(cursorMark)
-	}
-	return sizedLine(cursor+rowFacts(listed, selected), format.Bytes(rowBytes(listed)), inner, column)
+	paint := paintFor(selected)
+	return sizedLine(paint.marker()+rowFacts(listed, paint),
+		paint.size().Render(format.Bytes(rowBytes(listed))), inner, column, paint)
 }
 
 // rowFacts is what one row says about itself, in the provider's own spelling: a
 // repository by its Hub id and what cria can do with it, a quant by its tag, a
 // partials row by what it is holding back (docs/specs/CACHE.md).
-func rowFacts(listed cacheRow, selected bool) string {
-	name := factStyle
-	if selected {
-		name = selectedStyle
-	}
-
+func rowFacts(listed cacheRow, paint rowPaint) string {
 	switch listed.kind {
 	case itemRow:
-		facts := []string{itemIndent + name.Render(listed.item.Label)}
+		facts := []string{paint.pad(itemIndent) + paint.name().Render(listed.item.Label)}
 		if !listed.item.Complete {
-			facts = append(facts, noticeStyle.Render(partialMark+" incomplete"))
+			facts = append(facts, paint.notice().Render(partialMark+" incomplete"))
 		}
-		return strings.Join(facts, factSeparator)
+		return paint.join(facts...)
 	case partialsRow:
-		return itemIndent + noticeStyle.Render(partialMark+" "+unfinishedWords(len(listed.repo.Partials)))
+		return paint.pad(itemIndent) + paint.notice().Render(partialMark+" "+unfinishedWords(len(listed.repo.Partials)))
 	}
 
-	facts := []string{name.Render(listed.repo.ID), quietStyle.Render(listed.repo.Kind.String())}
+	facts := []string{paint.name().Render(listed.repo.ID), paint.quiet().Render(listed.repo.Kind.String())}
 	// A dataset or a space is not a model cria could serve, and the row says so
 	// rather than letting "other" stand for both that and an unrecognised model.
 	if listed.repo.Type != hubcache.RepoModel {
-		facts = append(facts, quietStyle.Render(string(listed.repo.Type)))
+		facts = append(facts, paint.quiet().Render(string(listed.repo.Type)))
 	}
-	return strings.Join(facts, factSeparator)
+	return paint.join(facts...)
 }
 
 // unfinishedWords counts what a repository is holding back, in English: one
@@ -235,10 +228,10 @@ func sizeColumn(rows []cacheRow) int {
 
 // sizedLine puts a row's facts on the left and its size right-aligned on the
 // right, the two filling exactly the pane's inner width.
-func sizedLine(facts, size string, inner, column int) string {
+func sizedLine(facts, size string, inner, column int, paint rowPaint) string {
 	room := max(inner-column-lipgloss.Width(sizeGap), 1)
 	pad := max(column-lipgloss.Width(size), 0)
-	return fit(facts, room) + sizeGap + strings.Repeat(" ", pad) + size
+	return paint.fill(facts, room) + paint.pad(sizeGap+strings.Repeat(" ", pad)) + size
 }
 
 // cacheDetailLines is the highlighted row in full: what the filesystem already
@@ -264,12 +257,12 @@ func (m model) itemDetail(repo *hubcache.Repo, item *hubcache.Item, inner int) [
 	detail := &details{inner: inner}
 	detail.add("repo", repo.ID, factStyle)
 	detail.add("quant", item.Label, factStyle)
-	detail.add("size", format.Bytes(item.Bytes), factStyle)
+	detail.add("size", format.Bytes(item.Bytes), sizeStyle)
 	if !item.Complete {
 		detail.add("state", "incomplete — some of its shards are not on disk", alarmStyle)
 	}
-	detail.add("revision", orUnknown(repo.Revision), quietStyle)
-	detail.add("modified", stamp(item.Modified), quietStyle)
+	detail.add("revision", orUnknown(repo.Revision), factStyle)
+	detail.add("modified", stamp(item.Modified), factStyle)
 	detail.files(item.Files)
 	m.crossReference(detail, repo.ID, item.Label)
 	return detail.lines
@@ -280,14 +273,14 @@ func (m model) itemDetail(repo *hubcache.Repo, item *hubcache.Item, inner int) [
 func (m model) repoDetail(repo *hubcache.Repo, inner int) []string {
 	detail := &details{inner: inner}
 	detail.add("repo", repo.ID, factStyle)
-	detail.add("kind", repoKindWords(repo), quietStyle)
-	detail.add("size", format.Bytes(repo.Bytes), factStyle)
+	detail.add("kind", repoKindWords(repo), factStyle)
+	detail.add("size", format.Bytes(repo.Bytes), sizeStyle)
 	if len(repo.Files) > 0 && !repo.Complete {
 		detail.add("state", "incomplete — a download of it did not finish", alarmStyle)
 	}
-	detail.add("revision", orUnknown(repo.Revision), quietStyle)
-	detail.add("modified", stamp(repo.Modified), quietStyle)
-	detail.add("dir", repo.Dir, quietStyle)
+	detail.add("revision", orUnknown(repo.Revision), factStyle)
+	detail.add("modified", stamp(repo.Modified), factStyle)
+	detail.add("dir", repo.Dir, factStyle)
 	detail.files(repo.Files)
 	// No quant is named, so every entry and every server on this repository is
 	// one this row's delete would take with it.
@@ -302,14 +295,14 @@ func partialsDetail(repo *hubcache.Repo, inner int) []string {
 	detail := &details{inner: inner}
 	detail.add("repo", repo.ID, factStyle)
 	detail.add("partials", unfinishedWords(len(repo.Partials)), noticeStyle)
-	detail.add("reclaims", format.Bytes(repo.PartialBytes), factStyle)
+	detail.add("reclaims", format.Bytes(repo.PartialBytes), sizeStyle)
 	for i, partial := range repo.Partials {
 		label := "files"
 		if i > 0 {
 			label = ""
 		}
 		detail.add(label, strings.Join([]string{filepath.Base(partial.Path),
-			format.Bytes(partial.Bytes), age(partial.Modified)}, detailSeparator), quietStyle)
+			format.Bytes(partial.Bytes), age(partial.Modified)}, detailSeparator), factStyle)
 	}
 	return detail.lines
 }
@@ -414,7 +407,7 @@ func (d *details) files(files []hubcache.File) {
 		if i > 0 {
 			label = ""
 		}
-		d.add(label, file.Name+detailSeparator+format.Bytes(file.Bytes), quietStyle)
+		d.add(label, file.Name+detailSeparator+format.Bytes(file.Bytes), factStyle)
 	}
 }
 
