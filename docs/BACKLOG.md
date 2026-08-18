@@ -34,6 +34,18 @@ Group entries under headings as themes emerge.
   trigger: sizing up a repo before download becomes a felt need the agent flow
   doesn't cover.
 
+## Tools
+
+- **Version-verdict cache.** `llama-server --version` is ~40 ms normally but can
+  take seconds on the first exec after a brew upgrade (signature validation +
+  dyld closure over ~15 MB of dylibs) or under memory pressure with a model
+  resident; a slow check once got SIGKILLed by the old 3s budget and misread as
+  an unverifiable build. The verdict is a pure function of the binary, so a
+  cache keyed by (path, mtime, size) would run the exec once per installed
+  build. (noted 2026-08-18; the ordering fix — already-running checked first —
+  plus the 10s budget should make this moot.) Revisit trigger: the version
+  check still visibly delays or mislabels a start after those fixes.
+
 ## Serve
 
 - **MLX downloads are nearly invisible as a phase.** `mlx_lm.server` binds its
