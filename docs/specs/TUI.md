@@ -21,7 +21,10 @@ keybinds get detailed as they are built.
   `/props`). Everything shown is obtainable from stable interfaces (`docs/cria.md`,
   principle 6); nothing comes from logs — the log itself is available as a raw
   tail. The box sits at the top and appears in **every** view, the cache view
-  included; it carries no key hints of its own.
+  included; it carries no key hints of its own. When nothing is running it shows
+  the last-started server (from UI preferences, so across sessions too) in a
+  `stopped` display state — the server-group keys keep a target: restart-last
+  always acts on what the box shows.
 - **Stop is global, start is scoped.** Stop/kill keybinds act on the running server
   no matter what is selected; only starting requires selecting an entry. A
   restart-last keybind covers the one-keypress swap-back.
