@@ -15,8 +15,11 @@ and the deletion contract. v1 is visibility and cleaning only; growth ideas wait
   can be trusted for "where did my disk go".
 - The selectable unit mirrors serving identity: a GGUF **quant**, an MLX **repo**
   (quants are models on both sides of the app); "other" repos select whole.
-- Partial downloads (`.incomplete` blobs) are surfaced as reclaimable, and
-  deletable on their own.
+- Partial downloads are surfaced as reclaimable, and deletable on their own.
+  **Both suffixes count** (settled 2026-08-18, from the dev Mac's own cache):
+  huggingface_hub leaves `.incomplete` blobs, llama-server — which fetches every
+  GGUF cria serves — leaves `.downloadInProgress` ones. Reading only `.incomplete`
+  would miss every partial the llama path produces, which is most of them.
 - A details panel for the selected item shows what the filesystem already knows:
   snapshot revision, file list with sizes (shards summed), on-disk dates, which
   config entries reference it, and whether it is being served right now. Richer

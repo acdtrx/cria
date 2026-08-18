@@ -1,6 +1,18 @@
 # Step 5 — cache walker
 
-**Phase 2 · Status: not started**
+**Phase 2 · Status: done (2026-08-18)** — suite green, all gates pass; walker
+validated against the real cache (11 repos, 167.4 GB, within filesystem
+block-rounding of `du`; real shared-blob dedup exercised). Planning corrections
+found against reality: partials are **both** `.incomplete` (huggingface_hub)
+and `.downloadInProgress` (llama-server) — CACHE.md updated in the same change;
+the gguf kind reads from **any** snapshot (invariant: KindGGUF ⟺ has items);
+the MLX marker is config.json's `quantization` object — verified on real repos,
+including a non-mlx-community one where org-naming would have failed.
+Decisions: `mmproj-*` projector files are their own items (basename stem),
+never merged with a quant sharing the precision token — the deletion unit
+stays safe; unrecognized-name items also label by stem (labels are identity,
+files keep their names); a partial-only repo (blobs+refs, no snapshot) tags
+`other` — honest, the filesystem holds no model file yet.
 
 ## Intent
 
