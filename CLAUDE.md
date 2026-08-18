@@ -189,10 +189,13 @@ history-narrating comment you meet up to this rule.
 
 ## Deployability `[PROJECT]`
 
-- cria ships as **one static binary per host**. "Deploy" is `go build` on the dev Mac
-  and `scp` to the target — Go ad-hoc-signs darwin/arm64 binaries and scp sets no
-  quarantine xattr, so the copy just runs. No installers, no services, no packaging
-  until someone outside the household asks for a binary (`docs/BACKLOG.md`).
+- cria ships as **one static binary per host**. In the household, "deploy" is
+  `go build` on the dev Mac and `scp` to the target — Go ad-hoc-signs darwin/arm64
+  binaries and scp sets no quarantine xattr, so the copy just runs. For everyone
+  else (settled 2026-08-18): tag pushes build GitHub Releases (darwin/arm64,
+  linux/amd64, linux/arm64) and `install.sh` fetches the latest — curl sets no
+  quarantine xattr either, so no notarization is needed. Still no installers or
+  services.
 - cria writes to exactly two places: config in `~/.config/cria/` (human/agent-edited;
   cria only creates the root + `AGENTS.md`) and runtime state in `~/.local/state/cria/` (pidfiles,
   server state records, server logs). The Hugging Face cache is **managed, not owned** —

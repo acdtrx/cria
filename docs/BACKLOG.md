@@ -72,10 +72,11 @@ Group entries under headings as themes emerge.
 - **Linux as a supported platform.** `linux/amd64` must keep compiling (`CLAUDE.md`,
   Project Facts) but nothing is tested or distributed. Revisit trigger: a Linux
   machine joins the household, or a friend on Linux asks for a binary.
-- **Distribution beyond scp.** Browser-downloaded binaries carry the quarantine
-  xattr; outsiders would need `xattr -d`, a Homebrew tap, or Developer-ID
-  notarization. Revisit trigger: the first person outside the household asks for a
-  binary.
+- **Homebrew tap / browser-download story.** GitHub Releases + the curl
+  installer cover distribution (curl sets no quarantine xattr); a binary saved
+  through a *browser* still carries it and needs `xattr -d`, which a tap or
+  notarization would solve. Revisit trigger: someone actually installs by
+  browser download and trips over Gatekeeper.
 
 ## Reach
 

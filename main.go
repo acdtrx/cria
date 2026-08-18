@@ -12,8 +12,11 @@ import (
 )
 
 // version identifies this binary; it is what `cria --version` prints and what the
-// TUI header shows.
-const version = "0.1.0"
+// TUI header shows. Release builds inject the tag
+// (-ldflags "-X main.version=<tag>", .github/workflows/release.yml); a local
+// build honestly says dev rather than claiming a release it may have drifted
+// from.
+var version = "dev"
 
 func main() {
 	scaffoldConfigTree()

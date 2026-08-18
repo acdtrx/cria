@@ -1,0 +1,74 @@
+# A semver tag becomes a GitHub Release carrying one binary per target. Asset
+# names are unversioned so the stable releases/latest/download URLs — what
+# install.sh fetches — never change; the version lives in the tag, in the
+# checksums file, and inside the binary (main.version via ldflags). darwin/arm64
+# builds natively on a macOS runner: the Go linker ad-hoc-signs it there and the
+# job proves the produced binary actually runs.
+name: release
+
+on:
+  push:
+    tags: ["[0-9]*"]
+
+permissions:
+  contents: write
+
+jobs:
+  darwin:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: full suite
+        run: go test ./... -count=1
+      - name: build darwin/arm64
+        run: |
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o cria .
+          ./cria --version | grep -F "${GITHUB_REF_NAME}"
+          tar -czf cria_darwin_arm64.tar.gz cria
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darwin
+          path: cria_darwin_arm64.tar.gz
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: short suite
+        run: go test ./... -count=1 -short
+      - name: build linux/amd64 and linux/arm64
+        run: |
+          CGO_ENABLED=0 GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o cria .
+          ./cria --version | grep -F "${GITHUB_REF_NAME}"
+          tar -czf cria_linux_amd64.tar.gz cria
+          CGO_ENABLED=0 GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o cria .
+          tar -czf cria_linux_arm64.tar.gz cria
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: cria_linux_*.tar.gz
+
+  publish:
+    needs: [darwin, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: checksums
+        run: sha256sum cria_*.tar.gz > checksums.txt
+      - name: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "cria ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            cria_darwin_arm64.tar.gz cria_linux_amd64.tar.gz cria_linux_arm64.tar.gz checksums.txt

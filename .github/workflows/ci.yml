@@ -1,0 +1,35 @@
+# The suite, on every push and pull request. macOS is the lived-on platform and
+# runs everything; Linux is compile-supported (docs/TECH-STACK.md) and runs the
+# short suite — the integration tests that spawn real processes and read real
+# `ps` output are verified on macOS.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - name: vet
+        run: go vet ./...
+      - name: test (full on macOS, short on Linux)
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then go test ./... -count=1; else go test ./... -count=1 -short; fi
+      - name: every release target still compiles
+        run: |
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ./...
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ./...
