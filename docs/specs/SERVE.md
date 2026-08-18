@@ -82,6 +82,15 @@ failure states.
    spawned — a green answered by some other process fails the wait naming both
    pids. Attribution that cannot be obtained degrades to a note, never a
    failure: the health signal is primary, `lsof` corroborates.
+5. Lazily-loading backends are **warmed by default** (settled 2026-08-18):
+   mlx_lm.server answers green before loading any weights, so a green `--wait`
+   sends one minimal completion (`POST /v1/completions`, one token, the
+   record's own model reference — never an empty prompt, which wedges the
+   server; found by live probing) and reports only after it answers: green
+   means loaded, under its own generous budget. The TUI fires the same warm in
+   the background after an mlx start. llama loads at startup and is never
+   warmed; which backends load lazily is one rule in serve. A no-wait start
+   cannot carry the request and says so in a note.
 
 ## Stop
 

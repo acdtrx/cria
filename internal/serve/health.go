@@ -45,9 +45,14 @@ type prober func(url string) Health
 
 // probeURL is the endpoint cria asks about one record's server: the address it
 // can be reached at, and the documented path for its backend.
-func probeURL(record Record) string {
+func probeURL(record Record) string { return serverURL(record, healthPath(record.Backend)) }
+
+// serverURL is where cria reaches one record's server at a given path. Every
+// request cria makes to a managed server goes through here, so the probe and the
+// warm can never disagree about which address a bind means.
+func serverURL(record Record, path string) string {
 	address := net.JoinHostPort(probeTarget(record.Host), strconv.Itoa(record.Port))
-	return "http://" + address + healthPath(record.Backend)
+	return "http://" + address + path
 }
 
 // probeTarget is the address to probe for a server bound to host. A wildcard
@@ -82,7 +87,7 @@ func newHTTPProbe() prober {
 	return func(url string) Health {
 		response, err := client.Get(url)
 		if err != nil {
-			return Health{URL: url, Detail: probeFailure(err)}
+			return Health{URL: url, Detail: requestFailure(err, probeTimeout)}
 		}
 		// The body is never read: the status is the whole answer, and nothing
 		// cria displays comes out of a server's payload.
@@ -96,14 +101,16 @@ func newHTTPProbe() prober {
 	}
 }
 
-// probeFailure phrases a probe that got no answer at all. net/http wraps its
-// errors in the whole request ("Get \"http://…\": dial tcp …: connect:
-// connection refused"), which is a paragraph to read a port off; the innermost
-// error is the two words that matter, and the URL is carried alongside anyway.
-func probeFailure(err error) string {
+// requestFailure phrases a request to a server that got no answer at all — a
+// probe, or the warm that follows a start (warm.go) — bounded by the budget that
+// one was given. net/http wraps its errors in the whole request ("Get
+// \"http://…\": dial tcp …: connect: connection refused"), which is a paragraph
+// to read a port off; the innermost error is the two words that matter, and the
+// URL is carried alongside anyway.
+func requestFailure(err error, within time.Duration) string {
 	var timeout interface{ Timeout() bool }
 	if errors.As(err, &timeout) && timeout.Timeout() {
-		return fmt.Sprintf("no answer within %s", probeTimeout)
+		return fmt.Sprintf("no answer within %s", within)
 	}
 	for {
 		inner := errors.Unwrap(err)

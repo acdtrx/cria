@@ -84,6 +84,7 @@ type servers interface {
 	Snapshots() (serve.StatusListing, error)
 	PortUse(port int) (serve.PortUse, error)
 	ListensOn(record serve.Record) (bool, []int, error)
+	Warm(record serve.Record) error
 }
 
 // app is one invocation: its two output streams and the subsystems it drives.
@@ -214,6 +215,13 @@ func (a *app) printf(format string, args ...any) {
 // its output from stdout, and neither changes because cria had something to add.
 func (a *app) note(format string, args ...any) {
 	fmt.Fprintf(a.err, "note: "+format+"\n", args...)
+}
+
+// waiting writes what cria is doing while a caller waits on it. It is not an
+// aside about the answer but the reason the answer is taking this long, so it
+// carries no "note:" — and it goes to stderr for the same reason a note does.
+func (a *app) waiting(format string, args ...any) {
+	fmt.Fprintf(a.err, format+"\n", args...)
 }
 
 // fail reports that the asked-for thing is not true or not done, and carries the

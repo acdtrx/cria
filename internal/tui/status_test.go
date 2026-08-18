@@ -40,9 +40,9 @@ func liveStatus(phase serve.Phase) serve.Status {
 
 // box is the status box's plain text, one line per line, drawn the way it is
 // whenever no key is asking which server it means (pick.go).
-func box(listing serve.StatusListing, saved prefs) []string {
+func box(listing serve.StatusListing, pending pendingActions, saved prefs) []string {
 	var lines []string
-	for _, line := range statusLines(listing, saved, newProgressBar(), boxCursor{}) {
+	for _, line := range statusLines(listing, pending, saved, newProgressBar(), boxCursor{}) {
 		lines = append(lines, plain(line))
 	}
 	return lines
@@ -51,7 +51,7 @@ func box(listing serve.StatusListing, saved prefs) []string {
 // A running server's line carries every fact docs/specs/TUI.md asks the box
 // for: what it is, what it costs, and what it last answered.
 func TestRunningStatusShowsTheFacts(t *testing.T) {
-	lines := box(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning)}}, defaultPrefs())
+	lines := box(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning)}}, nil, defaultPrefs())
 	if len(lines) != 1 {
 		t.Fatalf("a running server drew %d lines, want 1: %q", len(lines), lines)
 	}
@@ -70,7 +70,7 @@ func TestUnmeasuredServerReportsNoCost(t *testing.T) {
 	status := liveStatus(serve.PhaseRunning)
 	status.Stats = procs.Stats{}
 
-	lines := box(serve.StatusListing{Servers: []serve.Status{status}}, defaultPrefs())
+	lines := box(serve.StatusListing{Servers: []serve.Status{status}}, nil, defaultPrefs())
 	if strings.Contains(lines[0], "0 B") || strings.Contains(lines[0], "0.0% cpu") {
 		t.Errorf("the status line reads %q, want no cost claimed for a pid `ps` did not answer for", lines[0])
 	}
@@ -80,7 +80,7 @@ func TestUnmeasuredServerReportsNoCost(t *testing.T) {
 // phase is the judgement, and nothing else about the server changes shape.
 func TestEveryLivePhaseDrawsOneLine(t *testing.T) {
 	for _, phase := range []serve.Phase{serve.PhaseStarting, serve.PhaseRunning, serve.PhaseUnhealthy} {
-		lines := box(serve.StatusListing{Servers: []serve.Status{liveStatus(phase)}}, defaultPrefs())
+		lines := box(serve.StatusListing{Servers: []serve.Status{liveStatus(phase)}}, nil, defaultPrefs())
 		if len(lines) != 1 {
 			t.Fatalf("the %s phase drew %d lines, want 1: %q", phase, len(lines), lines)
 		}
@@ -96,7 +96,7 @@ func TestDownloadingStatusShowsProgress(t *testing.T) {
 	status := liveStatus(serve.PhaseDownloading)
 	status.Progress = serve.Progress{Bytes: 6 * 1024 * 1024 * 1024, Total: 24 * 1024 * 1024 * 1024, Known: true}
 
-	lines := box(serve.StatusListing{Servers: []serve.Status{status}}, defaultPrefs())
+	lines := box(serve.StatusListing{Servers: []serve.Status{status}}, nil, defaultPrefs())
 	if len(lines) != 2 {
 		t.Fatalf("a download drew %d lines, want 2: %q", len(lines), lines)
 	}
@@ -117,7 +117,7 @@ func TestDownloadWithoutATotalStillReportsBytes(t *testing.T) {
 	status := liveStatus(serve.PhaseDownloading)
 	status.Progress = serve.Progress{Bytes: 3 * 1024 * 1024 * 1024, Reason: "the Hub did not answer"}
 
-	lines := box(serve.StatusListing{Servers: []serve.Status{status}}, defaultPrefs())
+	lines := box(serve.StatusListing{Servers: []serve.Status{status}}, nil, defaultPrefs())
 	if want := "3.0 GiB so far (no total: the Hub did not answer)"; !strings.Contains(lines[1], want) {
 		t.Errorf("the progress line reads %q, want %q", lines[1], want)
 	}
@@ -126,7 +126,7 @@ func TestDownloadWithoutATotalStillReportsBytes(t *testing.T) {
 // An exited record is a crash report: what died, when it was launched, and the
 // log that says why. Nothing is claimed about what it costs or answers.
 func TestExitedStatusIsACrashReport(t *testing.T) {
-	lines := box(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseExited)}}, defaultPrefs())
+	lines := box(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseExited)}}, nil, defaultPrefs())
 	if len(lines) != 2 {
 		t.Fatalf("an exited record drew %d lines, want 2: %q", len(lines), lines)
 	}
@@ -148,7 +148,7 @@ func TestExitedStatusIsACrashReport(t *testing.T) {
 // entry that was started last, so the server keys keep a target across sessions
 // (docs/specs/TUI.md).
 func TestStoppedStatusComesFromPreferences(t *testing.T) {
-	lines := box(serve.StatusListing{}, prefs{Backend: config.BackendLlama, LastStarted: "qwen"})
+	lines := box(serve.StatusListing{}, nil, prefs{Backend: config.BackendLlama, LastStarted: "qwen"})
 	if len(lines) != 1 {
 		t.Fatalf("the stopped box drew %d lines, want 1: %q", len(lines), lines)
 	}
@@ -160,7 +160,7 @@ func TestStoppedStatusComesFromPreferences(t *testing.T) {
 // A host where nothing has ever been started says so, rather than showing an
 // empty box.
 func TestStoppedStatusWithoutAHistorySaysSo(t *testing.T) {
-	lines := box(serve.StatusListing{}, defaultPrefs())
+	lines := box(serve.StatusListing{}, nil, defaultPrefs())
 	if want := "no server has been started yet"; !strings.Contains(lines[0], want) {
 		t.Errorf("the stopped line reads %q, want %q", lines[0], want)
 	}
@@ -172,7 +172,7 @@ func TestSeveralServersStack(t *testing.T) {
 	second := liveStatus(serve.PhaseRunning)
 	second.EntryID, second.Port = "gemma", 8081
 
-	lines := box(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning), second}}, defaultPrefs())
+	lines := box(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning), second}}, nil, defaultPrefs())
 	if len(lines) != 2 {
 		t.Fatalf("two servers drew %d lines, want 2: %q", len(lines), lines)
 	}
@@ -195,7 +195,7 @@ func TestTheTableHoldsAcrossPhases(t *testing.T) {
 	dead := liveStatus(serve.PhaseExited)
 	dead.EntryID = "gemma-27b"
 
-	lines := box(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning), dead}}, defaultPrefs())
+	lines := box(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning), dead}}, nil, defaultPrefs())
 	if len(lines) != 3 {
 		t.Fatalf("a live and an exited server drew %d lines, want 3 (the crash log line included): %q", len(lines), lines)
 	}
@@ -218,7 +218,7 @@ func TestBrokenRecordsAreShown(t *testing.T) {
 		Err:     errors.New("port is 0, want a port between 1 and 65535"),
 	}}}
 
-	lines := box(listing, defaultPrefs())
+	lines := box(listing, nil, defaultPrefs())
 	if len(lines) != 2 {
 		t.Fatalf("a broken record drew %d lines, want 2: %q", len(lines), lines)
 	}
@@ -227,6 +227,68 @@ func TestBrokenRecordsAreShown(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], "port is 0") || !strings.Contains(lines[1], "delete that file") {
 		t.Errorf("the broken line reads %q, want the reason and the fix", lines[1])
+	}
+}
+
+// An action cria is running takes the phase column: the phase was observed
+// before the keypress, so it is the older of the two truths (lifecycle.go).
+func TestAPendingActionTakesThePhaseColumn(t *testing.T) {
+	listing := serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning)}}
+	pending := pendingActions{"qwen": verbStopping}
+
+	lines := box(listing, pending, defaultPrefs())
+	if len(lines) != 1 {
+		t.Fatalf("a stopping server drew %d lines, want 1: %q", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], verbStopping) {
+		t.Errorf("the status line reads %q, want what cria is doing to it", lines[0])
+	}
+	if strings.Contains(lines[0], "running") {
+		t.Errorf("the status line reads %q, want the observed phase replaced by the action", lines[0])
+	}
+	// Everything else about the server is still there: only the phase column is
+	// the action's.
+	for _, fact := range []string{"pid 4242", ":8080", "unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL"} {
+		if !strings.Contains(lines[0], fact) {
+			t.Errorf("the status line reads %q, want it to keep %q", lines[0], fact)
+		}
+	}
+
+	// It is drawn in the amber a start is drawn in — something is happening,
+	// nothing is wrong.
+	drawn := statusLines(listing, pending, defaultPrefs(), newProgressBar(), boxCursor{})
+	if !strings.Contains(drawn[0], noticeStyle.Render(verbStopping)) {
+		t.Errorf("the action is not drawn in the amber of a phase in motion: %q", drawn[0])
+	}
+	if noticeStyle.GetForeground() != phaseColor(serve.PhaseStarting) {
+		t.Error("the action's colour and the starting phase's have drifted apart")
+	}
+}
+
+// A start has no record to observe yet, so the entry cria is starting gets a row
+// of its own: its id and what cria is doing, and nothing else — a row of blank
+// columns would read as facts cria failed to read (CODING-RULES §4).
+func TestAPendingStartDrawsARowOfItsOwn(t *testing.T) {
+	lines := box(serve.StatusListing{}, pendingActions{"qwen": verbStarting}, defaultPrefs())
+	if len(lines) != 1 {
+		t.Fatalf("a start with no record drew %d lines, want 1: %q", len(lines), lines)
+	}
+	if want := "qwen  " + verbStarting; strings.TrimSpace(lines[0]) != want {
+		t.Errorf("the row reads %q, want %q", strings.TrimSpace(lines[0]), want)
+	}
+	if strings.Contains(lines[0], "stopped") {
+		t.Errorf("the box reads %q, want the start rather than the stopped state", lines[0])
+	}
+
+	// It joins the same table as the servers around it, so the box does not
+	// shift sideways when the record appears.
+	running := liveStatus(serve.PhaseRunning)
+	both := box(serve.StatusListing{Servers: []serve.Status{running}}, pendingActions{"gemma": verbStarting}, defaultPrefs())
+	if len(both) != 2 {
+		t.Fatalf("a server and a start drew %d lines, want 2: %q", len(both), both)
+	}
+	if a, b := runeColumn(both[0], "running"), runeColumn(both[1], verbStarting); a != b || a < 0 {
+		t.Errorf("the phase column is not aligned: %d vs %d\n%q\n%q", a, b, both[0], both[1])
 	}
 }
 
@@ -256,12 +318,12 @@ func TestPhaseToneMapping(t *testing.T) {
 // The colours are actually applied: a running server's phase word is green on
 // screen, and an exited record's whole line is drawn as a crash report.
 func TestPhaseColoursReachTheLine(t *testing.T) {
-	running := statusLines(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning)}}, defaultPrefs(), newProgressBar(), boxCursor{})
+	running := statusLines(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning)}}, nil, defaultPrefs(), newProgressBar(), boxCursor{})
 	if !strings.Contains(running[0], lipgloss.NewStyle().Foreground(green).Render("running")) {
 		t.Errorf("the running line does not draw its phase in green: %q", running[0])
 	}
 
-	exited := statusLines(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseExited)}}, defaultPrefs(), newProgressBar(), boxCursor{})
+	exited := statusLines(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseExited)}}, nil, defaultPrefs(), newProgressBar(), boxCursor{})
 	if !strings.HasPrefix(exited[0], opener(alarmStyle)) {
 		t.Errorf("the exited line does not open in the crash-report colour: %q", exited[0])
 	}

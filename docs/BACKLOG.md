@@ -57,15 +57,6 @@ Group entries under headings as themes emerge.
   Revisit trigger: MLX first-starts of large models become common and the
   running-but-actually-fetching window proves confusing in daily use.
 
-- **Opt-in mlx warmup (`--warm`).** mlx_lm.server answers `/v1/models` before
-  loading any weights (lazy load on the first completion), so `--wait`'s green
-  is shallow for mlx: the first real request bears the whole load time of a
-  multi-GB model. A `--warm` flag could send one tiny completion after green
-  and wait it out — opt-in, because an implicit warmup silently burns real
-  inference time. (noted 2026-08-18 from a live migration session; the start
-  output now says weights load on first request.) Revisit trigger: the
-  first-request stall confuses a client/agent in practice despite the note.
-
 ## Cache view
 
 - **Aliased blobs show as one file.** The walker keys a repo's files by blob, so

@@ -36,8 +36,13 @@ type fakeServers struct {
 
 	started  []config.Entry // the entries Start was called with, in order
 	stopped  []string       // the entries Stop was called for, in order
+	warmed   []string       // the servers Warm was asked to load, in order
 	asked    []int          // the ports PortUse was asked about, in order
 	observed int            // how many snapshots the wait took
+
+	// onWarm runs while Warm is in flight, so a test can read what cria had
+	// printed by the time it started loading the weights.
+	onWarm func()
 
 	startErr     error
 	stopErr      error
@@ -45,6 +50,7 @@ type fakeServers struct {
 	snapshotErr  error
 	portErr      error
 	listenersErr error
+	warmErr      error
 }
 
 func (f *fakeServers) Start(entry config.Entry, _ tools.Report) (serve.Record, error) {
@@ -115,6 +121,20 @@ func (f *fakeServers) ListensOn(record serve.Record) (bool, []int, error) {
 		pids = []int{record.PID}
 	}
 	return slices.Contains(pids, record.PID), pids, nil
+}
+
+// Warm answers the way a loaded server does — the completion came back — unless
+// a test scripted otherwise. Only the mlx records reach it: the rule about which
+// backends are warmed is serve's (docs/specs/SERVE.md).
+func (f *fakeServers) Warm(record serve.Record) error {
+	if !serve.LoadsLazily(record.Backend) {
+		return nil
+	}
+	f.warmed = append(f.warmed, record.EntryID)
+	if f.onWarm != nil {
+		f.onWarm()
+	}
+	return f.warmErr
 }
 
 func (f *fakeServers) PortUse(port int) (serve.PortUse, error) {

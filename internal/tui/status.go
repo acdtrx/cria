@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -48,8 +49,12 @@ func (c boxCursor) on(row int) bool { return c.picking && c.row == row }
 // across sessions. An exited record is *not* that state — it is a crash report
 // cria still holds, and it stays on screen until it is dismissed or the entry
 // starts again.
-func statusLines(listing serve.StatusListing, saved prefs, bar progress.Model, cursor boxCursor) []string {
-	if len(listing.Servers) == 0 && len(listing.Broken) == 0 {
+//
+// What cria is in the middle of doing is shown here too, and nowhere else: an
+// entry with an action in flight reads as starting, stopping or restarting from
+// the keypress rather than from the next observation (lifecycle.go).
+func statusLines(listing serve.StatusListing, pending pendingActions, saved prefs, bar progress.Model, cursor boxCursor) []string {
+	if len(listing.Servers) == 0 && len(listing.Broken) == 0 && len(pending) == 0 {
 		return []string{stoppedLine(saved)}
 	}
 
@@ -57,9 +62,18 @@ func statusLines(listing serve.StatusListing, saved prefs, bar progress.Model, c
 	// v1 surface). Their lines are a table: each fact is a column as wide as
 	// that fact on any row, so two servers are compared down the box rather than
 	// re-parsed per line. A single server is the same table with one row.
-	rows := make([]serverRow, len(listing.Servers))
+	//
+	// An entry cria is starting has no record to observe yet, so it is a row of
+	// its own, under the ones there is something to say about. It joins the same
+	// table, which is what keeps the box from shifting sideways when the record
+	// appears and its row fills in.
+	rows := make([]serverRow, 0, len(listing.Servers)+len(pending))
 	for i, status := range listing.Servers {
-		rows[i] = statusRow(status, paintFor(cursor.on(i)))
+		rows = append(rows, statusRow(status, pending.verb(status.EntryID), paintFor(cursor.on(i))))
+	}
+	unrecorded := pending.unrecorded(listing.Servers)
+	for _, entryID := range unrecorded {
+		rows = append(rows, pendingRow(entryID, pending.verb(entryID), paintFor(false)))
 	}
 	widths := columnWidths(rows)
 
@@ -72,6 +86,9 @@ func statusLines(listing serve.StatusListing, saved prefs, bar progress.Model, c
 			line = row.paint.fill(row.paint.marker()+line, cursor.inner)
 		}
 		lines = append(lines, line)
+		if i >= len(listing.Servers) {
+			continue // an entry with no record has nothing to add under its row
+		}
 		if listing.Servers[i].Phase == serve.PhaseDownloading {
 			lines = append(lines, downloadLine(listing.Servers[i].Progress, bar))
 		}
@@ -83,6 +100,22 @@ func statusLines(listing serve.StatusListing, saved prefs, bar progress.Model, c
 		lines = append(lines, brokenLines(broken)...)
 	}
 	return lines
+}
+
+// unrecorded is the entries cria is acting on that the listing has no row for:
+// a start between its keypress and the record it writes, or a restart of an
+// entry whose record has just gone. Sorted, so the box does not reorder itself
+// between two draws of the same thing.
+func (p pendingActions) unrecorded(servers []serve.Status) []string {
+	var ids []string
+	for entryID := range p {
+		if slices.ContainsFunc(servers, func(status serve.Status) bool { return status.EntryID == entryID }) {
+			continue
+		}
+		ids = append(ids, entryID)
+	}
+	slices.Sort(ids)
+	return ids
 }
 
 // serverRow is one server's line as columns plus an uncolumned tail. Live and
@@ -107,13 +140,25 @@ type cell struct {
 // during a run, and the phase is what says which. An exited row is the crash
 // report: nothing is claimed about what it costs or answers — cria never
 // collected its exit status, and the log is the evidence (docs/specs/SERVE.md).
-func statusRow(status serve.Status, paint rowPaint) serverRow {
+//
+// A verb is an action cria is running on this server right now, and it takes the
+// phase column: the observation behind the phase was taken before the keypress,
+// so "running" there would be the older truth of the two (lifecycle.go).
+func statusRow(status serve.Status, verb string, paint rowPaint) serverRow {
+	phase := cell{string(status.Phase), paint.phase(status.Phase)}
+	if status.Phase == serve.PhaseExited {
+		phase.style = paint.alarm()
+	}
+	if verb != "" {
+		phase = cell{verb, paint.notice()}
+	}
+
 	if status.Phase == serve.PhaseExited {
 		return serverRow{
 			paint: paint,
 			cells: []cell{
 				{status.EntryID, paint.alarm()},
-				{string(status.Phase), paint.alarm()},
+				phase,
 				{string(status.Backend), paint.alarm()},
 				{format.HubReference(status.Repo, status.Quant), paint.alarm()},
 			},
@@ -124,7 +169,7 @@ func statusRow(status serve.Status, paint rowPaint) serverRow {
 
 	row := serverRow{paint: paint, cells: []cell{
 		{status.EntryID, paint.fact()},
-		{string(status.Phase), paint.phase(status.Phase)},
+		phase,
 		{string(status.Backend), paint.quiet()},
 		{format.HubReference(status.Repo, status.Quant), paint.fact()},
 		{fmt.Sprintf("pid %d", status.PID), paint.quiet()},
@@ -147,6 +192,17 @@ func statusRow(status serve.Status, paint rowPaint) serverRow {
 		row.tail = paint.quiet().Render(status.Health.Detail)
 	}
 	return row
+}
+
+// pendingRow is an entry cria is acting on that has no record to draw: the
+// moment between ⏎ and the record a start writes. Its id and what cria is doing
+// are the whole row — nothing else has happened yet, and a row of blank columns
+// would look like facts cria failed to read (CODING-RULES §4).
+func pendingRow(entryID, verb string, paint rowPaint) serverRow {
+	return serverRow{paint: paint, cells: []cell{
+		{entryID, paint.fact()},
+		{verb, paint.notice()},
+	}}
 }
 
 // columnWidths is how wide each column has to be for that column's widest text

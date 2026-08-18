@@ -294,15 +294,16 @@ func TestStartWaitVerifiesTheListener(t *testing.T) {
 }
 
 // An mlx server is running as soon as it answers, but it has not loaded a single
-// weight yet: the note says so on the green path, where a caller is about to
-// send the request that pays for it.
-func TestStartWaitNotesTheMLXFirstRequestCost(t *testing.T) {
+// weight yet: --wait means ready, so cria sends the completion that loads them
+// and the verdict waits for the answer. A llama server has loaded its model
+// before it answers at all, so nothing is sent for one.
+func TestStartWaitWarmsAnMLXServer(t *testing.T) {
 	cases := []struct {
 		name     string
 		backend  config.Backend
-		wantNote bool
+		wantWarm bool
 	}{
-		{name: "an mlx server", backend: config.BackendMLX, wantNote: true},
+		{name: "an mlx server", backend: config.BackendMLX, wantWarm: true},
 		{name: "a llama server", backend: config.BackendLlama},
 	}
 
@@ -317,12 +318,95 @@ func TestStartWaitNotesTheMLXFirstRequestCost(t *testing.T) {
 			}
 			app, out, errOut := newTestApp(testTree(), fake)
 
+			// What stdout held when the load began: the verdict must not be in it
+			// yet — a caller reading "is running" is told the server is ready.
+			var whenWarming string
+			fake.onWarm = func() { whenWarming = out.String() }
+
 			if code := app.start([]string{"qwen", "--wait"}); code != exitOK {
 				t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
 			}
-			const note = "note: mlx_lm.server loads model weights on the first request; the first completion bears that cost"
+			if warmed := len(fake.warmed) == 1; warmed != test.wantWarm {
+				t.Fatalf("cria warmed %v, want the warm to be %v for a %s server", fake.warmed, test.wantWarm, test.backend)
+			}
+
+			const said = "loading model weights (mlx loads lazily; this can take a while)…"
+			if got := strings.Contains(errOut.String(), said); got != test.wantWarm {
+				t.Errorf("stderr reads %q, want the loading line to be %v", errOut, test.wantWarm)
+			}
+			if !test.wantWarm {
+				return
+			}
+			if strings.Contains(whenWarming, "is running") {
+				t.Errorf("cria green-lit the start before the weights were loaded: %q", whenWarming)
+			}
+			if !strings.Contains(out.String(), "qwen is running") {
+				t.Errorf("cria printed %q, want the verdict once the completion answered", out)
+			}
+			// The line is progress on stderr, not the answer: stdout stays what a
+			// script reads.
+			if strings.Contains(out.String(), "loading model weights") {
+				t.Errorf("cria printed the loading line on stdout: %q", out)
+			}
+		})
+	}
+}
+
+// A warm that does not come back fails the start: cria asked for a completion
+// and never got one. The server may well still be up — the refusal says so, and
+// points at the log rather than claiming it died.
+func TestStartWaitFailsWhenTheWeightsDoNotLoad(t *testing.T) {
+	record := testRecord()
+	record.Backend = config.BackendMLX
+	fake := &fakeServers{
+		record:  record,
+		phases:  []serve.Phase{serve.PhaseRunning},
+		health:  serve.Health{URL: "http://127.0.0.1:8080/v1/models", Green: true, Status: 200, Detail: "200 OK"},
+		warmErr: errors.New("qwen did not load its weights: http://127.0.0.1:8080/v1/completions: no answer within 15m0s"),
+	}
+	app, out, errOut := newTestApp(testTree(), fake)
+
+	if code := app.start([]string{"qwen", "--wait"}); code != exitFailure {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitFailure, errOut)
+	}
+	for _, want := range []string{"did not load its weights", "no answer within 15m0s", "may still be up", testRecord().LogPath} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("cria printed %q, want it to contain %q", errOut, want)
+		}
+	}
+	if strings.Contains(out.String(), "is running") {
+		t.Errorf("cria green-lit a start whose weights never loaded: %q", out)
+	}
+}
+
+// A start that does not wait leaves the weights unloaded, and says so with the
+// command that loads them now.
+func TestStartWithoutWaitNotesTheLazyLoad(t *testing.T) {
+	cases := []struct {
+		name     string
+		backend  config.Backend
+		wantNote bool
+	}{
+		{name: "an mlx server", backend: config.BackendMLX, wantNote: true},
+		{name: "a llama server", backend: config.BackendLlama},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			record := testRecord()
+			record.Backend = test.backend
+			fake := &fakeServers{record: record}
+			app, out, errOut := newTestApp(testTree(), fake)
+
+			if code := app.start([]string{"qwen"}); code != exitOK {
+				t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+			}
+			const note = "note: mlx loads model weights on the first request; `cria start qwen --wait` loads them now"
 			if got := strings.Contains(errOut.String(), note); got != test.wantNote {
-				t.Errorf("the note is %v on stderr %q, want %v", got, errOut, test.wantNote)
+				t.Errorf("stderr reads %q, want the note to be %v for a %s server", errOut, test.wantNote, test.backend)
+			}
+			if len(fake.warmed) != 0 {
+				t.Errorf("a start that was not asked to wait loaded %v", fake.warmed)
 			}
 			// The note is an aside: the answer a script reads stays on stdout.
 			if strings.Contains(out.String(), "note:") {

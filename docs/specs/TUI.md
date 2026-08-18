@@ -51,7 +51,15 @@ keybinds get detailed as they are built.
   (stop/kill: live; dismiss: exited; log: any) — j/k to pick, ⏎ runs the armed
   action, esc cancels; the notice line prompts ("which server to stop") and the
   keyboard returns to the view it left. One candidate acts immediately, as
-  before; restart keeps acting on the last-started entry.
+  before. Restart joins the pick over live servers (amended 2026-08-18); with
+  nothing live it still acts on the last-started entry.
+- **An action shows in the box at the keypress** (settled 2026-08-18): the
+  moment a key acts, the target's phase column carries the verb —
+  starting…/stopping…/killing…/restarting…, a fresh start as its own minimal
+  row — as display state, and the action's completion triggers an immediate
+  observation so the box converges in milliseconds rather than at the next
+  tick. Status lives in the box, including the status of what cria is doing
+  right now.
 - **UI preferences are state, not config**: active backend and last-started entry
   live in a small file under `~/.local/state/cria/`. The config tree stays
   human-owned; cria never records preferences there.

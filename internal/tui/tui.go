@@ -52,6 +52,7 @@ type servers interface {
 	Stop(record serve.Record) error
 	Kill(record serve.Record) error
 	Dismiss(record serve.Record) error
+	Warm(record serve.Record) error
 	PortUse(port int) (serve.PortUse, error)
 	KillHolder(holder serve.Holder) error
 }
@@ -136,6 +137,10 @@ type model struct {
 	listing serve.StatusListing
 	failure error // the last refresh that failed, held until one succeeds
 	alert   alert
+
+	// What cria is doing to an entry between the keypress and the answer, drawn
+	// in the box where a server's state is read (lifecycle.go).
+	pending pendingActions
 
 	// What the config tree declares, and what the host holds for it. Each is
 	// held with the reason it could not be read, which stays on screen until a
@@ -264,10 +269,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case entriesMsg:
 		return m.loaded(msg), nil
 	case startedMsg:
-		return m.started(msg), nil
+		return m.started(msg)
 	case actedMsg:
-		m.alert = alert{text: msg.text, bad: msg.bad}
-		return m, nil
+		return m.acted(msg)
+	case warmedMsg:
+		return m.warmed(msg), nil
 	case holderKilledMsg:
 		return m.holderKilled(msg), nil
 	case plannedMsg:
@@ -390,7 +396,7 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(pressed, m.keys.log):
 		return m.aim(pickLog)
 	case key.Matches(pressed, m.keys.restart):
-		return m.restartShownEntry()
+		return m.aimRestart()
 	case key.Matches(pressed, m.keys.dismiss):
 		return m.aim(pickDismiss)
 	}
@@ -581,7 +587,7 @@ func (m model) View() tea.View {
 // missing either is unreadable rather than merely smaller.
 func (m model) frame() string {
 	width := m.frameWidth()
-	top := append([]string{pane(paneTitle(statusTitle), width, statusLines(m.listing, m.prefs, m.bar, m.boxCursor()))}, m.notes(width)...)
+	top := append([]string{pane(paneTitle(statusTitle), width, statusLines(m.listing, m.pending, m.prefs, m.bar, m.boxCursor()))}, m.notes(width)...)
 	bar := renderKeybar(width, m.groups()...)
 
 	rows := m.screenRows(top, bar)

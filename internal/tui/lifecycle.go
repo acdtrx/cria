@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 
@@ -37,10 +38,20 @@ type (
 	// actedMsg is what a stop, a kill or a dismiss had to report — which is
 	// nothing at all when it worked: the status box shows the result on the
 	// next refresh, and the alert line is for what the box cannot show (tui.go).
-	// A failure is exactly that, so it travels here.
+	// A failure is exactly that, so it travels here. The entry travels either
+	// way: it is what the box was drawing as in-flight until this landed.
 	actedMsg struct {
-		text string
-		bad  bool
+		entryID string
+		text    string
+		bad     bool
+	}
+	// warmedMsg is one warm's answer: the server was asked for a completion so
+	// its weights are loaded, and this says whether the completion came back
+	// (docs/specs/SERVE.md). Nothing is reported when it did — the box already
+	// shows the server running.
+	warmedMsg struct {
+		entryID string
+		err     error
 	}
 	// holderKilledMsg is the port asked again after a foreign holder was killed.
 	holderKilledMsg struct {
@@ -49,6 +60,53 @@ type (
 		err   error
 	}
 )
+
+// pendingActions is what cria is in the middle of doing, entry id → the word for
+// it. It is honest display state rather than a guess: between the keypress and
+// the message the action answers with, cria *is* starting or stopping that
+// entry, and the box is where a server's state is read (docs/specs/TUI.md). The
+// next observation supersedes it — an entry is only in here while its own action
+// is in flight.
+type pendingActions map[string]string
+
+// The words the box shows while an action runs. Each is what cria is doing, not
+// what it will have done: a restart says so for both of its legs, and an entry
+// with nothing to stop is only being started.
+const (
+	verbStarting   = "starting…"
+	verbStopping   = "stopping…"
+	verbKilling    = "killing…"
+	verbRestarting = "restarting…"
+)
+
+// verb is what cria is doing to an entry right now, or the empty string when it
+// is doing nothing to it.
+func (p pendingActions) verb(entryID string) string { return p[entryID] }
+
+// pend records that an action on one entry is in flight. The map is rebuilt
+// rather than written into: the frame is a value that gets copied on every
+// message, and a map shared between those copies would let an action change what
+// an earlier frame said it was doing.
+func (m model) pend(entryID, verb string) model {
+	pending := make(pendingActions, len(m.pending)+1)
+	maps.Copy(pending, m.pending)
+	pending[entryID] = verb
+	m.pending = pending
+	return m
+}
+
+// settled drops an entry's in-flight verb: its action has answered, and what the
+// box says about that entry is the observation's job again.
+func (m model) settled(entryID string) model {
+	if _, waiting := m.pending[entryID]; !waiting {
+		return m
+	}
+	pending := make(pendingActions, len(m.pending))
+	maps.Copy(pending, m.pending)
+	delete(pending, entryID)
+	m.pending = pending
+	return m
+}
 
 // modal is a refusal the user can answer: the processes holding the port an
 // entry asked for, with the kill cria offers here and nowhere else
@@ -70,7 +128,7 @@ func (m model) startSelected() (tea.Model, tea.Cmd) {
 	if !ok || selected.broken != nil {
 		return m, nil
 	}
-	return m, m.launch(selected.entry)
+	return m.pend(selected.entry.ID, verbStarting), m.launch(selected.entry)
 }
 
 // launch is the start sequence as a command. The sequence itself is
@@ -135,15 +193,21 @@ func managedRefusal(entry config.Entry, held serve.Server) error {
 //
 // A preferences write that fails does not unstart the server: what was lost is
 // cria's memory of it, and that is what the alert says.
-func (m model) started(msg startedMsg) model {
+//
+// The start is no longer in flight either way, so the box stops drawing it as
+// such and is asked for the truth immediately: the answer is milliseconds old
+// and waiting a whole tick to show it would leave "starting…" on screen after
+// cria already knew better.
+func (m model) started(msg startedMsg) (model, tea.Cmd) {
+	m = m.settled(msg.entry.ID)
 	if len(msg.holders) > 0 {
 		m.modal = &modal{entry: msg.entry, holders: msg.holders}
 		m.alert = alert{}
-		return m
+		return m, m.refresh
 	}
 	if msg.err != nil {
 		m.alert = alert{text: msg.err.Error(), bad: true}
-		return m
+		return m, m.refresh
 	}
 
 	// The server is up and the status box says so on the next tick; the line
@@ -154,7 +218,46 @@ func (m model) started(msg startedMsg) model {
 		m.alert = alert{text: err.Error(), bad: true}
 	}
 	m.keys.retarget(targetOf(m.listing, m.prefs))
+	return m, tea.Batch(m.refresh, m.warmStarted(msg.record))
+}
+
+// warmStarted is the load a fresh server still owes whoever uses it: an mlx
+// server answers before it has read a weight, and the first completion pays for
+// all of them (docs/specs/SERVE.md). cria sends that completion itself, in the
+// background — the whole frame keeps redrawing while a load that can take
+// minutes runs.
+//
+// A backend that loads at startup has nothing to warm and gets no command at
+// all; which those are is serve's rule, not the frame's.
+func (m model) warmStarted(record serve.Record) tea.Cmd {
+	if !serve.LoadsLazily(record.Backend) {
+		return nil
+	}
+	servers := m.host.servers
+	return func() tea.Msg {
+		return warmedMsg{entryID: record.EntryID, err: servers.Warm(record)}
+	}
+}
+
+// warmed takes the warm's answer. A load that worked says nothing: the box shows
+// the server running, and a line announcing that its weights are in memory would
+// be one more true thing to read (tui.go). A load that did not come back is
+// exactly what the box cannot show — the server is still running there — so it
+// goes on the line under it.
+func (m model) warmed(msg warmedMsg) model {
+	if msg.err != nil {
+		m.alert = alert{text: msg.err.Error(), bad: true}
+	}
 	return m
+}
+
+// acted takes a stop's, a kill's or a dismiss's answer: that entry is no longer
+// in flight, and the box is asked for the truth right away rather than at the
+// next tick.
+func (m model) acted(msg actedMsg) (model, tea.Cmd) {
+	m = m.settled(msg.entryID)
+	m.alert = alert{text: msg.text, bad: msg.bad}
+	return m, m.refresh
 }
 
 // stopServer is s on the server it landed on. Stop is global — it acts on a
@@ -164,11 +267,11 @@ func (m model) started(msg startedMsg) model {
 // redrawing behind it.
 func (m model) stopServer(record serve.Record) (tea.Model, tea.Cmd) {
 	servers := m.host.servers
-	return m, func() tea.Msg {
+	return m.pend(record.EntryID, verbStopping), func() tea.Msg {
 		if err := servers.Stop(record); err != nil {
-			return actedMsg{text: err.Error(), bad: true}
+			return actedMsg{entryID: record.EntryID, text: err.Error(), bad: true}
 		}
-		return actedMsg{}
+		return actedMsg{entryID: record.EntryID}
 	}
 }
 
@@ -176,30 +279,51 @@ func (m model) stopServer(record serve.Record) (tea.Model, tea.Cmd) {
 // wedged or that the user does not want to wait for (docs/specs/SERVE.md).
 func (m model) killServer(record serve.Record) (tea.Model, tea.Cmd) {
 	servers := m.host.servers
-	return m, func() tea.Msg {
+	return m.pend(record.EntryID, verbKilling), func() tea.Msg {
 		if err := servers.Kill(record); err != nil {
-			return actedMsg{text: err.Error(), bad: true}
+			return actedMsg{entryID: record.EntryID, text: err.Error(), bad: true}
 		}
-		return actedMsg{}
+		return actedMsg{entryID: record.EntryID}
 	}
 }
 
 // dismissRecord is d: clear a crash report the box is showing, once the user is
-// done reading it (docs/specs/SERVE.md).
+// done reading it (docs/specs/SERVE.md). It is the one action the box does not
+// draw as in-flight: it removes a file and the row goes with it, so there is no
+// interval to describe.
 func (m model) dismissRecord(record serve.Record) (tea.Model, tea.Cmd) {
 	servers := m.host.servers
 	return m, func() tea.Msg {
 		if err := servers.Dismiss(record); err != nil {
-			return actedMsg{text: err.Error(), bad: true}
+			return actedMsg{entryID: record.EntryID, text: err.Error(), bad: true}
 		}
-		return actedMsg{}
+		return actedMsg{entryID: record.EntryID}
 	}
 }
 
-// restartShownEntry is r: stop what the box shows and start it again. It works
-// from the stopped state too — the box names the last-started entry there, which
-// is the whole reason that fallback exists (docs/specs/TUI.md) — and it is the
-// one-keypress swap-back after a stop.
+// restartServer is r on a server cria can see: stop it, then start its entry
+// again — the one-keypress swap-back after a stop. Both legs are one action, so
+// the box says "restarting" until the second one lands.
+func (m model) restartServer(record serve.Record) (tea.Model, tea.Cmd) {
+	entry, found := m.entryNamed(record.EntryID)
+	if !found {
+		m.alert = alert{text: restartsNothing(record.EntryID), bad: true}
+		return m, nil
+	}
+
+	settings := m.settings()
+	check, servers := m.host.tools, m.host.servers
+	return m.pend(entry.ID, verbRestarting), func() tea.Msg {
+		if err := servers.Stop(record); err != nil {
+			return startedMsg{entry: entry, err: err}
+		}
+		return startEntry(entry, settings, check, servers)
+	}
+}
+
+// restartShownEntry is r with nothing running to act on. The box is showing a
+// crash report, or the entry that was started last on a host where nothing is
+// (docs/specs/TUI.md), and a restart there is a start: there is nothing to stop.
 func (m model) restartShownEntry() (tea.Model, tea.Cmd) {
 	id, shown := m.shownEntryID()
 	if !shown {
@@ -207,21 +331,16 @@ func (m model) restartShownEntry() (tea.Model, tea.Cmd) {
 	}
 	entry, found := m.entryNamed(id)
 	if !found {
-		m.alert = alert{text: fmt.Sprintf("%s is not an entry cria can read any more; nothing to restart", id), bad: true}
+		m.alert = alert{text: restartsNothing(id), bad: true}
 		return m, nil
 	}
+	return m.pend(entry.ID, verbStarting), m.launch(entry)
+}
 
-	record, live := m.liveRecord()
-	settings := m.settings()
-	check, servers := m.host.tools, m.host.servers
-	return m, func() tea.Msg {
-		if live {
-			if err := servers.Stop(record); err != nil {
-				return startedMsg{entry: entry, err: err}
-			}
-		}
-		return startEntry(entry, settings, check, servers)
-	}
+// restartsNothing is an entry the config tree no longer declares: a record is
+// self-contained, but a start needs the file (docs/specs/SERVE.md).
+func restartsNothing(id string) string {
+	return fmt.Sprintf("%s is not an entry cria can read any more; nothing to restart", id)
 }
 
 // pressInModal is the keyboard while a refusal is up: kill what holds the port,
@@ -316,39 +435,16 @@ func orUnreadable(value string) string {
 	return value
 }
 
-// liveRecord is the first server the box shows that cria can still see. Several
-// at once is entries declaring different ports (docs/cria.md, v1 surface), and
-// the box lists them in entry order, so the first is the one being read at the
-// top — which is the one restart-last means (docs/specs/TUI.md). The keys that
-// could mean any of them ask which instead (pick.go).
-func (m model) liveRecord() (serve.Record, bool) {
-	for _, status := range m.listing.Servers {
-		if status.Phase != serve.PhaseExited {
-			return status.Record, true
-		}
-	}
-	return serve.Record{}, false
-}
-
-// exitedRecord is the first crash report the box is showing, if it is showing
-// one.
-func (m model) exitedRecord() (serve.Record, bool) {
+// shownEntryID is the entry the status box names with nothing running: the
+// crash report it is showing, else the entry that was started last — the
+// fallback that keeps restart a target across sessions (docs/specs/TUI.md).
+// A server cria can see is never answered for here: the keys that could mean any
+// of several ask which (pick.go).
+func (m model) shownEntryID() (string, bool) {
 	for _, status := range m.listing.Servers {
 		if status.Phase == serve.PhaseExited {
-			return status.Record, true
+			return status.EntryID, true
 		}
-	}
-	return serve.Record{}, false
-}
-
-// shownEntryID is the entry the status box names: what is running, else what
-// crashed, else what was started last (docs/specs/TUI.md).
-func (m model) shownEntryID() (string, bool) {
-	if record, live := m.liveRecord(); live {
-		return record.EntryID, true
-	}
-	if record, exited := m.exitedRecord(); exited {
-		return record.EntryID, true
 	}
 	return m.prefs.LastStarted, m.prefs.LastStarted != ""
 }

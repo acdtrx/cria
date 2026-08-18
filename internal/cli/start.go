@@ -81,6 +81,7 @@ func (a *app) start(args []string) int {
 	a.printf("  log %s\n", record.LogPath)
 	if !wait {
 		a.printf("  not serving yet; `cria status` reports its phase, `cria start %s %s` blocks until it does\n", id, waitFlag)
+		a.noteLazyLoad(record)
 		return exitOK
 	}
 	return a.await(manager, record)
@@ -190,9 +191,11 @@ func (a *app) await(manager servers, record serve.Record) int {
 			if refusal := a.listenerRefusal(manager, record); refusal != "" {
 				return a.fail("start %s: %s", record.EntryID, refusal)
 			}
+			if refusal := a.loadRefusal(manager, record, began); refusal != "" {
+				return a.fail("start %s: %s", record.EntryID, refusal)
+			}
 			a.printf("%s is running after %s: %s answered %s\n",
 				record.EntryID, since(began), status.Health.URL, status.Health.Detail)
-			a.noteFirstRequestCost(record)
 			return exitOK
 		case serve.PhaseExited:
 			return a.fail("start %s: it exited after %s without serving; its log is the crash report: %s",
@@ -259,16 +262,44 @@ func listenerPIDs(pids []int) string {
 	return strings.Join(numbers, ", ")
 }
 
-// noteFirstRequestCost warns that a green mlx server has not finished the work a
-// caller expects it to have finished: mlx_lm.server answers /v1/models before it
-// has loaded any weights, and loads them on the first request instead. The
-// verdict is still running — the server is serving — so this is an aside, not a
-// phase.
-func (a *app) noteFirstRequestCost(record serve.Record) {
-	if record.Backend != config.BackendMLX {
+// loadRefusal is why a green server is not yet the ready server --wait promises,
+// or the empty string when it is.
+//
+// mlx_lm.server answers /v1/models before it has read a single weight and loads
+// them on the first completion instead (docs/specs/SERVE.md), so a wait that
+// stopped at green would hand back a server whose first real request pays
+// minutes. --wait means ready: cria sends that first completion itself, and the
+// verdict waits for the answer.
+//
+// A completion that does not come back fails the start. The server may well
+// still be up — the load can outlast even the budget serve gives it, and nothing
+// about this says the process died — so the refusal reports what happened and
+// where the log is rather than claiming the server is gone.
+func (a *app) loadRefusal(manager servers, record serve.Record, began time.Time) string {
+	if !serve.LoadsLazily(record.Backend) {
+		return ""
+	}
+
+	// Said before the wait rather than after it, and on stderr: this is what
+	// cria is doing while a caller sits there, not the answer they asked for.
+	a.waiting("loading model weights (mlx loads lazily; this can take a while)…")
+	err := manager.Warm(record)
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf("it answered after %s but %v; the server may still be up — its log is %s",
+		since(began), err, record.LogPath)
+}
+
+// noteLazyLoad is the same fact on the path that does not wait: the server is
+// started, and the weights are not loaded until something asks it for a
+// completion. The note names the one command that loads them now.
+func (a *app) noteLazyLoad(record serve.Record) {
+	if !serve.LoadsLazily(record.Backend) {
 		return
 	}
-	a.note("mlx_lm.server loads model weights on the first request; the first completion bears that cost")
+	a.note("mlx loads model weights on the first request; `cria start %s %s` loads them now",
+		record.EntryID, waitFlag)
 }
 
 // address is where a server listens, as its record spells it.

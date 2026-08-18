@@ -78,7 +78,7 @@ func TestSeveralServersMakeTheKeyAsk(t *testing.T) {
 
 	// The picked row is drawn on the same band the lists use, marker included,
 	// and the row beside it is not.
-	lines := statusLines(frame.listing, frame.prefs, frame.bar, frame.boxCursor())
+	lines := statusLines(frame.listing, frame.pending, frame.prefs, frame.bar, frame.boxCursor())
 	assertBanded(t, lines[0], lines[1], frame.frameWidth()-4)
 	if drawn := plain(lines[0]); !strings.HasPrefix(drawn, cursorMark+"qwen") {
 		t.Errorf("the picked row reads %q, want the cursor's mark in front of it", drawn)
@@ -234,6 +234,73 @@ func TestTheLogPicksAcrossLiveAndExitedRecords(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("the picked log did not go and read the file")
+	}
+}
+
+// Restart is a key like the others once there is more than one server it could
+// mean: with several live it asks which, and the answer is that server's stop
+// and start (docs/specs/TUI.md). With one live it acts, and with none it falls
+// back to the entry the box names.
+func TestRestartAsksWhichServerWhenSeveralAreLive(t *testing.T) {
+	frame, fake := pickFrame(t,
+		serverNamed("qwen", 8080, serve.PhaseRunning),
+		serverNamed("gemma", 8081, serve.PhaseRunning))
+
+	frame, cmd := press(t, frame, typed('r'))
+	if cmd != nil {
+		t.Fatal("a restart with two servers to choose between acted on one of them")
+	}
+	if frame.pick == nil || frame.pick.action != pickRestart {
+		t.Fatalf("the key armed %+v, want the restart waiting for its server", frame.pick)
+	}
+	if want := "which server to restart"; frame.alert.text != want {
+		t.Errorf("the line under the box reads %q, want %q", frame.alert.text, want)
+	}
+	bar := plain(renderKeybar(200, frame.groups()...))
+	for _, hint := range []string{"restart which", "⏎ restart", "esc cancel"} {
+		if !strings.Contains(bar, hint) {
+			t.Errorf("the keybar reads %q, want it to offer %q", bar, hint)
+		}
+	}
+
+	// ⏎ on the second one restarts that one: its stop, then its start.
+	frame, _ = press(t, frame, typed('j'))
+	frame, cmd = press(t, frame, enter)
+	if got := frame.pending.verb("gemma"); got != verbRestarting {
+		t.Errorf("the frame is %q on gemma, want %q from the moment ⏎ picked it", got, verbRestarting)
+	}
+	frame = answer(t, frame, cmd)
+
+	if len(fake.stopped) != 1 || fake.stopped[0] != "gemma" {
+		t.Fatalf("the restart stopped %q, want the picked server first", fake.stopped)
+	}
+	if len(fake.started) != 1 || fake.started[0] != "gemma" {
+		t.Fatalf("the restart started %q, want the picked server after its stop", fake.started)
+	}
+	if frame.pick != nil || frame.alert.text != "" {
+		t.Errorf("the mode outlived the answer: %+v, %q", frame.pick, frame.alert.text)
+	}
+	if got := frame.pending.verb("gemma"); got != "" {
+		t.Errorf("the frame still says %q about gemma after the restart landed", got)
+	}
+}
+
+// A crash report is not something to restart *from* while a server is up: the
+// restart picks between the servers cria can see, and skips the exited records
+// the same way stop does.
+func TestTheRestartPickSkipsCrashReports(t *testing.T) {
+	frame, _ := pickFrame(t,
+		serverNamed("qwen", 8080, serve.PhaseExited),
+		serverNamed("gemma", 8081, serve.PhaseRunning),
+		serverNamed("mlx-qwen", 8082, serve.PhaseRunning))
+
+	frame, _ = press(t, frame, typed('r'))
+	if got := pickedID(t, frame); got != "gemma" {
+		t.Fatalf("the cursor started on %q, want the first server cria can still see", got)
+	}
+	frame, _ = press(t, frame, typed('j'))
+	if got := pickedID(t, frame); got != "mlx-qwen" {
+		t.Errorf("j moved the cursor to %q, want the other live server", got)
 	}
 }
 

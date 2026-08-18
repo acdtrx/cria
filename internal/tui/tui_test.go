@@ -34,10 +34,13 @@ type fakeServers struct {
 	dismissErr error
 	holderErr  error
 
+	warmErr error
+
 	started   []string
 	stopped   []string
 	killed    []string
 	dismissed []string
+	warmed    []string
 	holders   []int
 	asked     []int // the ports a start asked about, in the order it asked
 }
@@ -91,6 +94,17 @@ func (f *fakeServers) Kill(record serve.Record) error {
 func (f *fakeServers) Dismiss(record serve.Record) error {
 	f.dismissed = append(f.dismissed, record.EntryID)
 	return f.dismissErr
+}
+
+// Warm answers the way a server that loaded its weights does, and records the
+// entry it was asked to load. A backend that loads at startup never reaches
+// here: which those are is serve's rule (docs/specs/SERVE.md).
+func (f *fakeServers) Warm(record serve.Record) error {
+	if !serve.LoadsLazily(record.Backend) {
+		return nil
+	}
+	f.warmed = append(f.warmed, record.EntryID)
+	return f.warmErr
 }
 
 func (f *fakeServers) PortUse(port int) (serve.PortUse, error) {

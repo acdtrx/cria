@@ -100,6 +100,10 @@ type Manager struct {
 	cache cacheReader
 	hub   hubReader
 
+	// The one request cria sends a server rather than asks it: the completion
+	// that makes a lazily-loading backend load its weights (warm.go).
+	warm warmer
+
 	// What a Manager remembers between observations. Both are display state,
 	// live only as long as this cria invocation, and are never persisted: which
 	// pid of an entry has answered green — the line between "not answering yet"
@@ -120,6 +124,10 @@ type Manager struct {
 	// whole settle without waiting one out.
 	settle     time.Duration
 	settlePoll time.Duration
+
+	// How long a warm may take, held for the same reason again — no test waits
+	// out a budget measured in minutes.
+	warmWithin time.Duration
 }
 
 // New builds the manager cria uses: a state root and a process table, wired to
@@ -132,6 +140,7 @@ func New(root string, host procs.Host) *Manager {
 		probe:    newHTTPProbe(),
 		cache:    readCache,
 		hub:      hubTotals(),
+		warm:     newHTTPWarm(),
 		greenPID: map[string]int{},
 		totals:   map[string]hubapi.Total{},
 		grace:    stopGrace,
@@ -140,6 +149,8 @@ func New(root string, host procs.Host) *Manager {
 
 		settle:     identitySettle,
 		settlePoll: identityPoll,
+
+		warmWithin: warmBudget,
 	}
 }
 

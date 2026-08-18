@@ -21,9 +21,7 @@ import (
 // act on are re-read from the current listing every time they are needed, so a
 // server that exits under the cursor moves the cursor rather than the action.
 
-// pickAction is the server key waiting for its target. Restart is not one of
-// them: it acts on the entry that was started last, which is one entry by
-// construction (docs/specs/TUI.md).
+// pickAction is the server key waiting for its target.
 type pickAction int
 
 const (
@@ -31,6 +29,7 @@ const (
 	pickKill
 	pickLog
 	pickDismiss
+	pickRestart
 )
 
 // pick is one armed key: what it will do, and where its cursor stands.
@@ -60,6 +59,17 @@ func (m model) aim(action pickAction) (tea.Model, tea.Cmd) {
 	return m.syncEscScope(), nil
 }
 
+// aimRestart is r. Restart is the one server key with a target when nothing is
+// running — the box shows the entry that was started last, and starting it again
+// is the whole of a restart there (docs/specs/TUI.md). With servers cria can see,
+// it is a key like the others: one is the answer, several ask which.
+func (m model) aimRestart() (tea.Model, tea.Cmd) {
+	if len(m.pickable(pickRestart)) == 0 {
+		return m.restartShownEntry()
+	}
+	return m.aim(pickRestart)
+}
+
 // carryOut is the armed action on the server it landed on. Every key keeps its
 // own function: what is decided here is which server, never what happens to it.
 func (m model) carryOut(action pickAction, record serve.Record) (tea.Model, tea.Cmd) {
@@ -70,6 +80,8 @@ func (m model) carryOut(action pickAction, record serve.Record) (tea.Model, tea.
 		return m.killServer(record)
 	case pickDismiss:
 		return m.dismissRecord(record)
+	case pickRestart:
+		return m.restartServer(record)
 	}
 	return m.showLog(record)
 }
@@ -138,13 +150,13 @@ func (m model) pickable(action pickAction) []int {
 }
 
 // answers reports whether a server in this phase is something the action can be
-// pointed at: stop and kill mean a server cria can still see, dismiss means a
-// crash report, and the log is the one thing every record has either way
-// (docs/specs/SERVE.md).
+// pointed at: stop, kill and restart mean a server cria can still see — a
+// restart of one is its stop and its start — dismiss means a crash report, and
+// the log is the one thing every record has either way (docs/specs/SERVE.md).
 func (a pickAction) answers(phase serve.Phase) bool {
 	exited := phase == serve.PhaseExited
 	switch a {
-	case pickStop, pickKill:
+	case pickStop, pickKill, pickRestart:
 		return !exited
 	case pickDismiss:
 		return exited
@@ -197,6 +209,8 @@ func (a pickAction) verb() string {
 		return "kill"
 	case pickDismiss:
 		return "dismiss"
+	case pickRestart:
+		return "restart"
 	}
 	return "log"
 }
