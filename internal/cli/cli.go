@@ -33,15 +33,17 @@ const (
 	exitUsage   = 2
 )
 
-// subcommands is the whole v1 surface (docs/specs/CLI.md). Bare `cria` opens the
-// TUI instead of naming a subcommand.
-var subcommands = []string{"start", "stop", "status", "docs", "wired-limit"}
+// subcommands is the whole v1 surface (docs/specs/CLI.md), in the order the help
+// page presents it: the server lifecycle, then the config tree, then the two
+// generators. Bare `cria` opens the TUI instead of naming a subcommand.
+var subcommands = []string{"start", "stop", "status", "list", "edit", "docs", "wired-limit"}
 
-// The flags the surface has: one per subcommand, both booleans
+// The flags the surface has: one per subcommand, all booleans
 // (docs/specs/CLI.md).
 const (
-	waitFlag = "--wait"
-	jsonFlag = "--json"
+	waitFlag  = "--wait"
+	jsonFlag  = "--json"
+	pathsFlag = "--paths"
 )
 
 // How `--wait` watches a start it has just triggered.
@@ -81,6 +83,7 @@ type servers interface {
 	Snapshot(record serve.Record) (serve.Status, error)
 	Snapshots() (serve.StatusListing, error)
 	PortUse(port int) (serve.PortUse, error)
+	ListensOn(record serve.Record) (bool, []int, error)
 }
 
 // app is one invocation: its two output streams and the subsystems it drives.
@@ -141,19 +144,26 @@ func (a *app) run(args []string, version string) int {
 	case "--version":
 		a.printf("cria %s\n", version)
 		return exitOK
+	case "--help", "-h", "help":
+		a.printf("%s", helpPage)
+		return exitOK
 	case "start":
 		return a.start(args[1:])
 	case "stop":
 		return a.stop(args[1:])
 	case "status":
 		return a.status(args[1:])
+	case "list":
+		return a.list(args[1:])
+	case "edit":
+		return a.edit(args[1:])
 	case "docs":
 		a.printf("%s", config.Docs())
 		return exitOK
 	case "wired-limit":
 		return a.wiredLimit(args[1:])
 	default:
-		return a.usage("unknown subcommand %q; valid subcommands are: %s",
+		return a.usage("unknown subcommand %q; valid subcommands are: %s; `cria --help` says what each one does",
 			args[0], strings.Join(subcommands, ", "))
 	}
 }
@@ -196,6 +206,14 @@ func newManager() (servers, error) {
 // here.
 func (a *app) printf(format string, args ...any) {
 	fmt.Fprintf(a.out, format, args...)
+}
+
+// note writes an aside: something true and worth knowing that is not the answer
+// the invocation asked for. It goes to stderr so stdout stays the answer alone —
+// a script reading `cria start --wait` reads its verdict from the exit code and
+// its output from stdout, and neither changes because cria had something to add.
+func (a *app) note(format string, args ...any) {
+	fmt.Fprintf(a.err, "note: "+format+"\n", args...)
 }
 
 // fail reports that the asked-for thing is not true or not done, and carries the

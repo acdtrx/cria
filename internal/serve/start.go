@@ -120,29 +120,44 @@ func (m *Manager) refuseIfRunning(entryID string) error {
 }
 
 // captureIdentity reads back what the process table says the new pid is running,
-// immediately, so the record carries the identity that makes it verifiable
-// later.
+// so the record carries the identity that makes it verifiable later.
 //
-// The identity has to name the program cria just launched. A server that failed
-// on its first breath is either gone already or — since it is still cria's own
-// child until cria exits — an unreaped row reading "<defunct>", and recording
-// that row would produce a record that matches itself on every later read and so
-// claims to be live forever. Neither is the process cria launched: the record
-// takes no identity, matches nothing, and reads as exited with its log as the
-// crash report.
+// The identity has to name the program cria just launched, and a fresh pid does
+// not always name it yet: a server installed as a shim re-execs itself within
+// tens of milliseconds of the spawn, and the argv caught in between names
+// neither program. So the pid is asked again, at identityPoll, until it either
+// names the program or is gone — the settle window bounds the whole thing
+// (internal/serve, identitySettle).
+//
+// Two answers end the wait with no identity at all. A pid that has gone was a
+// server that failed on its first breath; a pid that never names the program
+// within the window is either that same failure lingering as an unreaped
+// "<defunct>" row — recording it would produce a record matching itself forever,
+// claiming to be live — or a spawn cria simply could not attribute. Neither is
+// the process cria launched: the record takes no identity, matches nothing, and
+// reads as exited with its log as the crash report.
 //
 // The check is containment rather than a prefix because a server installed as a
 // script runs under its interpreter, which puts its path in argv[1] — the shape
 // mlx-lm ships (internal/procs).
 func (m *Manager) captureIdentity(pid int, program string) (procs.Identity, error) {
-	identity, found, err := m.host.Identify(pid)
-	if err != nil {
-		return procs.Identity{}, err
+	deadline := time.Now().Add(m.settle)
+	for {
+		identity, found, err := m.host.Identify(pid)
+		if err != nil {
+			return procs.Identity{}, err
+		}
+		if !found {
+			return procs.Identity{}, nil
+		}
+		if strings.Contains(identity.Command, program) {
+			return identity, nil
+		}
+		if !time.Now().Before(deadline) {
+			return procs.Identity{}, nil
+		}
+		time.Sleep(m.settlePoll)
 	}
-	if !found || !strings.Contains(identity.Command, program) {
-		return procs.Identity{}, nil
-	}
-	return identity, nil
 }
 
 // spawnDetached is the real spawner: it starts a server that outlives cria.

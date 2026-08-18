@@ -54,7 +54,7 @@ func TestStopWithNoEntryNamed(t *testing.T) {
 			name:     "nothing running, but crash reports remain",
 			listing:  serve.Listing{Servers: []serve.Server{serverNamed("qwen", 4242, false)}},
 			want:     exitFailure,
-			contains: "nothing is running (1 exited record(s) remain",
+			contains: "nothing is running (1 exited record(s) remain; `cria status` shows them, `cria stop <id>` clears one)",
 		},
 	}
 
@@ -97,7 +97,10 @@ func TestStopNamesItsEntry(t *testing.T) {
 }
 
 // Stopping a server that has already crashed removes its record and succeeds:
-// that is the state the caller asked for (docs/specs/SERVE.md).
+// that is the state the caller asked for (docs/specs/SERVE.md). The report says
+// what cria actually judged — the pid is not the process it launched — rather
+// than claiming the server exited, which a record written without an identity
+// would make untrue.
 func TestStopClearsAnExitedRecord(t *testing.T) {
 	fake := &fakeServers{listing: serve.Listing{Servers: []serve.Server{serverNamed("qwen", 4242, false)}}}
 	app, out, errOut := newTestApp(testTree(), fake)
@@ -108,25 +111,54 @@ func TestStopClearsAnExitedRecord(t *testing.T) {
 	if !slices.Equal(fake.stopped, []string{"qwen"}) {
 		t.Errorf("cria stopped %v, want the exited entry's record cleared", fake.stopped)
 	}
-	if !strings.Contains(out.String(), "had already exited") {
-		t.Errorf("cria printed %q, want what it found", out)
+	for _, want := range []string{"had already exited", "pid 4242 is no longer the process cria launched", "removed its record"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("cria printed %q, want it to contain %q", out, want)
+		}
 	}
 }
 
 // An entry with no record was never started, or was already stopped: there is
-// nothing to do, and the exit code says so.
+// nothing to do, and the exit code says so. The refusal names what cria does
+// hold, because a caller whose server is still answering needs to hear that cria
+// is not tracking it.
 func TestStopRefusesAnEntryWithNoRecord(t *testing.T) {
-	fake := &fakeServers{}
-	app, _, errOut := newTestApp(testTree(), fake)
+	cases := []struct {
+		name     string
+		listing  serve.Listing
+		contains []string
+	}{
+		{
+			name:     "cria holds nothing at all",
+			contains: []string{"no server record for qwen", "holds no server records at all", "not cria's to stop"},
+		},
+		{
+			name: "cria holds records for other entries",
+			listing: serve.Listing{
+				Servers: []serve.Server{serverNamed("gemma", 11, true)},
+				Broken:  []serve.BrokenRecord{{EntryID: "mistral", Path: "/s/mistral.json", Err: errors.New("pid is 0")}},
+			},
+			contains: []string{"no server record for qwen", "holds records for: gemma, mistral"},
+		},
+	}
 
-	if code := app.stop([]string{"qwen"}); code != exitFailure {
-		t.Fatalf("exit code %d, want %d", code, exitFailure)
-	}
-	if !strings.Contains(errOut.String(), "no server record for qwen") {
-		t.Errorf("cria printed %q, want what is missing", errOut)
-	}
-	if len(fake.stopped) != 0 {
-		t.Errorf("cria stopped %v for an entry with no record", fake.stopped)
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			fake := &fakeServers{listing: test.listing}
+			app, _, errOut := newTestApp(testTree(), fake)
+
+			if code := app.stop([]string{"qwen"}); code != exitFailure {
+				t.Fatalf("exit code %d, want %d", code, exitFailure)
+			}
+			for _, want := range test.contains {
+				if !strings.Contains(errOut.String(), want) {
+					t.Errorf("cria printed %q, want it to contain %q", errOut, want)
+				}
+			}
+			if len(fake.stopped) != 0 {
+				t.Errorf("cria stopped %v for an entry with no record", fake.stopped)
+			}
+		})
 	}
 }
 

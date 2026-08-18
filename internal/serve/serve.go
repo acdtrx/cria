@@ -67,6 +67,19 @@ const (
 	// answer lives in another process's lifetime, so there is no event to wait
 	// on: this is observation, bounded by the two windows above.
 	exitPoll = 100 * time.Millisecond
+
+	// identitySettle bounds how long a fresh pid is given to become the program
+	// cria launched, and identityPoll is how often it is asked. A server
+	// installed as a shim re-execs itself moments after the spawn — a uv-shimmed
+	// mlx_lm.server goes shim python → framework Python.app within ~50-100ms —
+	// and the argv in between names neither. Recording that intermediate argv
+	// writes a record matching nothing, so a healthy server reads exited forever
+	// and no stop can act on it. The window is generous against a busy machine;
+	// the interval is short enough that a normal spawn is caught on its first or
+	// second look. Bounded observation of an external process settling, not a
+	// sleep around a race (CODING-RULES §6).
+	identitySettle = 1500 * time.Millisecond
+	identityPoll   = 50 * time.Millisecond
 )
 
 // Manager is the state directory plus the process table: everything cria needs
@@ -102,6 +115,11 @@ type Manager struct {
 	grace   time.Duration
 	confirm time.Duration
 	poll    time.Duration
+
+	// The identity-capture window, held for the same reason: a test drives a
+	// whole settle without waiting one out.
+	settle     time.Duration
+	settlePoll time.Duration
 }
 
 // New builds the manager cria uses: a state root and a process table, wired to
@@ -119,6 +137,9 @@ func New(root string, host procs.Host) *Manager {
 		grace:    stopGrace,
 		confirm:  killConfirm,
 		poll:     exitPoll,
+
+		settle:     identitySettle,
+		settlePoll: identityPoll,
 	}
 }
 

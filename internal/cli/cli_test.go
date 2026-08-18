@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -27,16 +28,23 @@ type fakeServers struct {
 	progress  serve.Progress      // carried by a snapshot whose phase is downloading
 	health    serve.Health        // carried by every snapshot of a started server
 
+	// Who the operating system says is listening on the started server's port.
+	// Nil means the record's own pid, which is the normal case: a test only
+	// scripts this when it is about attribution.
+	listeners    []int
+	listenersSet bool
+
 	started  []config.Entry // the entries Start was called with, in order
 	stopped  []string       // the entries Stop was called for, in order
 	asked    []int          // the ports PortUse was asked about, in order
 	observed int            // how many snapshots the wait took
 
-	startErr    error
-	stopErr     error
-	listErr     error
-	snapshotErr error
-	portErr     error
+	startErr     error
+	stopErr      error
+	listErr      error
+	snapshotErr  error
+	portErr      error
+	listenersErr error
 }
 
 func (f *fakeServers) Start(entry config.Entry, _ tools.Report) (serve.Record, error) {
@@ -94,6 +102,19 @@ func (f *fakeServers) Snapshot(record serve.Record) (serve.Status, error) {
 		status.Progress = f.progress
 	}
 	return status, nil
+}
+
+// ListensOn answers with the pids a test scripted, defaulting to the record's
+// own pid — the host where the server cria started is the one holding its port.
+func (f *fakeServers) ListensOn(record serve.Record) (bool, []int, error) {
+	if f.listenersErr != nil {
+		return false, nil, f.listenersErr
+	}
+	pids := f.listeners
+	if !f.listenersSet {
+		pids = []int{record.PID}
+	}
+	return slices.Contains(pids, record.PID), pids, nil
 }
 
 func (f *fakeServers) PortUse(port int) (serve.PortUse, error) {
@@ -179,7 +200,7 @@ func TestRouting(t *testing.T) {
 	}{
 		{name: "the version is printed", args: []string{"--version"}, want: exitOK, contains: "cria 9.9.9-test"},
 		{name: "docs prints the config schema", args: []string{"docs"}, want: exitOK, contains: "backend"},
-		{name: "an unknown subcommand names the valid set", args: []string{"serve"}, want: exitUsage, contains: "valid subcommands are: start, stop, status, docs"},
+		{name: "an unknown subcommand names the valid set", args: []string{"serve"}, want: exitUsage, contains: "valid subcommands are: start, stop, status, list, edit, docs, wired-limit"},
 		{name: "start needs an entry id", args: []string{"start"}, want: exitUsage, contains: "usage: cria start <id> [--wait]"},
 		{name: "start takes one entry id", args: []string{"start", "a", "b"}, want: exitUsage, contains: "one entry at a time (got a, b)"},
 		{name: "start refuses a flag it does not know", args: []string{"start", "qwen", "--now"}, want: exitUsage, contains: "unknown flag --now"},

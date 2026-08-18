@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -220,6 +221,114 @@ func TestStartWaitsForRunning(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "qwen is running") || !strings.Contains(out.String(), "200 OK") {
 		t.Errorf("cria printed %q, want the verdict and what the health endpoint answered", out)
+	}
+}
+
+// A green port is not on its own proof that cria's own server answered it, so
+// the wait asks who is listening before it green-lights the start. The three
+// answers are: cria's pid holds the port (green), someone else does (refused,
+// both pids named), and the question could not be asked (green, with the note —
+// the health signal is primary, attribution is corroboration).
+func TestStartWaitVerifiesTheListener(t *testing.T) {
+	cases := []struct {
+		name         string
+		listeners    []int
+		listenersSet bool
+		listenersErr error
+		want         int
+		contains     []string
+	}{
+		{
+			name:     "the port is held by the server cria started",
+			want:     exitOK,
+			contains: []string{"qwen is running"},
+		},
+		{
+			name:         "the port is held by another process",
+			listeners:    []int{9001},
+			listenersSet: true,
+			want:         exitFailure,
+			contains:     []string{"port :8080 answers", "not the server cria started", "pid 4242", "listener(s) 9001"},
+		},
+		{
+			name:         "nothing is listening at the moment cria looked",
+			listeners:    []int{},
+			listenersSet: true,
+			want:         exitFailure,
+			contains:     []string{"listener(s) none"},
+		},
+		{
+			name:         "the port could not be attributed",
+			listenersErr: errors.New("lsof did not answer within 3s"),
+			want:         exitOK,
+			contains:     []string{"qwen is running", "note: cannot confirm that pid 4242 is what answers on port 8080", "lsof did not answer"},
+		},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			fake := &fakeServers{
+				record:       testRecord(),
+				phases:       []serve.Phase{serve.PhaseRunning},
+				health:       serve.Health{URL: "http://127.0.0.1:8080/health", Green: true, Status: 200, Detail: "200 OK"},
+				listeners:    test.listeners,
+				listenersSet: test.listenersSet,
+				listenersErr: test.listenersErr,
+			}
+			app, out, errOut := newTestApp(testTree(), fake)
+
+			if code := app.start([]string{"qwen", "--wait"}); code != test.want {
+				t.Fatalf("exit code %d, want %d (stderr: %s)", code, test.want, errOut)
+			}
+			printed := out.String() + errOut.String()
+			for _, want := range test.contains {
+				if !strings.Contains(printed, want) {
+					t.Errorf("cria printed %q, want it to contain %q", printed, want)
+				}
+			}
+			if test.want == exitFailure && strings.Contains(out.String(), "is running") {
+				t.Errorf("cria green-lit a start whose port another process answers: %q", out)
+			}
+		})
+	}
+}
+
+// An mlx server is running as soon as it answers, but it has not loaded a single
+// weight yet: the note says so on the green path, where a caller is about to
+// send the request that pays for it.
+func TestStartWaitNotesTheMLXFirstRequestCost(t *testing.T) {
+	cases := []struct {
+		name     string
+		backend  config.Backend
+		wantNote bool
+	}{
+		{name: "an mlx server", backend: config.BackendMLX, wantNote: true},
+		{name: "a llama server", backend: config.BackendLlama},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			record := testRecord()
+			record.Backend = test.backend
+			fake := &fakeServers{
+				record: record,
+				phases: []serve.Phase{serve.PhaseRunning},
+				health: serve.Health{URL: "http://127.0.0.1:8080/v1/models", Green: true, Status: 200, Detail: "200 OK"},
+			}
+			app, out, errOut := newTestApp(testTree(), fake)
+
+			if code := app.start([]string{"qwen", "--wait"}); code != exitOK {
+				t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+			}
+			const note = "note: mlx_lm.server loads model weights on the first request; the first completion bears that cost"
+			if got := strings.Contains(errOut.String(), note); got != test.wantNote {
+				t.Errorf("the note is %v on stderr %q, want %v", got, errOut, test.wantNote)
+			}
+			// The note is an aside: the answer a script reads stays on stdout.
+			if strings.Contains(out.String(), "note:") {
+				t.Errorf("cria printed the note on stdout: %q", out)
+			}
+		})
 	}
 }
 

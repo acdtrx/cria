@@ -39,7 +39,9 @@ func (a *app) stop(args []string) int {
 }
 
 // stopNamed stops the server one entry id names. The record is the whole
-// question — an entry with no record was never started, or was already stopped.
+// question — an entry with no record was never started, or was already stopped —
+// and a record whose process has gone is cleared by the same command, which is
+// what a stop of an exited entry asks for (docs/specs/SERVE.md).
 func (a *app) stopNamed(manager servers, listing serve.Listing, id string) int {
 	for _, server := range listing.Servers {
 		if server.EntryID == id {
@@ -52,7 +54,25 @@ func (a *app) stopNamed(manager servers, listing serve.Listing, id string) int {
 				id, broken.Path, broken.Err)
 		}
 	}
-	return a.fail("stop %s: cria has no server record for %s; nothing to stop", id, id)
+	return a.fail("stop %s: cria has no server record for %s; nothing to stop%s", id, id, whatIsRecorded(listing))
+}
+
+// whatIsRecorded names the entries cria does hold records for, for the refusal
+// that found none under the id it was given. A stop cria refuses is exactly the
+// moment the caller needs to know which servers cria is actually tracking — and
+// that a server it never started is not one it can stop.
+func whatIsRecorded(listing serve.Listing) string {
+	ids := make([]string, 0, len(listing.Servers)+len(listing.Broken))
+	for _, server := range listing.Servers {
+		ids = append(ids, server.EntryID)
+	}
+	for _, broken := range listing.Broken {
+		ids = append(ids, broken.EntryID)
+	}
+	if len(ids) == 0 {
+		return " (cria holds no server records at all; a server it did not start is not cria's to stop)"
+	}
+	return fmt.Sprintf(" (cria holds records for: %s)", strings.Join(ids, ", "))
 }
 
 // stopTheOnlyServer is `cria stop` with nothing named: it acts when exactly one
@@ -83,6 +103,12 @@ func (a *app) stopTheOnlyServer(manager servers, listing serve.Listing) int {
 // stopServer performs the stop and reports what it did. A record whose process
 // had already gone is not a failure: the record is removed, which is the state
 // the caller asked for (docs/specs/SERVE.md).
+//
+// The second line reports the judgement rather than a claim about the world:
+// what cria knows is that the pid is no longer the process it launched, and
+// saying only "it exited" would be a lie in the one case where it is not — a
+// record written without an identity, which matches nothing however healthy the
+// server is.
 func (a *app) stopServer(manager servers, server serve.Server) int {
 	if err := manager.Stop(server.Record); err != nil {
 		return a.fail("stop %s: %v", server.EntryID, err)
@@ -91,7 +117,8 @@ func (a *app) stopServer(manager servers, server serve.Server) int {
 		a.printf("stopped %s (pid %d on %s)\n", server.EntryID, server.PID, address(server.Record))
 		return exitOK
 	}
-	a.printf("%s had already exited; removed its record (log: %s)\n", server.EntryID, server.LogPath)
+	a.printf("%s had already exited (pid %d is no longer the process cria launched); removed its record (log: %s)\n",
+		server.EntryID, server.PID, server.LogPath)
 	return exitOK
 }
 
@@ -109,5 +136,5 @@ func whatElseIsRecorded(listing serve.Listing) string {
 	if len(held) == 0 {
 		return ""
 	}
-	return fmt.Sprintf(" (%s record(s) remain; `cria status` shows them)", strings.Join(held, " and "))
+	return fmt.Sprintf(" (%s record(s) remain; `cria status` shows them, `cria stop <id>` clears one)", strings.Join(held, " and "))
 }

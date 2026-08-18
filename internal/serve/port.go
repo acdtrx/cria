@@ -1,6 +1,9 @@
 package serve
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // PortUse is who holds a port right now, answered in the order a start has to
 // ask (docs/specs/SERVE.md): the server cria itself has running there, else
@@ -57,6 +60,25 @@ func (m *Manager) PortUse(port int) (PortUse, error) {
 		return PortUse{}, nil
 	}
 	return PortUse{Holders: holders}, nil
+}
+
+// ListensOn reports whether the pid a record names is among the processes
+// listening on that record's port, and which pids are listening either way.
+//
+// It answers a different question from liveness and from the health probe, and
+// only together do the three mean "this server is serving": the probe proves
+// something answers on the port, liveness proves cria's process is alive, and
+// this proves they are the same thing. A server started from a forgotten
+// terminal answers a probe exactly as convincingly (docs/specs/SERVE.md).
+//
+// The empty answer is honest rather than absent: a port with no listener at the
+// moment cria looked is reported as such, not as an error.
+func (m *Manager) ListensOn(record Record) (bool, []int, error) {
+	pids, err := m.host.Listeners(record.Port)
+	if err != nil {
+		return false, nil, fmt.Errorf("cannot tell which process listens on port %d: %w", record.Port, err)
+	}
+	return slices.Contains(pids, record.PID), pids, nil
 }
 
 // KillHolder ends a process that is holding a port cria did not start it on —

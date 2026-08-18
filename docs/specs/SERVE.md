@@ -11,6 +11,12 @@ observe, stop, re-attach — and the runtime state records behind it.
   file, with `HF_TOKEN` exported when the `hf` token file exists (env, never argv).
   cria is free to exit at any moment; nothing about a running server depends on a
   cria process existing.
+- The identity is captured right after the spawn, and re-asked briefly while the
+  command line settles (amended 2026-08-18): a script-installed server re-execs
+  through its interpreter within milliseconds — a uv shim does it twice — and an
+  identity captured mid-exec would read a healthy server as exited forever.
+  Capture waits, bounded, until the command names the launched program or the
+  pid is gone; only then does the record take the match-nothing zero identity.
 - Exit codes of detached servers are unobservable by design (they reparent away);
   the log tail is the crash evidence, never a collected exit status.
 
@@ -71,7 +77,11 @@ failure states.
 3. Compose the command (`docs/specs/CONFIG.md`), spawn detached, write the record.
 4. `cria start <id>` returns once the record is written; `--wait` blocks until the
    phase settles (`running` → exit 0; `exited`/`unhealthy` → non-zero) — agent
-   validation in one command.
+   validation in one command. A green verdict is corroborated by attribution
+   (amended 2026-08-18): the pid listening on the port must be the pid cria
+   spawned — a green answered by some other process fails the wait naming both
+   pids. Attribution that cannot be obtained degrades to a note, never a
+   failure: the health signal is primary, `lsof` corroborates.
 
 ## Stop
 

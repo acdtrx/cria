@@ -38,7 +38,7 @@ const (
 	StatusFound      Status = iota // resolved, and fit for what cria asks of it
 	StatusMissing                  // neither the config override nor PATH names a program cria can run
 	StatusOutdated                 // llama-server only: present, but older than hubCacheBuild
-	StatusUnverified               // llama-server only: present, version unreadable — treated as outdated
+	StatusUnverified               // llama-server only: present, but its build went unread — refused like an old one, though the cause is cria's ignorance rather than the build
 )
 
 // String names the status the way a report renders it.
@@ -118,11 +118,27 @@ func checkLlamaServer(override string, version versionRunner) Tool {
 	// question, so the exec error only matters when nothing could be parsed.
 	output, err := version(found.path)
 	build, parsed := parseBuild(output)
+	// One immediate retry, and only for a probe that could not run at all: a
+	// binary revalidating its signatures or a machine busy serving a model has
+	// been seen losing this exec, and a single failed probe is not evidence about
+	// the build. An answer — parsed, or printed in a shape cria does not read — is
+	// the tool's own reply and is never asked for twice.
+	if !parsed && err != nil {
+		output, err = version(found.path)
+		build, parsed = parseBuild(output)
+	}
 	switch {
+	case !parsed && err != nil:
+		// The probe failed, twice: cria knows nothing about this build, which is
+		// not the same as knowing it is old. The fix is to run it again, not to
+		// upgrade a llama.cpp that may well be current.
+		tool.Status = StatusUnverified
+		tool.Disables = unstartable("llama", fmt.Sprintf("`llama-server --version` could not be run (%v), twice in a row, so cria could not read this build's version", err))
+		tool.Fix = retryFix
 	case !parsed:
 		tool.Status = StatusUnverified
-		tool.Disables = unstartable("llama", versionProblem(err)+", so cria cannot confirm this build downloads into the Hugging Face hub cache")
-		tool.Fix = upgradeFix
+		tool.Disables = unstartable("llama", "`llama-server --version` reported no build number, so cria cannot confirm this build downloads into the Hugging Face hub cache")
+		tool.Fix = unreadableVersionFix
 	case build < hubCacheBuild:
 		tool.Status = StatusOutdated
 		tool.Build = build
@@ -162,9 +178,22 @@ func checkHF(override string) Tool {
 	return tool
 }
 
-// upgradeFix is the single answer to both llama-server version verdicts: the
-// build has to move past the one that shares the hub cache.
-var upgradeFix = fmt.Sprintf("upgrade llama.cpp to build %d or newer", hubCacheBuild)
+// The three answers to a llama-server cria will not use, one per verdict. Only
+// a build cria actually read and found too old is told to upgrade: advising an
+// upgrade after a probe that never ran sends the reader after a version that may
+// already be current.
+var (
+	// upgradeFix answers a build cria read and judged too old.
+	upgradeFix = fmt.Sprintf("upgrade llama.cpp to build %d or newer", hubCacheBuild)
+
+	// retryFix answers a probe that could not run: nothing was learned about the
+	// build, and the next invocation may well learn it.
+	retryFix = "the probe could not run; run cria again, and check the llama-server binary itself if it keeps failing"
+
+	// unreadableVersionFix answers a banner in a shape cria does not read: the
+	// build is on screen, so the reader can judge it where cria could not.
+	unreadableVersionFix = fmt.Sprintf("run `llama-server --version` yourself: upgrade llama.cpp if it names a build below %d, and report the banner if it names none", hubCacheBuild)
+)
 
 // unstartable phrases what a backend loses, the way the degradation principle
 // puts it: entries stay listed, they just cannot start (docs/specs/TOOLS.md).
@@ -175,15 +204,6 @@ func unstartable(backend, because string) string {
 		return line
 	}
 	return line + " (" + because + ")"
-}
-
-// versionProblem describes why no build number came back: the exec itself failed,
-// or it succeeded and printed nothing cria recognises.
-func versionProblem(err error) string {
-	if err != nil {
-		return "`llama-server --version` failed (" + err.Error() + ")"
-	}
-	return "`llama-server --version` reported no build number"
 }
 
 // resolution is one tool's lookup: where cria would exec it from, and why an

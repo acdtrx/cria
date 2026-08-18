@@ -301,6 +301,72 @@ func TestAServerThatDiedImmediatelyRecordsNoIdentity(t *testing.T) {
 	}
 }
 
+// A shimmed server does not name its program in argv straight away: a uv-shimmed
+// mlx_lm.server re-execs framework Python through Python.app within tens of
+// milliseconds of the spawn, and the argv caught in between names neither
+// program. The capture keeps looking until the pid names what cria launched —
+// recording that intermediate argv writes a record matching nothing, which makes
+// a healthy server read exited forever with no stop able to act on it.
+func TestIdentityCaptureWaitsForTheProgramToSettle(t *testing.T) {
+	host := &fakeHost{
+		interim:     map[int]procs.Identity{4242: identityOf("/opt/homebrew/opt/python@3.13/bin/python3.13")},
+		settleAfter: map[int]int{4242: 2},
+	}
+	manager := newManager(t, host)
+	record, _ := startOne(t, manager, host, llamaEntry(), 4242)
+	looks := host.identifies[4242]
+
+	if looks != 3 {
+		t.Errorf("the capture took %d looks at the process table, want the 3 the pid needed to settle", looks)
+	}
+	if record.Identity != host.alive[4242] {
+		t.Errorf("the record carries %+v, want the settled identity %+v", record.Identity, host.alive[4242])
+	}
+	live, err := manager.Live(record)
+	if err != nil {
+		t.Fatalf("judging liveness: %v", err)
+	}
+	if !live {
+		t.Error("the started server reads as exited, which is the bug this capture exists to prevent")
+	}
+}
+
+// A pid that names the program on the first look is not asked twice: the wait is
+// for a process that has not settled, not a cost every start pays.
+func TestIdentityCaptureAsksOnceWhenTheFirstAnswerNamesTheProgram(t *testing.T) {
+	host := &fakeHost{}
+	manager := newManager(t, host)
+	startOne(t, manager, host, llamaEntry(), 4242)
+
+	if looks := host.identifies[4242]; looks != 1 {
+		t.Errorf("the capture took %d looks at the process table, want 1", looks)
+	}
+}
+
+// A pid that goes while cria is still waiting for it to settle ends the wait
+// there: the server failed on its first breath, and the record takes no identity
+// — which is the truth about it.
+func TestIdentityCaptureStopsWhenThePIDIsGone(t *testing.T) {
+	host := &fakeHost{
+		interim:     map[int]procs.Identity{4242: identityOf("/opt/homebrew/opt/python@3.13/bin/python3.13")},
+		settleAfter: map[int]int{4242: 2},
+	}
+	manager := newManager(t, host)
+	spawner := &fakeSpawner{pid: 4242, output: "error: unknown argument\n"}
+	manager.spawn = spawner.launch
+
+	record, err := manager.Start(llamaEntry(), usableReport())
+	if err != nil {
+		t.Fatalf("starting: %v", err)
+	}
+	if record.Identity != (procs.Identity{}) {
+		t.Errorf("the record carries the identity %+v of a process that is not the server", record.Identity)
+	}
+	if looks := host.identifies[4242]; looks != 3 {
+		t.Errorf("the capture took %d looks, want it to stop at the 3rd, where the pid was gone", looks)
+	}
+}
+
 // A process table that fails right after the spawn is a broken host, and it is
 // reported as one — with the pid and the log of the server that is now running
 // unidentified.

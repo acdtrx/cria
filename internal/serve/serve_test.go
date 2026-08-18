@@ -27,11 +27,25 @@ type fakeHost struct {
 	dieOnTerm  bool                // the process exits when it is asked to
 	dieOnKill  bool                // ... and when it is killed
 	failWith   error               // Identify answers with this instead of the table
+
+	// What a pid looks like before it settles, and for how many looks: the shape
+	// a shimmed server has on the host for the first tens of milliseconds after
+	// its spawn, when its argv names neither the shim nor the program.
+	interim     map[int]procs.Identity
+	settleAfter map[int]int
+	identifies  map[int]int // how many times Identify was asked about each pid
 }
 
 func (h *fakeHost) Identify(pid int) (procs.Identity, bool, error) {
 	if h.failWith != nil {
 		return procs.Identity{}, false, h.failWith
+	}
+	if h.identifies == nil {
+		h.identifies = map[int]int{}
+	}
+	h.identifies[pid]++
+	if interim, scripted := h.interim[pid]; scripted && h.identifies[pid] <= h.settleAfter[pid] {
+		return interim, true, nil
 	}
 	identity, found := h.alive[pid]
 	return identity, found, nil
@@ -111,6 +125,8 @@ func newManager(t *testing.T, host procs.Host) *Manager {
 	manager.grace = 50 * time.Millisecond
 	manager.confirm = 50 * time.Millisecond
 	manager.poll = time.Millisecond
+	manager.settle = 50 * time.Millisecond
+	manager.settlePoll = time.Millisecond
 	return manager
 }
 

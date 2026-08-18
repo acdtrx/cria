@@ -187,8 +187,12 @@ func (a *app) await(manager servers, record serve.Record) int {
 
 		switch status.Phase {
 		case serve.PhaseRunning:
+			if refusal := a.listenerRefusal(manager, record); refusal != "" {
+				return a.fail("start %s: %s", record.EntryID, refusal)
+			}
 			a.printf("%s is running after %s: %s answered %s\n",
 				record.EntryID, since(began), status.Health.URL, status.Health.Detail)
+			a.noteFirstRequestCost(record)
 			return exitOK
 		case serve.PhaseExited:
 			return a.fail("start %s: it exited after %s without serving; its log is the crash report: %s",
@@ -212,6 +216,59 @@ func (a *app) await(manager servers, record serve.Record) int {
 		// another process and there is no event to wait on (CODING-RULES §6).
 		time.Sleep(a.poll)
 	}
+}
+
+// listenerRefusal is why a green port is not proof that the server cria started
+// is the one answering it, or the empty string when nothing contradicts the
+// health signal.
+//
+// It is asked only once the probe has gone green, which is what makes a mismatch
+// meaningful: a server still coming up holds no port yet and is nobody's
+// contradiction, while a green port held by another pid means cria was about to
+// report a start that never happened — the answering server is someone else's
+// (docs/specs/SERVE.md).
+//
+// The health signal is primary and this is corroboration, so a port lookup cria
+// could not run leaves the verdict standing: `lsof` degrades attribution only
+// (docs/specs/TOOLS.md), and failing a start because a diagnostic could not run
+// would refuse servers that are demonstrably serving.
+func (a *app) listenerRefusal(manager servers, record serve.Record) string {
+	listening, pids, err := manager.ListensOn(record)
+	if err != nil {
+		a.note("cannot confirm that pid %d is what answers on port %d: %v", record.PID, record.Port, err)
+		return ""
+	}
+	if listening {
+		return ""
+	}
+	return fmt.Sprintf("port :%d answers, but the listener is not the server cria started (pid %d, listener(s) %s)",
+		record.Port, record.PID, listenerPIDs(pids))
+}
+
+// listenerPIDs spells who holds a port, for the refusal that has to name them. A
+// port with nothing listening at the moment cria looked is said so rather than
+// left blank.
+func listenerPIDs(pids []int) string {
+	if len(pids) == 0 {
+		return "none"
+	}
+	numbers := make([]string, 0, len(pids))
+	for _, pid := range pids {
+		numbers = append(numbers, strconv.Itoa(pid))
+	}
+	return strings.Join(numbers, ", ")
+}
+
+// noteFirstRequestCost warns that a green mlx server has not finished the work a
+// caller expects it to have finished: mlx_lm.server answers /v1/models before it
+// has loaded any weights, and loads them on the first request instead. The
+// verdict is still running — the server is serving — so this is an aside, not a
+// phase.
+func (a *app) noteFirstRequestCost(record serve.Record) {
+	if record.Backend != config.BackendMLX {
+		return
+	}
+	a.note("mlx_lm.server loads model weights on the first request; the first completion bears that cost")
 }
 
 // address is where a server listens, as its record spells it.

@@ -228,6 +228,7 @@ func TestCheckJudgesTheLlamaServerBuild(t *testing.T) {
 		wantStatus Status
 		wantBuild  int
 		wantCause  string
+		wantFix    []string
 	}{
 		{
 			name:       "a current build",
@@ -247,6 +248,7 @@ func TestCheckJudgesTheLlamaServerBuild(t *testing.T) {
 			wantStatus: StatusOutdated,
 			wantBuild:  hubCacheBuild - 1,
 			wantCause:  "~/.cache/llama.cpp",
+			wantFix:    []string{"upgrade llama.cpp", strconv.Itoa(hubCacheBuild)},
 		},
 		{
 			name:       "an ancient build",
@@ -254,23 +256,31 @@ func TestCheckJudgesTheLlamaServerBuild(t *testing.T) {
 			wantStatus: StatusOutdated,
 			wantBuild:  4000,
 			wantCause:  "~/.cache/llama.cpp",
+			wantFix:    []string{"upgrade llama.cpp", strconv.Itoa(hubCacheBuild)},
 		},
 		{
+			// The tool answered in a shape cria does not read: the build is on
+			// screen, so the fix sends the reader to look at it.
 			name:       "output cria cannot read",
 			output:     "llama-server: unrecognized option '--version'\n",
 			wantStatus: StatusUnverified,
 			wantCause:  "reported no build number",
+			wantFix:    []string{"run `llama-server --version` yourself", strconv.Itoa(hubCacheBuild)},
 		},
 		{
 			name:       "no output at all",
 			wantStatus: StatusUnverified,
 			wantCause:  "reported no build number",
+			wantFix:    []string{"run `llama-server --version` yourself"},
 		},
 		{
+			// The probe never ran, so nothing was learned about the build: the fix
+			// is another attempt, not an upgrade of a llama.cpp that may be current.
 			name:       "the version command itself failed",
 			err:        execFailed,
 			wantStatus: StatusUnverified,
 			wantCause:  execFailed.Error(),
+			wantFix:    []string{"the probe could not run", "run cria again"},
 		},
 		{
 			// A program that answered and still exited badly has answered.
@@ -307,9 +317,104 @@ func TestCheckJudgesTheLlamaServerBuild(t *testing.T) {
 			if !strings.Contains(llama.Disables, "llama entries") || !strings.Contains(llama.Disables, test.wantCause) {
 				t.Errorf("llama-server disables %q, want it to name llama entries and %q", llama.Disables, test.wantCause)
 			}
-			// Both verdicts have the same answer: move the build past the threshold.
-			if !strings.Contains(llama.Fix, "upgrade llama.cpp") || !strings.Contains(llama.Fix, strconv.Itoa(hubCacheBuild)) {
-				t.Errorf("llama-server fix is %q, want it to name the upgrade and build %d", llama.Fix, hubCacheBuild)
+			// Each verdict carries the answer that matches what cria actually
+			// learned: upgrade a build it read and judged, look at a banner it
+			// could not read, run again after a probe that never ran.
+			for _, want := range test.wantFix {
+				if !strings.Contains(llama.Fix, want) {
+					t.Errorf("llama-server fix is %q, want it to contain %q", llama.Fix, want)
+				}
+			}
+			if test.wantStatus != StatusOutdated && strings.Contains(llama.Fix, "upgrade llama.cpp to build") {
+				t.Errorf("llama-server fix is %q, but no build was read to call old", llama.Fix)
+			}
+		})
+	}
+}
+
+// versionAnswer is one reply from `llama-server --version`: what it printed and
+// whether the exec itself came back.
+type versionAnswer struct {
+	output string
+	err    error
+}
+
+// The version probe is retried once, and only when the exec itself failed: a
+// single lost exec — a binary revalidating its signatures, a machine busy
+// serving a model — is not evidence about the build. An answer, readable or not,
+// is the tool's own reply and is never asked for twice.
+func TestTheVersionProbeIsRetriedOnceWhenItCannotRun(t *testing.T) {
+	execFailed := errors.New("signal: killed")
+
+	tests := []struct {
+		name       string
+		answers    []versionAnswer
+		wantStatus Status
+		wantBuild  int
+		wantRuns   int
+		wantFix    string
+	}{
+		{
+			name:       "the first exec fails and the second answers",
+			answers:    []versionAnswer{{err: execFailed}, {output: versionOutput(10450)}},
+			wantStatus: StatusFound,
+			wantBuild:  10450,
+			wantRuns:   2,
+		},
+		{
+			name:       "both execs fail",
+			answers:    []versionAnswer{{err: execFailed}, {err: execFailed}},
+			wantStatus: StatusUnverified,
+			wantRuns:   2,
+			wantFix:    "the probe could not run",
+		},
+		{
+			name:       "a parsed answer is never asked for twice",
+			answers:    []versionAnswer{{output: versionOutput(10450)}},
+			wantStatus: StatusFound,
+			wantBuild:  10450,
+			wantRuns:   1,
+		},
+		{
+			name:       "an old build is a parsed answer too",
+			answers:    []versionAnswer{{output: fmt.Sprintf("version: %d (2b6c8e1d1)\n", hubCacheBuild-1)}},
+			wantStatus: StatusOutdated,
+			wantBuild:  hubCacheBuild - 1,
+			wantRuns:   1,
+			wantFix:    "upgrade llama.cpp",
+		},
+		{
+			name:       "output cria cannot read is still an answer",
+			answers:    []versionAnswer{{output: "llama-server: unrecognized option '--version'\n"}},
+			wantStatus: StatusUnverified,
+			wantRuns:   1,
+			wantFix:    "run `llama-server --version` yourself",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pathWith(t, LlamaServer)
+			runs := 0
+			version := func(string) (string, error) {
+				answer := test.answers[min(runs, len(test.answers)-1)]
+				runs++
+				return answer.output, answer.err
+			}
+
+			llama := check(config.Settings{}, version).LlamaServer
+
+			if runs != test.wantRuns {
+				t.Errorf("cria ran `llama-server --version` %d times, want %d", runs, test.wantRuns)
+			}
+			if llama.Status != test.wantStatus {
+				t.Fatalf("llama-server is %s (%s), want %s", llama.Status, llama.Disables, test.wantStatus)
+			}
+			if llama.Build != test.wantBuild {
+				t.Errorf("llama-server build is %d, want %d", llama.Build, test.wantBuild)
+			}
+			if test.wantFix != "" && !strings.Contains(llama.Fix, test.wantFix) {
+				t.Errorf("llama-server fix is %q, want it to contain %q", llama.Fix, test.wantFix)
 			}
 		})
 	}

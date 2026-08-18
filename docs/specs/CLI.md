@@ -12,6 +12,16 @@ its subsystem.
 - `cria stop [<id>]` — `docs/specs/SERVE.md`.
 - `cria status [--json]` — `docs/specs/SERVE.md`.
 - `cria docs` — prints the config schema and full examples; `docs/specs/CONFIG.md`.
+- `cria list [--paths]` (settled 2026-08-18) — one aligned line per entry (id,
+  backend, repo:quant, port; `--paths` appends the entry's file — how an agent
+  locates a profile), refused files listed after with their key errors; an
+  empty tree points at `cria docs` and exits 0 (an empty list is a true answer).
+- `cria edit <id>` (settled 2026-08-18) — opens `$VISUAL`, else `$EDITOR`, on
+  the entry's file (broken entries included — that is the point) and waits;
+  the user's editor writes, cria still never does. Neither variable set, an
+  unknown id, or a non-zero editor exit refuse with exit 1.
+- `cria --help` / `-h` / `help` — one page: the subcommands, the flags, the
+  exit-code rule, and the pointers agents need (`cria docs`, the validate loop).
 - `cria wired-limit <MB>` (settled 2026-08-18, user-designed) — generates the
   launchd plist that pins `iogpu.wired_limit_mb` at boot (Apple-silicon Macs
   reset it, and big models need the headroom): the plist to **stdout** so a
@@ -22,6 +32,9 @@ its subsystem.
   steps in a comment.
 
 Nothing else: no cache operations, no scaffolding (`docs/BACKLOG.md`).
+
+Flags: `--wait` on start, `--json` on status, `--paths` on list, `--version` and
+`--help` on the bare binary — nothing else speaks machine or takes options.
 
 ## Rules
 

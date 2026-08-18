@@ -38,8 +38,14 @@ each one's absence disables.
   private download cache, launching by Hub reference would put bytes where cria's
   cache view, download progress and surgery cannot see them — breaking the
   single-source-of-truth principle. The report names the fix: upgrade llama.cpp.
-- An unparseable version is reported as "unverified" and treated as too old —
-  loud-and-absent over silent-and-plausible (CODING-RULES §4).
+- An unverifiable build still disables llama serving — loud-and-absent over
+  silent-and-plausible (CODING-RULES §4) — but the report distinguishes the
+  three ways of not knowing (amended 2026-08-18, after a busy machine's killed
+  probe was answered with "upgrade llama.cpp" about a current build): a probe
+  that could not *run* retries once and then advises retrying, not upgrading; a
+  probe that ran but printed no recognizable build advises checking the banner
+  by hand; only a build that was actually read and is actually old gets the
+  upgrade advice.
 
 ## Degradation principle
 
