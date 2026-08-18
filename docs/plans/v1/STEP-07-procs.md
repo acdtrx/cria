@@ -1,6 +1,18 @@
 # Step 7 — procs: ps/lsof ownership
 
-**Phase 3 · Status: not started**
+**Phase 3 · Status: done (2026-08-18)** — suite green (table tests on canned
+output + integration tests against processes the suite starts itself), all
+gates pass; live probe found a real llama-server and mlx_lm.server with
+identity, cwd and port attribution. Findings against reality: `ps -o comm=`
+is unusable (a script-installed mlx_lm.server reports its Python interpreter;
+relative-path starts truncate to 16 chars) — matching is argv[0] basename or a
+path-shaped argv[1]; `lstart` is locale-dependent, so every exec pins
+`LC_ALL=C`; `-o command=` does not truncate (`-ww` kept for Linux procps);
+`-A` not `-e` (macOS reads `-e` as environment). Deviations accepted: no
+build-tag seam (the flag set is common to macOS and Linux — a seam with
+nothing behind it); `Listeners` returns all pids on a port (dual-stack and
+forked servers genuinely hold several — serve chooses how to report); signal
+delivery refuses pid < 1 (kill(2) group semantics).
 
 ## Intent
 
