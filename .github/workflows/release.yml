@@ -1,4 +1,6 @@
-# A semver tag becomes a GitHub Release carrying one binary per target. Asset
+# A v-prefixed semver tag (v0.2.2) becomes a GitHub Release carrying one binary
+# per target; a bare semver tag (0.2.3) is an anchor and builds nothing — the
+# prefix is how a tag chooses to ship (CLAUDE.md, Git). Asset
 # names are unversioned so the stable releases/latest/download URLs — what
 # install.sh fetches — never change; the version lives in the tag, in the
 # checksums file, and inside the binary (main.version via ldflags). darwin/arm64
@@ -8,7 +10,7 @@ name: release
 
 on:
   push:
-    tags: ["[0-9]*"]
+    tags: ["v[0-9]*"]
 
 permissions:
   contents: write
@@ -25,8 +27,8 @@ jobs:
         run: go test ./... -count=1
       - name: build darwin/arm64
         run: |
-          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o cria .
-          ./cria --version | grep -F "${GITHUB_REF_NAME}"
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o cria .
+          ./cria --version | grep -F "${GITHUB_REF_NAME#v}"
           tar -czf cria_darwin_arm64.tar.gz cria
       - uses: actions/upload-artifact@v4
         with:
@@ -44,10 +46,10 @@ jobs:
         run: go test ./... -count=1 -short
       - name: build linux/amd64 and linux/arm64
         run: |
-          CGO_ENABLED=0 GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o cria .
-          ./cria --version | grep -F "${GITHUB_REF_NAME}"
+          CGO_ENABLED=0 GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o cria .
+          ./cria --version | grep -F "${GITHUB_REF_NAME#v}"
           tar -czf cria_linux_amd64.tar.gz cria
-          CGO_ENABLED=0 GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o cria .
+          CGO_ENABLED=0 GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o cria .
           tar -czf cria_linux_arm64.tar.gz cria
       - uses: actions/upload-artifact@v4
         with:

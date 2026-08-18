@@ -185,7 +185,10 @@ history-narrating comment you meet up to this rule.
   merges and **always immediately before a large plan's implementation begins** — the
   tag names the world the plan started from, for diffing and for bailing out. The
   message says what the anchor holds in one line. Tags push to every remote alongside
-  main (settled 2026-08-18, when `cala` became the first remote). `[PROJECT]`
+  main (settled 2026-08-18, when `cala` became the first remote). A **v-prefixed**
+  tag (`v0.2.2`) additionally triggers the GitHub release build; a bare tag
+  (`0.2.3`) is an anchor only — the prefix is how a tag chooses to ship (settled
+  2026-08-18). `[PROJECT]`
 
 ## Deployability `[PROJECT]`
 
