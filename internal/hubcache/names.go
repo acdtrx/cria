@@ -27,6 +27,14 @@ var shardSuffix = regexp.MustCompile(`-(\d{5})-of-(\d{5})$`)
 // matching ignores case too, and older repos write theirs in lower case.
 var quantToken = regexp.MustCompile(`(?i)^(?:[IT]?Q\d[0-9A-Z_]*|B?F(?:16|32)|MXFP4[0-9A-Z_]*)$`)
 
+// udPrefix is the token unsloth puts in front of its dynamic quantizations, and
+// it belongs to the tag rather than to the model name: llama.cpp resolves
+// `-hf repo:TAG` through the Hub's manifest endpoint, which serves the full
+// UD-Q4_K_XL spelling unsloth's own documentation tells people to ask for. A
+// label that dropped it would leave the documented entry value matching
+// nothing — neither the item on disk nor the Hub's size for it.
+const udPrefix = "UD"
+
 // parseRepoDir reads a cache directory name — models--org--name — into the Hub
 // namespace and the repo id it stands for. The separator is the same "--" the Hub
 // folder convention substitutes for "/", so a repo id that itself contains "--"
@@ -59,19 +67,74 @@ func splitShard(name string) (base string, index, count int, sharded bool) {
 }
 
 // quantLabel names the quantization a GGUF file holds, read off its name: the
-// last token that spells a ggml type. Repos put the tag last by convention
+// last token that spells a ggml type, carrying unsloth's UD- prefix with it
+// when the name has one. Repos put the tag last by convention
 // (Qwen3-30B-A3B-UD-Q4_K_XL.gguf), so taking the last match keeps a model name
 // that happens to contain something tag-shaped from winning over the real tag.
+//
+// That one prefix is the only token absorbed, and only directly before the
+// type: every other token ahead of it is model name (gemma-4-26B-it-qat-Q4_K_XL
+// is a Q4_K_XL, not a qat-Q4_K_XL).
 func quantLabel(name string) (string, bool) {
 	base, _, _, _ := splitShard(name)
 	stem := strings.TrimSuffix(base, filepath.Ext(base))
 	tokens := strings.Split(stem, "-")
 	for i := len(tokens) - 1; i >= 0; i-- {
-		if quantToken.MatchString(tokens[i]) {
-			return tokens[i], true
+		if !quantToken.MatchString(tokens[i]) {
+			continue
 		}
+		if i > 0 && strings.EqualFold(tokens[i-1], udPrefix) {
+			return tokens[i-1] + "-" + tokens[i], true
+		}
+		return tokens[i], true
 	}
 	return "", false
+}
+
+// MatchQuant picks which of a repo's item labels the quant a config entry names
+// refers to, and reports its position. The labels are the cache's items or the
+// ones the Hub's file listing spells; a label repeated across shards is the one
+// item it names, not several.
+//
+// Matching ignores case, the way llama-server's `-hf repo:TAG` does. An entry
+// that spells the tag without unsloth's UD- prefix — or with one the repo's
+// files omit — still finds its item, but only when nothing matches outright and
+// exactly one label matches with the prefix set aside. A repo publishing both
+// spellings is two items, and cria will not guess which one was meant: it
+// reports the quant absent, which is visible, where a guess would be plausible
+// and wrong (CODING-RULES §4).
+func MatchQuant(labels []string, quant string) (int, bool) {
+	for i, label := range labels {
+		if strings.EqualFold(label, quant) {
+			return i, true
+		}
+	}
+
+	wanted := withoutUD(quant)
+	match, hits := 0, 0
+	for i, label := range labels {
+		if !strings.EqualFold(withoutUD(label), wanted) {
+			continue
+		}
+		if hits > 0 && label == labels[match] {
+			continue // another shard of the item already matched
+		}
+		match, hits = i, hits+1
+	}
+	if hits != 1 {
+		return 0, false
+	}
+	return match, true
+}
+
+// withoutUD sets unsloth's dynamic-quantization prefix aside, so the two
+// spellings of one quantization can be compared.
+func withoutUD(tag string) string {
+	prefix := udPrefix + "-"
+	if len(tag) > len(prefix) && strings.EqualFold(tag[:len(prefix)], prefix) {
+		return tag[len(prefix):]
+	}
+	return tag
 }
 
 // itemLabel is the name a GGUF file's item carries: its quantization when the
@@ -94,6 +157,18 @@ func itemLabel(name string) string {
 		return label
 	}
 	return stem
+}
+
+// GGUFItem names the item a file belongs to and reports whether it is a GGUF
+// file at all — the whole rule for which files make up one quantization, in one
+// place. internal/hubapi asks it the same question of the Hub's file listing
+// that the walk asks of the cache, so the bytes on disk and the bytes still to
+// come are counted over the same set of files (docs/specs/SERVE.md).
+func GGUFItem(name string) (string, bool) {
+	if !hasExt(name, ".gguf") {
+		return "", false
+	}
+	return itemLabel(name), true
 }
 
 // isProjector reports whether a file is a multimodal projector, which both

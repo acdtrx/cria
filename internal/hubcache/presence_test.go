@@ -32,14 +32,21 @@ func TestPresenceOfALlamaEntry(t *testing.T) {
 		want  Presence
 	}{
 		{
+			// The tag as unsloth documents it and as the file spells it.
 			name:  "the quant is on disk",
+			entry: config.Entry{Backend: config.BackendLlama, Repo: "unsloth/Qwen3.8-27B-GGUF", Quant: "UD-Q4_K_XL"},
+			want:  Presence{Cached: true, Bytes: 3000},
+		},
+		{
+			// The same tag written without the prefix: one item answers to it.
+			name:  "the quant is on disk, spelled without the UD prefix",
 			entry: config.Entry{Backend: config.BackendLlama, Repo: "unsloth/Qwen3.8-27B-GGUF", Quant: "Q4_K_XL"},
 			want:  Presence{Cached: true, Bytes: 3000},
 		},
 		{
 			// llama-server's -hf repo:TAG matching ignores case, so the answer must too.
 			name:  "the quant is on disk, spelled in another case",
-			entry: config.Entry{Backend: config.BackendLlama, Repo: "unsloth/Qwen3.8-27B-GGUF", Quant: "q4_k_xl"},
+			entry: config.Entry{Backend: config.BackendLlama, Repo: "unsloth/Qwen3.8-27B-GGUF", Quant: "ud-q4_k_xl"},
 			want:  Presence{Cached: true, Bytes: 3000},
 		},
 		{

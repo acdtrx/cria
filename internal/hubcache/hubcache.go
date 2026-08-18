@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -152,13 +151,17 @@ func (c *Cache) Repo(id string) (*Repo, bool) {
 	return nil, false
 }
 
-// Item finds the quantization a llama entry names. The match ignores case because
-// llama-server's `-hf org/repo:TAG` matches the file name that way.
-func (r *Repo) Item(label string) (*Item, bool) {
+// Item finds the quantization a llama entry names, by the rule MatchQuant
+// holds: the spellings llama-server would accept for the same tag all find the
+// same item.
+func (r *Repo) Item(quant string) (*Item, bool) {
+	labels := make([]string, len(r.Items))
 	for i := range r.Items {
-		if strings.EqualFold(r.Items[i].Label, label) {
-			return &r.Items[i], true
-		}
+		labels[i] = r.Items[i].Label
 	}
-	return nil, false
+	match, found := MatchQuant(labels, quant)
+	if !found {
+		return nil, false
+	}
+	return &r.Items[match], true
 }

@@ -13,13 +13,13 @@ func TestQuantLabelReadsTheTagOffTheFileName(t *testing.T) {
 	}{
 		{"LFM2.5-2.6B-Q8_0.gguf", "Q8_0"},
 		{"Qwen3-Embedding-0.6B-Q8_0.gguf", "Q8_0"},
-		{"gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf", "Q4_K_XL"},
-		{"Qwen3.6-35B-A3B-UD-IQ2_M.gguf", "IQ2_M"},
-		{"NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-Q4_K_XL.gguf", "Q4_K_XL"},
+		{"gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf", "UD-Q4_K_XL"},
+		{"Qwen3.6-35B-A3B-UD-IQ2_M.gguf", "UD-IQ2_M"},
+		{"NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-Q4_K_XL.gguf", "UD-Q4_K_XL"},
 		{"Qwen3-30B-A3B-TQ1_0.gguf", "TQ1_0"},
 		{"gpt-oss-20b-MXFP4.gguf", "MXFP4"},
 		{"qwen2.5-coder-3b-instruct-q4_k_m.gguf", "q4_k_m"},
-		{"Qwen3-235B-UD-Q4_K_XL-00002-of-00003.gguf", "Q4_K_XL"},
+		{"Qwen3-235B-UD-Q4_K_XL-00002-of-00003.gguf", "UD-Q4_K_XL"},
 		{"Qwen3-30B-A3B-Q4_K_M-imat.gguf", "Q4_K_M"},
 	}
 	for _, test := range tests {
@@ -30,6 +30,122 @@ func TestQuantLabelReadsTheTagOffTheFileName(t *testing.T) {
 			}
 			if label != test.label {
 				t.Errorf("%q reads as %q, want %q", test.name, label, test.label)
+			}
+		})
+	}
+}
+
+// unsloth's UD- is part of the tag, not of the model name: it is the spelling
+// its documentation gives and the one llama-server resolves, so the label keeps
+// it. Nothing else in front of the type is absorbed.
+func TestTheUDPrefixIsPartOfTheTag(t *testing.T) {
+	tests := []struct {
+		name  string
+		label string
+	}{
+		{"Qwen3-30B-A3B-UD-Q2_K_XL.gguf", "UD-Q2_K_XL"},
+		{"Qwen3-235B-UD-Q4_K_XL-00002-of-00003.gguf", "UD-Q4_K_XL"},
+		{"Qwen3-30B-A3B-ud-q2_k_xl.gguf", "ud-q2_k_xl"},
+		// Model-name tokens that sit where the prefix does stay model name.
+		{"gemma-4-26B-A4B-it-qat-Q4_K_XL.gguf", "Q4_K_XL"},
+		{"Qwen3-30B-A3B-BF16.gguf", "BF16"},
+		{"Qwen3-30B-A3B-Q4_K_M-imat.gguf", "Q4_K_M"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			label, ok := quantLabel(test.name)
+			if !ok {
+				t.Fatalf("no quantization read from %q, want %q", test.name, test.label)
+			}
+			if label != test.label {
+				t.Errorf("%q reads as %q, want %q", test.name, label, test.label)
+			}
+		})
+	}
+}
+
+// An entry names a quant the way its author spells it, and llama-server accepts
+// the tag with or without unsloth's prefix. The lookup follows: an exact
+// spelling always wins, one unambiguous item answers for a tag spelled the
+// other way, and anything ambiguous is reported absent rather than guessed.
+func TestMatchQuantAcceptsBothSpellingsOfATag(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels []string
+		quant  string
+		want   string
+	}{
+		{
+			name:   "the spelling the repo uses",
+			labels: []string{"UD-Q2_K_XL", "Q8_0"},
+			quant:  "UD-Q2_K_XL",
+			want:   "UD-Q2_K_XL",
+		},
+		{
+			name:   "the tag without the prefix the files carry",
+			labels: []string{"UD-Q2_K_XL", "Q8_0"},
+			quant:  "Q2_K_XL",
+			want:   "UD-Q2_K_XL",
+		},
+		{
+			name:   "the tag with a prefix the files omit",
+			labels: []string{"Q4_K_M", "Q8_0"},
+			quant:  "UD-Q4_K_M",
+			want:   "Q4_K_M",
+		},
+		{
+			name:   "either spelling in either case",
+			labels: []string{"ud-q2_k_xl"},
+			quant:  "Q2_K_XL",
+			want:   "ud-q2_k_xl",
+		},
+		{
+			name:   "an exact match beats one that needs the prefix set aside",
+			labels: []string{"UD-Q4_K_XL", "Q4_K_XL"},
+			quant:  "Q4_K_XL",
+			want:   "Q4_K_XL",
+		},
+		{
+			// Every shard of one item carries the item's label; they are one
+			// item, not several candidates.
+			name:   "the shards of one item are one item",
+			labels: []string{"UD-Q4_K_XL", "UD-Q4_K_XL", "UD-Q4_K_XL"},
+			quant:  "Q4_K_XL",
+			want:   "UD-Q4_K_XL",
+		},
+		{
+			// A repo that published the same tag in two spellings holds two
+			// items; nothing in the entry says which one it meant.
+			name:   "two items answer to the same tag",
+			labels: []string{"UD-Q4_K_XL", "ud-q4_k_xl"},
+			quant:  "Q4_K_XL",
+		},
+		{
+			name:   "a tag the repo does not publish",
+			labels: []string{"UD-Q2_K_XL", "Q8_0"},
+			quant:  "Q4_K_M",
+		},
+		{
+			name:   "a projector is never the answer to a quant",
+			labels: []string{"mmproj-BF16"},
+			quant:  "BF16",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			match, found := MatchQuant(test.labels, test.quant)
+			if !found {
+				if test.want != "" {
+					t.Fatalf("%q matched nothing in %v, want %q", test.quant, test.labels, test.want)
+				}
+				return
+			}
+			if test.want == "" {
+				t.Fatalf("%q matched %q in %v, want no match", test.quant, test.labels[match], test.labels)
+			}
+			if test.labels[match] != test.want {
+				t.Errorf("%q matched %q in %v, want %q", test.quant, test.labels[match], test.labels, test.want)
 			}
 		})
 	}
@@ -76,6 +192,37 @@ func TestProjectorsAreNeverQuantItems(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if label := itemLabel(test.name); label != test.label {
+				t.Errorf("%q becomes item %q, want %q", test.name, label, test.label)
+			}
+		})
+	}
+}
+
+// GGUFItem is the rule internal/hubapi shares to sum the same files off the
+// Hub's listing that the walk finds on disk, so it has to answer for a repo's
+// non-weight files too — and for the extension in whatever case a repo spells
+// it.
+func TestGGUFItemAnswersOnlyForGGUFFiles(t *testing.T) {
+	tests := []struct {
+		name  string
+		label string
+		gguf  bool
+	}{
+		{name: "Qwen3-30B-A3B-Q4_K_M.gguf", label: "Q4_K_M", gguf: true},
+		{name: "BF16/Qwen3-30B-A3B-BF16-00001-of-00002.gguf", label: "BF16", gguf: true},
+		{name: "Qwen3-30B-A3B-Q4_K_M.GGUF", label: "Q4_K_M", gguf: true},
+		{name: "mmproj-BF16.gguf", label: "mmproj-BF16", gguf: true},
+		{name: "config.json"},
+		{name: "README.md"},
+		{name: "model-00001-of-00002.safetensors"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			label, gguf := GGUFItem(test.name)
+			if gguf != test.gguf {
+				t.Fatalf("%q reads as gguf=%v, want %v", test.name, gguf, test.gguf)
+			}
+			if label != test.label {
 				t.Errorf("%q becomes item %q, want %q", test.name, label, test.label)
 			}
 		})

@@ -40,14 +40,14 @@ func TestReadListsAGGUFRepoQuantByQuant(t *testing.T) {
 	if repo.Revision != "revision-one" {
 		t.Errorf("the current revision is %q, want revision-one", repo.Revision)
 	}
-	want := []string{"IQ2_M", "Q4_K_XL", "mmproj-BF16", "mtp-gemma-4-26B-A4B-it"}
+	want := []string{"UD-IQ2_M", "UD-Q4_K_XL", "mmproj-BF16", "mtp-gemma-4-26B-A4B-it"}
 	if got := itemLabels(repo); !reflect.DeepEqual(got, want) {
 		t.Fatalf("the repo lists %v, want %v", got, want)
 	}
 	for _, test := range []struct {
 		label string
 		bytes int64
-	}{{"Q4_K_XL", 4000}, {"IQ2_M", 2000}, {"mmproj-BF16", 500}, {"mtp-gemma-4-26B-A4B-it", 300}} {
+	}{{"UD-Q4_K_XL", 4000}, {"UD-IQ2_M", 2000}, {"mmproj-BF16", 500}, {"mtp-gemma-4-26B-A4B-it", 300}} {
 		item, ok := repo.Item(test.label)
 		if !ok {
 			t.Fatalf("the repo has no item %q", test.label)
@@ -84,29 +84,80 @@ func TestReadFoldsShardsIntoOneItem(t *testing.T) {
 
 	repo := repoOf(t, read(t, tree.Root), "unsloth/Qwen3-235B-GGUF")
 
-	if got, want := itemLabels(repo), []string{"Q2_K_XL", "Q4_K_XL"}; !reflect.DeepEqual(got, want) {
+	if got, want := itemLabels(repo), []string{"UD-Q2_K_XL", "UD-Q4_K_XL"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("the repo lists %v, want %v", got, want)
 	}
 
-	whole, _ := repo.Item("Q4_K_XL")
+	whole, _ := repo.Item("UD-Q4_K_XL")
 	if len(whole.Files) != 3 {
-		t.Errorf("Q4_K_XL has %d files, want its 3 shards", len(whole.Files))
+		t.Errorf("UD-Q4_K_XL has %d files, want its 3 shards", len(whole.Files))
 	}
 	if whole.Bytes != 2500 {
-		t.Errorf("Q4_K_XL holds %d bytes, want the 2500 its shards sum to", whole.Bytes)
+		t.Errorf("UD-Q4_K_XL holds %d bytes, want the 2500 its shards sum to", whole.Bytes)
 	}
 	if !whole.Complete {
-		t.Error("Q4_K_XL is reported incomplete, but all 3 of its shards are on disk")
+		t.Error("UD-Q4_K_XL is reported incomplete, but all 3 of its shards are on disk")
 	}
 
 	// The second quant names two shards and only one arrived: the item exists,
 	// and it is not servable.
-	half, _ := repo.Item("Q2_K_XL")
+	half, _ := repo.Item("UD-Q2_K_XL")
 	if half.Complete {
-		t.Error("Q2_K_XL is reported complete, but shard 2 of 2 is missing")
+		t.Error("UD-Q2_K_XL is reported complete, but shard 2 of 2 is missing")
 	}
 	if repo.Complete {
 		t.Error("the repo is reported complete, but one of its shard series is short")
+	}
+}
+
+// A repo that publishes a dynamic quantization beside a plain one holds two
+// items: unsloth's prefix is part of the tag, so the two keep their own rows —
+// and their own deletes. An entry that spells the tag either way still finds
+// the one item that answers to it.
+func TestReadKeepsUDQuantsApartFromPlainOnes(t *testing.T) {
+	tree := newCacheTree(t)
+	tree.repo("models--unsloth--Qwen3-30B-A3B-GGUF").
+		snapshot("revision-one",
+			cachedFile{name: "Qwen3-30B-A3B-UD-Q4_K_XL.gguf", size: 4000},
+			cachedFile{name: "Qwen3-30B-A3B-Q4_K_M.gguf", size: 3000},
+			cachedFile{name: "Qwen3-30B-A3B-UD-Q2_K_XL-00001-of-00002.gguf", size: 900},
+			cachedFile{name: "Qwen3-30B-A3B-UD-Q2_K_XL-00002-of-00002.gguf", size: 600}).
+		main("revision-one")
+
+	repo := repoOf(t, read(t, tree.Root), "unsloth/Qwen3-30B-A3B-GGUF")
+
+	want := []string{"Q4_K_M", "UD-Q2_K_XL", "UD-Q4_K_XL"}
+	if got := itemLabels(repo); !reflect.DeepEqual(got, want) {
+		t.Fatalf("the repo lists %v, want %v", got, want)
+	}
+	for _, test := range []struct {
+		quant string
+		label string
+		files int
+		bytes int64
+	}{
+		{quant: "UD-Q4_K_XL", label: "UD-Q4_K_XL", files: 1, bytes: 4000},
+		{quant: "Q4_K_M", label: "Q4_K_M", files: 1, bytes: 3000},
+		{quant: "UD-Q2_K_XL", label: "UD-Q2_K_XL", files: 2, bytes: 1500},
+		// The tag spelled without the prefix the files carry: one item answers,
+		// so the entry finds it.
+		{quant: "Q2_K_XL", label: "UD-Q2_K_XL", files: 2, bytes: 1500},
+		// And with a prefix the file does not carry.
+		{quant: "UD-Q4_K_M", label: "Q4_K_M", files: 1, bytes: 3000},
+	} {
+		t.Run(test.quant, func(t *testing.T) {
+			item, ok := repo.Item(test.quant)
+			if !ok {
+				t.Fatalf("the repo has no item for %q; it lists %v", test.quant, itemLabels(repo))
+			}
+			if item.Label != test.label {
+				t.Fatalf("%q finds item %q, want %q", test.quant, item.Label, test.label)
+			}
+			if len(item.Files) != test.files || item.Bytes != test.bytes {
+				t.Errorf("%s holds %d files worth %d bytes, want %d worth %d",
+					item.Label, len(item.Files), item.Bytes, test.files, test.bytes)
+			}
+		})
 	}
 }
 
@@ -151,12 +202,12 @@ func TestReadKeepsProjectorsOutOfQuantItems(t *testing.T) {
 
 	// Shards still fold, and the projector beside them is still its own item.
 	sharded := repoOf(t, cache, "unsloth/Qwen3-235B-GGUF")
-	if got, want := itemLabels(sharded), []string{"Q4_K_XL", "mmproj-F16"}; !reflect.DeepEqual(got, want) {
+	if got, want := itemLabels(sharded), []string{"UD-Q4_K_XL", "mmproj-F16"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("the repo lists %v, want %v", got, want)
 	}
-	quant, _ := sharded.Item("Q4_K_XL")
+	quant, _ := sharded.Item("UD-Q4_K_XL")
 	if len(quant.Files) != 2 || quant.Bytes != 1800 || !quant.Complete {
-		t.Errorf("Q4_K_XL holds %d files worth %d bytes (complete=%v), want its 2 shards worth 1800, complete",
+		t.Errorf("UD-Q4_K_XL holds %d files worth %d bytes (complete=%v), want its 2 shards worth 1800, complete",
 			len(quant.Files), quant.Bytes, quant.Complete)
 	}
 	projector, _ := sharded.Item("mmproj-F16")
@@ -385,7 +436,7 @@ func TestReadIgnoresADanglingSnapshotEntry(t *testing.T) {
 
 	repo := repoOf(t, read(t, tree.Root), "unsloth/Qwen3.8-27B-GGUF")
 
-	if got, want := itemLabels(repo), []string{"Q4_K_XL"}; !reflect.DeepEqual(got, want) {
+	if got, want := itemLabels(repo), []string{"UD-Q4_K_XL"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("the repo lists %v, want %v", got, want)
 	}
 }

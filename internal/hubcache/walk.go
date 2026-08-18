@@ -368,10 +368,10 @@ func ggufItems(files []File) []Item {
 	byLabel := map[string]*Item{}
 	var order []string
 	for _, file := range files {
-		if !hasExt(file.Name, ".gguf") {
+		label, isGGUF := GGUFItem(file.Name)
+		if !isGGUF {
 			continue
 		}
-		label := itemLabel(file.Name)
 		item := byLabel[label]
 		if item == nil {
 			item = &Item{Label: label}
