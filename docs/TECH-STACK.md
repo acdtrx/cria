@@ -61,6 +61,11 @@
   resolved flags, port, log path, start time), the server log files, and a small
   UI-preferences file (active backend, last-started entry — settled 2026-08-18: UI
   memory is machine-owned state, never written into the config tree).
+- Neither `~/.config/cria/` nor `~/.local/state/cria/` consults the XDG env vars
+  (settled 2026-08-18): both trees are cria's own, and half of cria's files moving
+  with an env var while the other half stays put is worse than neither moving. The
+  HF cache is different — huggingface_hub owns that path, so cria resolves it
+  exactly the way the library does, XDG included.
 - State records are how the TUI re-attaches after restart: scan records, verify the
   pid is alive and the port answers, flag the rest stale. `encoding/json` — this is
   machine-owned state; comments are not needed and cria owns the format.

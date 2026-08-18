@@ -40,9 +40,13 @@ const probeTimeout = 3 * time.Second
 // Nothing here is parsed into a time. The comparison is `ps` output against
 // `ps` output, and a clock conversion is exactly where two spellings of one
 // instant stop being equal.
+//
+// An identity outlives the cria that captured it: serve writes it into a state
+// record and a later invocation reads it back (docs/specs/SERVE.md), which is
+// why the two fields carry the spelling that record file uses.
 type Identity struct {
-	Command   string // the process's full argv, joined the way `ps` prints it
-	StartedAt string // `ps -o lstart`, verbatim: "Tue Aug 18 14:57:30 2026"
+	Command   string `json:"command"`    // the process's full argv, joined the way `ps` prints it
+	StartedAt string `json:"started_at"` // `ps -o lstart`, verbatim: "Tue Aug 18 14:57:30 2026"
 }
 
 // SameProcess reports whether two identities name one process. A zero identity

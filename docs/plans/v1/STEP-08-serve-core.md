@@ -1,6 +1,18 @@
 # Step 8 — serve core: records, spawn, liveness, stop
 
-**Phase 3 · Status: not started**
+**Phase 3 · Status: done (2026-08-18)** — suite green, all gates pass.
+Detachment proven for real: a launcher under an actual pty started a server via
+the real Start path, the pty closed, the server survived (ppid=1, no
+controlling tty, session leader), and a fresh Manager re-attached from the
+record alone and stopped it; also probed: an unreaped `<defunct>` child reads
+as exited via identity mismatch, so liveness and stop confirmation are zombie-
+safe. Decisions: XDG_STATE_HOME not consulted (recorded in TECH-STACK);
+identity is captured only when it names the launched program — a server dead
+at capture time records the zero identity, which matches nothing (exited, log
+as crash report); pruning runs pre-launch to logsKept−1 so an untidiable log
+dir fails the start, and a failed spawn deletes its empty log; stop of an
+already-exited server removes the record and succeeds; procs.Identity gained
+JSON tags (records persist it).
 
 ## Intent
 
