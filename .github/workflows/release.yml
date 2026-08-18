@@ -19,8 +19,8 @@ jobs:
   darwin:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - name: full suite
@@ -30,7 +30,7 @@ jobs:
           CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o cria .
           ./cria --version | grep -F "${GITHUB_REF_NAME#v}"
           tar -czf cria_darwin_arm64.tar.gz cria
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: darwin
           path: cria_darwin_arm64.tar.gz
@@ -38,8 +38,8 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - name: short suite
@@ -51,7 +51,7 @@ jobs:
           tar -czf cria_linux_amd64.tar.gz cria
           CGO_ENABLED=0 GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o cria .
           tar -czf cria_linux_arm64.tar.gz cria
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: cria_linux_*.tar.gz
@@ -60,7 +60,7 @@ jobs:
     needs: [darwin, linux]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
       - name: checksums
