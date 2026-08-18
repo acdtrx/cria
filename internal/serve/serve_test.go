@@ -18,11 +18,13 @@ import (
 // escalation and the once-at-a-time rule are all exercised through it with no
 // process on the machine.
 type fakeHost struct {
-	alive     map[int]procs.Identity
-	sent      []string // "TERM 42", "KILL 42", in the order they were sent
-	dieOnTerm bool     // the process exits when it is asked to
-	dieOnKill bool     // ... and when it is killed
-	failWith  error    // Identify answers with this instead of the table
+	alive      map[int]procs.Identity
+	costs      map[int]procs.Stats // what each pid costs, for the pids a test gave one
+	statsAsked []int               // the pids Stats was called for, in order
+	sent       []string            // "TERM 42", "KILL 42", in the order they were sent
+	dieOnTerm  bool                // the process exits when it is asked to
+	dieOnKill  bool                // ... and when it is killed
+	failWith   error               // Identify answers with this instead of the table
 }
 
 func (h *fakeHost) Identify(pid int) (procs.Identity, bool, error) {
@@ -49,11 +51,19 @@ func (h *fakeHost) Kill(pid int) error {
 	return nil
 }
 
-// serve asks the process table three questions. The rest of the interface panics
+// Stats answers for the pids a test gave a cost, and reports every pid it was
+// asked about — an observation that asks the process table about a server that
+// has exited is a bug this catches.
+func (h *fakeHost) Stats(pid int) (procs.Stats, bool, error) {
+	h.statsAsked = append(h.statsAsked, pid)
+	stats, found := h.costs[pid]
+	return stats, found, nil
+}
+
+// serve asks the process table four questions. The rest of the interface panics
 // rather than answering zero, so a later step that starts asking one of them
 // fails here instead of quietly reading an empty answer as the truth.
-func (h *fakeHost) Stats(int) (procs.Stats, bool, error) { panic("serve does not ask for stats") }
-func (h *fakeHost) Servers() ([]procs.Process, error)    { panic("serve does not scan for servers") }
+func (h *fakeHost) Servers() ([]procs.Process, error) { panic("serve does not scan for servers") }
 func (h *fakeHost) WorkingDir(int) (string, bool, error) {
 	panic("serve does not ask for working directories")
 }

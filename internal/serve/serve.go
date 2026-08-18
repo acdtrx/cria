@@ -9,10 +9,16 @@
 // the config tree — so editing or deleting an entry never confuses the server it
 // launched.
 //
-// The two things this package touches are both injected: the state root as a
-// path and the process table as a procs.Host. That is the whole test seam for
-// records, liveness and stop; spawning has one of its own, so every rule here is
-// exercised without a live server.
+// Everything this package touches is injected: the state root as a path, the
+// process table as a procs.Host, and — for the observation half — spawning, the
+// health probe, the cache walk and the Hub. That is the whole test seam, so
+// every rule here is exercised without a live server, a listening port or a
+// model on disk.
+//
+// Observing a server is one derivation over four inputs (liveness, this
+// moment's probe, cache presence, and whether this server has ever answered
+// green), and the derivation is a pure function: the phases in
+// docs/specs/SERVE.md are a table, not a state machine cria maintains.
 //
 // cria never collects a server's exit status: a detached server reparents away,
 // and its log file is the crash evidence — never parsed, only shown
@@ -23,8 +29,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
+	"cria/internal/hubapi"
 	"cria/internal/procs"
 )
 
@@ -72,6 +80,23 @@ type Manager struct {
 	// records — with no server on the host.
 	spawn spawner
 
+	// The three things a snapshot asks the world outside the process table: is
+	// the port answering, what does the cache hold, and how big is the model
+	// when it is whole.
+	probe prober
+	cache cacheReader
+	hub   hubReader
+
+	// What a Manager remembers between observations. Both are display state,
+	// live only as long as this cria invocation, and are never persisted: which
+	// pid of an entry has answered green — the line between "not answering yet"
+	// and "stopped answering" — and what the Hub said a model comes to. The TUI
+	// refreshes in goroutines of its own, so the mutex is the price of the
+	// memory.
+	memory   sync.Mutex
+	greenPID map[string]int          // entry id → the pid whose server answered green
+	totals   map[string]hubapi.Total // model reference → what the Hub says it comes to
+
 	// The stop windows, held rather than read from the constants so a test can
 	// drive the whole escalation without waiting out a real grace period.
 	grace   time.Duration
@@ -79,15 +104,21 @@ type Manager struct {
 	poll    time.Duration
 }
 
-// New builds the manager cria uses: a state root and a process table.
+// New builds the manager cria uses: a state root and a process table, wired to
+// the real spawner, health probe, cache walk and Hub.
 func New(root string, host procs.Host) *Manager {
 	return &Manager{
-		root:    root,
-		host:    host,
-		spawn:   spawnDetached,
-		grace:   stopGrace,
-		confirm: killConfirm,
-		poll:    exitPoll,
+		root:     root,
+		host:     host,
+		spawn:    spawnDetached,
+		probe:    newHTTPProbe(),
+		cache:    readCache,
+		hub:      hubTotals(),
+		greenPID: map[string]int{},
+		totals:   map[string]hubapi.Total{},
+		grace:    stopGrace,
+		confirm:  killConfirm,
+		poll:     exitPoll,
 	}
 }
 
