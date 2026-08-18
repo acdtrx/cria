@@ -40,13 +40,25 @@ func (k kind) String() string {
 // declared — decoding, validation and `cria docs` all read them, so a schema
 // change updates the documentation by construction (docs/specs/CONFIG.md).
 type key struct {
-	name     string            // the TOML key
-	kind     kind              // the type the file must use
-	required bool              // absent is an error on its own
-	rules    string            // the docs line: what the key means and what constrains it
-	example  string            // a valid value in TOML syntax, for the generated examples
-	keys     schema            // kindTable only: the sub-table's own keys
-	check    func(v any) error // the value rules this key can judge on its own
+	name           string             // the TOML key
+	kind           kind               // the type the file must use
+	required       bool               // absent is an error on its own
+	onlyBackend    Backend            // the one backend that takes this key; empty means both
+	rules          string             // the docs line: what the key means and what constrains it
+	example        string             // a valid value in TOML syntax, for the generated examples
+	backendExample map[Backend]string // the example where the backends genuinely differ
+	keys           schema             // kindTable only: the sub-table's own keys
+	check          func(v any) error  // the value rules this key can judge on its own
+}
+
+// exampleFor is the value this key takes in one backend's example: the shared
+// example unless the backends genuinely differ — an MLX quantization is its own
+// repo, so each backend's template needs its own repo id.
+func (k key) exampleFor(backend Backend) string {
+	if value, ok := k.backendExample[backend]; ok {
+		return value
+	}
+	return k.example
 }
 
 // schema is an ordered list of keys; the order is the order `cria docs` prints
@@ -54,32 +66,35 @@ type key struct {
 type schema []key
 
 // entrySchema is the entry contract: one models/<id>.toml file is one launchable
-// thing (docs/specs/CONFIG.md). Rules that need more than one key — quant is
-// llama-only, port falls back to default_port — live in resolveEntry, the only
-// place that sees a whole entry next to the tree settings.
+// thing (docs/specs/CONFIG.md). Rules that need more than one key — a key its
+// backend does not take, port falling back to default_port — live in
+// resolveEntry, the only place that sees a whole entry next to the tree settings.
 var entrySchema = schema{
 	{
-		name:     "backend",
-		kind:     kindString,
-		required: true,
-		rules:    `the server program to run: "llama" (llama-server) or "mlx" (mlx_lm.server)`,
-		example:  `"llama"`,
-		check:    checkBackend,
+		name:           "backend",
+		kind:           kindString,
+		required:       true,
+		rules:          `the server program to run: "llama" (llama-server) or "mlx" (mlx_lm.server)`,
+		example:        `"llama"`,
+		backendExample: map[Backend]string{BackendMLX: `"mlx"`},
+		check:          checkBackend,
 	},
 	{
-		name:     "repo",
-		kind:     kindString,
-		required: true,
-		rules:    "Hugging Face repo id, org/name; the server fetches the model itself",
-		example:  `"unsloth/Qwen3-30B-A3B-GGUF"`,
-		check:    checkRepo,
+		name:           "repo",
+		kind:           kindString,
+		required:       true,
+		rules:          "Hugging Face repo id, org/name; the server fetches the model itself",
+		example:        `"unsloth/Qwen3-30B-A3B-GGUF"`,
+		backendExample: map[Backend]string{BackendMLX: `"mlx-community/Qwen3-30B-A3B-4bit"`},
+		check:          checkRepo,
 	},
 	{
-		name:    "quant",
-		kind:    kindString,
-		rules:   "llama only; the quantization to serve — omit it and the server picks the repo's default",
-		example: `"Q4_K_M"`,
-		check:   checkNonEmpty,
+		name:        "quant",
+		kind:        kindString,
+		onlyBackend: BackendLlama,
+		rules:       "the quantization to serve; omit it and the server picks the repo's default (an mlx quantization is its own repo)",
+		example:     `"Q4_K_M"`,
+		check:       checkNonEmpty,
 	},
 	{
 		name:    "port",
@@ -96,18 +111,20 @@ var entrySchema = schema{
 		check:   checkNonEmpty,
 	},
 	{
-		name:    "name",
-		kind:    kindString,
-		rules:   "display name; defaults to the entry id",
-		example: `"Qwen3 30B A3B"`,
-		check:   checkNonEmpty,
+		name:           "name",
+		kind:           kindString,
+		rules:          "display name; defaults to the entry id",
+		example:        `"Qwen3 30B A3B"`,
+		backendExample: map[Backend]string{BackendMLX: `"Qwen3 30B A3B (MLX 4bit)"`},
+		check:          checkNonEmpty,
 	},
 	{
-		name:    "args",
-		kind:    kindStringList,
-		rules:   "extra flags passed to the server verbatim; cria composes the model, port and host flags itself",
-		example: `["--ctx-size", "16384"]`,
-		check:   checkArgs,
+		name:           "args",
+		kind:           kindStringList,
+		rules:          "extra flags passed to the server verbatim; cria composes the model, port and host flags itself",
+		example:        `["--ctx-size", "16384"]`,
+		backendExample: map[Backend]string{BackendMLX: `["--max-tokens", "4096"]`},
+		check:          checkArgs,
 	},
 }
 

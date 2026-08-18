@@ -1,6 +1,14 @@
 # Step 3 — `cria docs` and first-run scaffold
 
-**Phase 1 · Status: not started**
+**Phase 1 · Status: done (2026-08-18) — phase 1 ends green.** Suite green
+(`go test ./... -count=1` ok), all gates pass; docs round-trip proven (rendered
+examples load through the parser with zero broken entries; a runtime-invented
+schema key surfaces in the output). Decisions taken during implementation:
+schema `key` gained `onlyBackend`/`backendExample` so backend-specific facts are
+declared once (step 2's quant guard now reads them); scaffold wired in `main.go`
+(cli stays a dispatch table), non-fatal on failure — `cria docs` still prints;
+embedded page lives as lowercase `agents.md` in the repo so it doesn't read as
+instructions to agents working on cria itself; scaffold uses O_EXCL create-only.
 
 ## Intent
 

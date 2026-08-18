@@ -121,8 +121,8 @@ func loadEntry(id, path string, settings Settings) (*Entry, error) {
 }
 
 // resolveEntry turns a checked table into an Entry, applying the rules that need
-// more than one key: quant belongs to llama, and port, host and name fall back to
-// the tree settings and the id (docs/specs/CONFIG.md).
+// more than one key: a key belonging to one backend, and port, host and name
+// falling back to the tree settings and the id (docs/specs/CONFIG.md).
 func resolveEntry(id, path string, table map[string]any, settings Settings) (*Entry, error) {
 	entry := Entry{
 		ID:      id,
@@ -136,10 +136,17 @@ func resolveEntry(id, path string, table map[string]any, settings Settings) (*En
 		Args:    optStrings(table, "args"),
 	}
 
-	if entry.Quant != "" && entry.Backend != BackendLlama {
-		return nil, &KeyError{
-			Key:    "quant",
-			Reason: fmt.Sprintf("only the %q backend takes a quant; an mlx quantization is its own repo", BackendLlama),
+	// A key the schema binds to one backend is refused on any other, from the same
+	// declaration `cria docs` renders that backend's example from.
+	for _, k := range entrySchema {
+		if k.onlyBackend == "" || k.onlyBackend == entry.Backend {
+			continue
+		}
+		if _, present := table[k.name]; present {
+			return nil, &KeyError{
+				Key:    k.name,
+				Reason: fmt.Sprintf("only the %q backend takes it; this entry's backend is %q", k.onlyBackend, entry.Backend),
+			}
 		}
 	}
 

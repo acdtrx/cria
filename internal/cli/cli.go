@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"cria/internal/config"
 )
 
 // Process exit codes. A subcommand returns exitFailure when the thing it was asked
@@ -40,7 +42,8 @@ func Dispatch(args []string, version string) int {
 	case "status":
 		return notImplemented("status")
 	case "docs":
-		return notImplemented("docs")
+		fmt.Print(config.Docs())
+		return exitOK
 	default:
 		fmt.Fprintf(os.Stderr, "cria: unknown subcommand %q; valid subcommands are: %s\n",
 			args[0], strings.Join(subcommands, ", "))
