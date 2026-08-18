@@ -21,7 +21,7 @@ const hfTokenVar = "HF_TOKEN"
 // (docs/specs/CONFIG.md); the entry loader has already refused an args list that
 // restates one of them.
 func composeCommand(entry config.Entry, report tools.Report) ([]string, error) {
-	tool, err := serverTool(entry.Backend, report)
+	tool, err := LaunchTool(entry.Backend, report)
 	if err != nil {
 		return nil, err
 	}
@@ -55,11 +55,16 @@ func hubReference(entry config.Entry) string {
 	return entry.Repo + ":" + entry.Quant
 }
 
-// serverTool is the start gate: an entry can only be launched by a tool the host
+// LaunchTool is the start gate: an entry can only be launched by a tool the host
 // has and cria may use (docs/specs/TOOLS.md). The refusal carries the tool's own
 // verdict — what its state disables and the one action that clears it — because
 // the tool check already phrased both.
-func serverTool(backend config.Backend, report tools.Report) (tools.Tool, error) {
+//
+// It is exported because the gate comes before the port check in a start
+// (docs/specs/SERVE.md), and both callers of that sequence — the CLI and, later,
+// the TUI — have to ask it in that order rather than discover the missing tool
+// from a refused spawn.
+func LaunchTool(backend config.Backend, report tools.Report) (tools.Tool, error) {
 	var tool tools.Tool
 	switch backend {
 	case config.BackendLlama:

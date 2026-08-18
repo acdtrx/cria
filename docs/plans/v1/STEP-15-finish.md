@@ -18,7 +18,9 @@ tag.
   (stop-then-start, agent endpoint unchanged), `status --json` consumed by a
   scripted check, real deletion vs `du`, foreign drill, full TUI tour, first-run
   scaffold on a clean home, `cria docs` → agent-written entry → `start --wait`
-  loop.
+  loop. Added from step 10: two small models resident at once on different
+  ports, exercising the several-servers no-arg `cria stop` refusal on real
+  records.
 - `ARCHITECTURE.md` documents the package boundaries and data flow as built
   (with the diagram CLAUDE.md asks for) — written now, at the end, when the
   shape is real.

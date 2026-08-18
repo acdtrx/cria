@@ -1,6 +1,20 @@
 # Step 10 — CLI lifecycle commands
 
-**Phase 3 · Status: not started**
+**Phase 3 · Status: done (2026-08-18) — phase 3 ends green; first real e2e
+passed.** Suite green, all gates pass. E2E on the dev Mac (llama-server
+b10450, cached LFM2.5-2.6B Q8_0, port 18080): start --wait green in 2s with
+the composed command shown; status human + --json sane (JSON is a deliberate
+projection — identity strings excluded, no omitempty, arrays never null);
+same-port second entry refused naming the holder; no-arg stop single-server
+case; foreign drill refused with pid/command/cwd and recovered after the kill;
+status with nothing running exits 1; host left clean (entries removed, no
+records, three pruned launch logs remain by design). Decisions: --wait budgets
+2min cached / 30min downloading, monotonic once downloading is seen, 2s poll,
+30s plain progress lines; serve gained PortUse (attribution the TUI reuses for
+its kill offer) and exported LaunchTool (gate order: tool before port); no
+`name` in JSON — records stay self-contained, status never reads the config
+tree. Deferred to step 15: the several-servers no-arg-stop case on real
+processes (two small models).
 
 ## Intent
 

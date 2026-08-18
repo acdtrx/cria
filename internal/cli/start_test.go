@@ -1,0 +1,300 @@
+package cli
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"cria/internal/config"
+	"cria/internal/serve"
+	"cria/internal/tools"
+)
+
+// A start that nothing refuses spawns the entry and prints what was launched —
+// the composed command line included, since that is the entry's documentation
+// (docs/specs/CONFIG.md).
+func TestStartSpawnsAndReportsTheLaunch(t *testing.T) {
+	fake := &fakeServers{record: testRecord()}
+	app, out, errOut := newTestApp(testTree(), fake)
+
+	if code := app.start([]string{"qwen"}); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if len(fake.started) != 1 || fake.started[0].ID != "qwen" {
+		t.Fatalf("cria started %+v, want the one entry that was named", fake.started)
+	}
+	if len(fake.asked) != 1 || fake.asked[0] != 8080 {
+		t.Errorf("cria checked ports %v, want the entry's own port before the spawn", fake.asked)
+	}
+
+	printed := out.String()
+	for _, want := range []string{"started qwen as pid 4242 on 0.0.0.0:8080", "llama-server -hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL", "qwen-20260818-145730.log"} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("cria printed %q, want it to contain %q", printed, want)
+		}
+	}
+}
+
+// An id that names no entry lists the ids that do — the answer to "what did I
+// mistype" (docs/specs/CLI.md).
+func TestStartRefusesAnUnknownEntry(t *testing.T) {
+	tree := testTree()
+	tree.Entries = append(tree.Entries, config.Entry{ID: "gemma", Backend: config.BackendLlama, Repo: "ggml-org/gemma-3-4b-it-GGUF", Port: 8080, Host: "0.0.0.0"})
+	fake := &fakeServers{record: testRecord()}
+	app, _, errOut := newTestApp(tree, fake)
+
+	if code := app.start([]string{"qwn"}); code != exitFailure {
+		t.Fatalf("exit code %d, want %d", code, exitFailure)
+	}
+	if !strings.Contains(errOut.String(), `no entry named "qwn"`) || !strings.Contains(errOut.String(), "available entries: qwen, gemma") {
+		t.Errorf("cria printed %q, want the unknown id and the ids that exist", errOut)
+	}
+	if len(fake.started) != 0 {
+		t.Errorf("cria started %+v for an id that names nothing", fake.started)
+	}
+}
+
+// An entry whose file is broken reports its own failure: the author needs the
+// offending key and the file, not a list of the entries that happen to parse
+// (docs/specs/CONFIG.md).
+func TestStartReportsABrokenEntry(t *testing.T) {
+	tree := testTree()
+	tree.Broken = []config.BrokenEntry{{
+		ID:   "gemma",
+		Path: "/home/u/.config/cria/models/gemma.toml",
+		Err:  &config.KeyError{Key: "port", Reason: "required: this entry sets no port and config.toml sets no default_port"},
+	}}
+	fake := &fakeServers{record: testRecord()}
+	app, _, errOut := newTestApp(tree, fake)
+
+	if code := app.start([]string{"gemma"}); code != exitFailure {
+		t.Fatalf("exit code %d, want %d", code, exitFailure)
+	}
+	for _, want := range []string{"models/gemma.toml", `key "port"`, "fix that file"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("cria printed %q, want it to contain %q", errOut, want)
+		}
+	}
+	if len(fake.asked) != 0 {
+		t.Errorf("cria checked a port for an entry that never loaded: %v", fake.asked)
+	}
+}
+
+// The tool gate comes before the port check: a host without llama-server has to
+// hear about llama-server (docs/specs/SERVE.md).
+func TestStartRefusesWhenTheToolIsUnusable(t *testing.T) {
+	fake := &fakeServers{record: testRecord()}
+	app, _, errOut := newTestApp(testTree(), fake)
+	app.tools = func(config.Settings) tools.Report {
+		report := usableReport()
+		report.LlamaServer = tools.Tool{
+			Name:     tools.LlamaServer,
+			Status:   tools.StatusMissing,
+			Disables: "starting llama entries; they stay listed, marked unstartable",
+			Fix:      "install llama.cpp so llama-server is on PATH",
+		}
+		return report
+	}
+
+	if code := app.start([]string{"qwen"}); code != exitFailure {
+		t.Fatalf("exit code %d, want %d", code, exitFailure)
+	}
+	for _, want := range []string{"llama-server is missing", "install llama.cpp"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("cria printed %q, want it to contain %q", errOut, want)
+		}
+	}
+	if len(fake.asked) != 0 || len(fake.started) != 0 {
+		t.Errorf("cria went on to check a port (%v) or spawn (%+v) with no usable tool", fake.asked, fake.started)
+	}
+}
+
+// A port held by a server cria started is the refusal with a fix in it: stop
+// that entry (docs/specs/SERVE.md). Both phrasings are the same branch — the
+// entry being started, and another one already on its port.
+func TestStartRefusesAPortAManagedServerHolds(t *testing.T) {
+	cases := []struct {
+		name    string
+		holder  string
+		wantAll []string
+	}{
+		{
+			name:    "the entry itself is already running",
+			holder:  "qwen",
+			wantAll: []string{"qwen is already running as pid 4242 on port 8080", "stop it first"},
+		},
+		{
+			name:    "another entry is serving on that port",
+			holder:  "gemma",
+			wantAll: []string{"port 8080 is already serving gemma (pid 4242)", "stop gemma first"},
+		},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			held := testRecord()
+			held.EntryID = test.holder
+			fake := &fakeServers{
+				record: testRecord(),
+				use:    serve.PortUse{Managed: &serve.Server{Record: held, Live: true}},
+			}
+			app, _, errOut := newTestApp(testTree(), fake)
+
+			if code := app.start([]string{"qwen"}); code != exitFailure {
+				t.Fatalf("exit code %d, want %d", code, exitFailure)
+			}
+			for _, want := range test.wantAll {
+				if !strings.Contains(errOut.String(), want) {
+					t.Errorf("cria printed %q, want it to contain %q", errOut, want)
+				}
+			}
+			if len(fake.started) != 0 {
+				t.Errorf("cria spawned onto a busy port: %+v", fake.started)
+			}
+		})
+	}
+}
+
+// A port held by anything else is reported with the pid, the command line and
+// the working directory — and left alone: the kill is the TUI's offer, never the
+// CLI's (docs/specs/SERVE.md).
+func TestStartRefusesAForeignPortHolder(t *testing.T) {
+	fake := &fakeServers{
+		record: testRecord(),
+		use: serve.PortUse{Holders: []serve.Holder{{
+			PID:        9001,
+			Command:    "/opt/homebrew/bin/llama-server -m gemma.gguf --port 8080",
+			WorkingDir: "/Users/someone/models",
+		}}},
+	}
+	app, _, errOut := newTestApp(testTree(), fake)
+
+	if code := app.start([]string{"qwen"}); code != exitFailure {
+		t.Fatalf("exit code %d, want %d", code, exitFailure)
+	}
+	for _, want := range []string{
+		"port 8080 is held by a process cria did not start",
+		"pid 9001",
+		"llama-server -m gemma.gguf",
+		"working directory /Users/someone/models",
+		"models/qwen.toml",
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("cria printed %q, want it to contain %q", errOut, want)
+		}
+	}
+	if len(fake.started) != 0 {
+		t.Errorf("cria spawned onto a foreign process's port: %+v", fake.started)
+	}
+}
+
+// A holder whose details could not be read still refuses the start: the pid is
+// what the port is taken by, and it is named.
+func TestStartRefusesAHolderItCannotDescribe(t *testing.T) {
+	fake := &fakeServers{record: testRecord(), use: serve.PortUse{Holders: []serve.Holder{{PID: 9001}}}}
+	app, _, errOut := newTestApp(testTree(), fake)
+
+	if code := app.start([]string{"qwen"}); code != exitFailure {
+		t.Fatalf("exit code %d, want %d", code, exitFailure)
+	}
+	if !strings.Contains(errOut.String(), "pid 9001") || !strings.Contains(errOut.String(), "unreadable") {
+		t.Errorf("cria printed %q, want the pid and what could not be read", errOut)
+	}
+}
+
+// --wait watches the start until the phase settles: running is the answer the
+// caller asked for (docs/specs/CLI.md).
+func TestStartWaitsForRunning(t *testing.T) {
+	fake := &fakeServers{
+		record: testRecord(),
+		phases: []serve.Phase{serve.PhaseStarting, serve.PhaseStarting, serve.PhaseRunning},
+		health: serve.Health{URL: "http://127.0.0.1:8080/health", Green: true, Status: 200, Detail: "200 OK"},
+	}
+	app, out, errOut := newTestApp(testTree(), fake)
+
+	if code := app.start([]string{"qwen", "--wait"}); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if fake.observed != 3 {
+		t.Errorf("the wait took %d observations, want the three the phases scripted", fake.observed)
+	}
+	if !strings.Contains(out.String(), "qwen is running") || !strings.Contains(out.String(), "200 OK") {
+		t.Errorf("cria printed %q, want the verdict and what the health endpoint answered", out)
+	}
+}
+
+// A start that fails while cria waits exits non-zero with the log path: the log
+// is the only crash evidence there is (docs/specs/SERVE.md).
+func TestStartWaitReportsAFailedStart(t *testing.T) {
+	cases := []struct {
+		name     string
+		phase    serve.Phase
+		contains string
+	}{
+		{name: "a server that exited", phase: serve.PhaseExited, contains: "it exited"},
+		{name: "a server that stopped answering", phase: serve.PhaseUnhealthy, contains: "it stopped answering"},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			fake := &fakeServers{
+				record: testRecord(),
+				phases: []serve.Phase{test.phase},
+				health: serve.Health{URL: "http://127.0.0.1:8080/health", Status: 503, Detail: "503 Service Unavailable"},
+			}
+			app, _, errOut := newTestApp(testTree(), fake)
+
+			if code := app.start([]string{"qwen", "--wait"}); code != exitFailure {
+				t.Fatalf("exit code %d, want %d", code, exitFailure)
+			}
+			if !strings.Contains(errOut.String(), test.contains) {
+				t.Errorf("cria printed %q, want it to contain %q", errOut, test.contains)
+			}
+			if !strings.Contains(errOut.String(), testRecord().LogPath) {
+				t.Errorf("cria printed %q, want the log path a crash is read from", errOut)
+			}
+		})
+	}
+}
+
+// A start that never settles is bound by its window: the wait ends naming the
+// phase it is stuck in, non-zero, with the log to look at.
+func TestStartWaitTimesOut(t *testing.T) {
+	fake := &fakeServers{record: testRecord(), phases: []serve.Phase{serve.PhaseStarting}}
+	app, _, errOut := newTestApp(testTree(), fake)
+	app.startWindow = 20 * time.Millisecond
+
+	if code := app.start([]string{"qwen", "--wait"}); code != exitFailure {
+		t.Fatalf("exit code %d, want %d", code, exitFailure)
+	}
+	if !strings.Contains(errOut.String(), "still starting after") {
+		t.Errorf("cria printed %q, want the phase it gave up in", errOut)
+	}
+}
+
+// A downloading start prints where the fetch has got to, and buys the download
+// budget: a model coming over the network must not be cut off by the window a
+// cached model is judged against.
+func TestStartWaitFollowsADownload(t *testing.T) {
+	fake := &fakeServers{
+		record:   testRecord(),
+		phases:   []serve.Phase{serve.PhaseDownloading, serve.PhaseDownloading, serve.PhaseRunning},
+		progress: serve.Progress{Bytes: 3 << 30, Total: 12 << 30, Known: true},
+		health:   serve.Health{URL: "http://127.0.0.1:8080/health", Green: true, Status: 200, Detail: "200 OK"},
+	}
+	app, out, errOut := newTestApp(testTree(), fake)
+	// A window that has already run out for a start, so only the download's own
+	// budget can carry this wait to its verdict.
+	app.startWindow = time.Nanosecond
+	app.downloadWindow = 2 * time.Second
+
+	if code := app.start([]string{"qwen", "--wait"}); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if !strings.Contains(out.String(), "downloading 3.0 GiB of 12.0 GiB (25%)") {
+		t.Errorf("cria printed %q, want the bytes fetched against the total", out)
+	}
+	if !strings.Contains(out.String(), "qwen is running") {
+		t.Errorf("cria printed %q, want the verdict the wait settled on", out)
+	}
+}
