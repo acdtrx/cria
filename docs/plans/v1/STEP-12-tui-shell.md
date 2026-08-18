@@ -1,6 +1,17 @@
 # Step 12 — TUI shell
 
-**Phase 5 · Status: not started**
+**Phase 5 · Status: done (2026-08-18)** — suite green (33 new tui tests), all
+gates pass; verified live in a real pty: all six status-box display states
+(running/downloading/starting/unhealthy/exited/stopped-from-prefs), grouped
+keybar with contextual server keys, view switch, backend toggle persisting to
+ui.json and sticky across relaunch, corrupt-prefs loud reset, ticker-driven
+running→unhealthy transition with no keypress. Deps entered at latest stable:
+charm.land bubbletea v2.0.8, bubbles v2.1.1, lipgloss v2.0.6 (paths verified
+against the module proxy). Decisions: cli stays bubbletea-free — Dispatch
+takes a tui hook wired from main; keys chosen: ⇥ backend, v view, t tools,
+q quit, s/l/r/d server scope; internal/format extracted (Bytes, HubReference)
+— cli and tui share presentation helpers instead of copies; refresh errors
+sticky until the next successful snapshot, last good listing stays on screen.
 
 ## Intent
 

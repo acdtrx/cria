@@ -1,0 +1,62 @@
+package tui
+
+import (
+	"strings"
+
+	"charm.land/bubbles/v2/key"
+)
+
+// The three scopes every keybind belongs to (docs/specs/TUI.md). Selection keys
+// read the highlighted item, server keys act on the running server from
+// anywhere, and global keys navigate. The grouping is what makes "what works
+// right now" legible without a help screen, so the labels are part of the bar
+// rather than decoration on it.
+const (
+	selectionScope = "selection"
+	serverScope    = "server"
+	globalScope    = "global"
+)
+
+// How the bar reads: keys within a scope are separated by a thin dot, scopes by
+// plain space wide enough to see the grouping.
+const (
+	keySeparator   = " · "
+	groupSeparator = "   "
+)
+
+// keyGroup is one scope's keys as the bar draws them.
+type keyGroup struct {
+	label    string
+	bindings []key.Binding
+}
+
+// renderKeybar draws the one bottom bar. A key that does not apply right now is
+// not drawn — a disabled binding does nothing when pressed either, so the bar
+// showing it would be a promise cria does not keep — and a scope with nothing
+// enabled leaves no label behind.
+func renderKeybar(width int, groups ...keyGroup) string {
+	var scopes []string
+	for _, group := range groups {
+		if hints := group.hints(); hints != "" {
+			scopes = append(scopes, hints)
+		}
+	}
+	return fit(strings.Join(scopes, groupSeparator), width)
+}
+
+// hints is one scope: its label, then every key that applies. It is empty when
+// none does.
+func (g keyGroup) hints() string {
+	var keys []string
+	for _, binding := range g.bindings {
+		if !binding.Enabled() {
+			continue
+		}
+		help := binding.Help()
+		keys = append(keys, keyStyle.Render(help.Key)+" "+labelStyle.Render(help.Desc))
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	return quietStyle.Render(g.label) + " " + strings.Join(keys, labelStyle.Render(keySeparator))
+}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"cria/internal/format"
 	"cria/internal/serve"
 )
 
@@ -81,7 +82,8 @@ func (a *app) reportStatus(listing serve.StatusListing) {
 // it carries its launch, its command and its log, which is what a crash is read
 // from (docs/specs/SERVE.md).
 func (a *app) reportServer(status serve.Status) {
-	a.printf("%s  %s  %s  %s\n", status.EntryID, status.Phase, status.Backend, modelReference(status.Record))
+	a.printf("%s  %s  %s  %s\n", status.EntryID, status.Phase, status.Backend,
+		format.HubReference(status.Repo, status.Quant))
 
 	if status.Phase == serve.PhaseExited {
 		a.printf("  pid %d on %s is gone; launched %s\n",
@@ -89,7 +91,7 @@ func (a *app) reportServer(status serve.Status) {
 	} else {
 		a.printf("  pid %d on %s, up %s\n", status.PID, address(status.Record), status.Uptime.Round(time.Second))
 		if status.Stats.RSSBytes > 0 || status.Stats.CPUPercent > 0 {
-			a.printf("  memory %s, cpu %.1f%%\n", formatBytes(status.Stats.RSSBytes), status.Stats.CPUPercent)
+			a.printf("  memory %s, cpu %.1f%%\n", format.Bytes(status.Stats.RSSBytes), status.Stats.CPUPercent)
 		}
 		a.printf("  health %s: %s\n", status.Health.URL, status.Health.Detail)
 		if status.Phase == serve.PhaseDownloading {
@@ -99,15 +101,6 @@ func (a *app) reportServer(status serve.Status) {
 
 	a.printf("  command %s\n", strings.Join(status.Command, " "))
 	a.printf("  log %s\n", status.LogPath)
-}
-
-// modelReference is the model a record serves, spelled the way the entry named
-// it: the repo, qualified by its quantization when there is one.
-func modelReference(record serve.Record) string {
-	if record.Quant == "" {
-		return record.Repo
-	}
-	return record.Repo + ":" + record.Quant
 }
 
 // The `cria status --json` document is a projection, not a marshalled snapshot.

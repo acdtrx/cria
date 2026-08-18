@@ -104,6 +104,7 @@ func newTestApp(tree *config.Tree, fake *fakeServers) (*app, *bytes.Buffer, *byt
 		tree:           func() (*config.Tree, error) { return tree, nil },
 		tools:          func(config.Settings) tools.Report { return usableReport() },
 		servers:        func() (servers, error) { return fake, nil },
+		tui:            func() error { return nil },
 		poll:           time.Millisecond,
 		startWindow:    200 * time.Millisecond,
 		downloadWindow: 400 * time.Millisecond,
@@ -188,6 +189,32 @@ func TestRouting(t *testing.T) {
 				t.Errorf("cria printed %q, want it to contain %q", printed, test.contains)
 			}
 		})
+	}
+}
+
+// Bare `cria` is the TUI, and a TUI that could not open reports why and exits
+// like any other refusal.
+func TestBareInvocationOpensTheTUI(t *testing.T) {
+	app, _, _ := newTestApp(testTree(), &fakeServers{})
+	opened := false
+	app.tui = func() error {
+		opened = true
+		return nil
+	}
+	if code := app.run(nil, "9.9.9-test"); code != exitOK {
+		t.Errorf("exit code %d, want %d", code, exitOK)
+	}
+	if !opened {
+		t.Error("bare `cria` did not open the TUI")
+	}
+
+	app, _, errOut := newTestApp(testTree(), &fakeServers{})
+	app.tui = func() error { return errors.New("cannot locate the home directory") }
+	if code := app.run(nil, "9.9.9-test"); code != exitFailure {
+		t.Errorf("exit code %d, want %d", code, exitFailure)
+	}
+	if !strings.Contains(errOut.String(), "cannot locate the home directory") {
+		t.Errorf("cria printed %q, want the failure the TUI met", errOut)
 	}
 }
 

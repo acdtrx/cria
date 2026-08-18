@@ -91,6 +91,12 @@ type app struct {
 	tools   func(config.Settings) tools.Report // the host's managed tools
 	servers func() (servers, error)            // the state directory and the process table
 
+	// tui is the program bare `cria` opens. It arrives as a function rather
+	// than an import so this package stays a command-line router: routing to
+	// the TUI is a decision here, but nothing about a terminal program is
+	// (CODING-RULES §7 — main.go does the wiring).
+	tui func() error
+
 	// The --wait windows, held rather than read from the constants so a test can
 	// drive a whole wait — including its timeout — without waiting one out.
 	poll           time.Duration
@@ -100,20 +106,21 @@ type app struct {
 }
 
 // Dispatch runs the invocation described by args — os.Args without the program
-// name — and returns the process exit code.
-func Dispatch(args []string, version string) int {
-	return newApp().run(args, version)
+// name — and returns the process exit code. tui is what bare `cria` opens.
+func Dispatch(args []string, version string, tui func() error) int {
+	return newApp(tui).run(args, version)
 }
 
 // newApp wires the real world: the process's own streams, the config tree where
 // config.Root puts it, the host's tools, and a manager over the state directory.
-func newApp() *app {
+func newApp(tui func() error) *app {
 	return &app{
 		out:            os.Stdout,
 		err:            os.Stderr,
 		tree:           loadTree,
 		tools:          tools.Check,
 		servers:        newManager,
+		tui:            tui,
 		poll:           waitPoll,
 		startWindow:    waitStartWindow,
 		downloadWindow: waitDownloadWindow,
@@ -146,10 +153,15 @@ func (a *app) run(args []string, version string) int {
 	}
 }
 
-// runTUI is the placeholder for the bubbletea app that bare `cria` opens.
+// runTUI opens the program bare `cria` names. A TUI that could not start says
+// why on stderr and exits like any other refusal: the terminal is already back
+// in the state it was handed over in, so there is nothing to render the failure
+// into (docs/specs/CLI.md).
 func (a *app) runTUI() int {
-	fmt.Fprintln(a.err, "cria: the TUI is not implemented yet")
-	return exitFailure
+	if err := a.tui(); err != nil {
+		return a.fail("%v", err)
+	}
+	return exitOK
 }
 
 // loadTree reads the config tree from its one location (docs/specs/CONFIG.md).

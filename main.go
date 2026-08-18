@@ -8,6 +8,7 @@ import (
 
 	"cria/internal/cli"
 	"cria/internal/config"
+	"cria/internal/tui"
 )
 
 // version identifies this binary; it is what `cria --version` prints and what the
@@ -16,7 +17,7 @@ const version = "0.1.0-dev"
 
 func main() {
 	scaffoldConfigTree()
-	os.Exit(cli.Dispatch(os.Args[1:], version))
+	os.Exit(cli.Dispatch(os.Args[1:], version, tui.Run))
 }
 
 // scaffoldConfigTree gives every invocation — TUI or subcommand — a config tree to
