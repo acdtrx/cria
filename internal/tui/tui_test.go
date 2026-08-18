@@ -98,8 +98,8 @@ func (f *fakeServers) KillHolder(holder serve.Holder) error {
 }
 
 // testHost is the other half of the seam: the config tree the frame lists, the
-// tool check that says what may be launched, and the hub cache behind the
-// cached dots.
+// tool check that says what may be launched, the hub cache both lists are drawn
+// from, and the surgery the cache view's delete key drives.
 type testHost struct {
 	servers  *fakeServers
 	tree     *config.Tree
@@ -107,6 +107,7 @@ type testHost struct {
 	report   tools.Report
 	cache    *hubcache.Cache
 	cacheErr error
+	surgery  *fakeSurgery
 	checks   int // how many times the tool check was run
 }
 
@@ -117,6 +118,7 @@ func newTestHost(fake *fakeServers) *testHost {
 		tree:    &config.Tree{Root: "/home/u/.config/cria"},
 		report:  usableTools(),
 		cache:   &hubcache.Cache{},
+		surgery: &fakeSurgery{},
 	}
 }
 
@@ -128,7 +130,8 @@ func (h *testHost) host() host {
 			h.checks++
 			return h.report
 		},
-		cache: func() (*hubcache.Cache, error) { return h.cache, h.cacheErr },
+		cache:   func() (*hubcache.Cache, error) { return h.cache, h.cacheErr },
+		surgery: h.surgery.surgery(),
 	}
 }
 
@@ -309,20 +312,6 @@ func TestQuitKeys(t *testing.T) {
 				t.Errorf("the quit key returned %T, want a quit", cmd())
 			}
 		})
-	}
-}
-
-// A key whose action is not built yet still says what it would do, rather than
-// doing nothing visible.
-func TestUnwiredKeysReportThemselves(t *testing.T) {
-	frame, _ := testFrame(t, &fakeServers{})
-	frame, _ = press(t, frame, typed('t'))
-
-	if !strings.Contains(frame.alert.text, "not wired yet") {
-		t.Errorf("the tools key left %q on screen, want it to say the pane is not built", frame.alert.text)
-	}
-	if !strings.Contains(plain(frame.View().Content), "not wired yet") {
-		t.Error("the frame does not draw what the last keypress did")
 	}
 }
 

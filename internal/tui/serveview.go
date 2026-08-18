@@ -164,7 +164,7 @@ func (m model) rowLine(listed row, selected bool) string {
 		name = selectedStyle
 	}
 	facts := []string{
-		m.presenceMark(listed.entry.ID),
+		m.presenceMark(listed.entry),
 		name.Render(listed.entry.ID),
 		quietStyle.Render(format.HubReference(listed.entry.Repo, listed.entry.Quant)),
 	}
@@ -175,13 +175,14 @@ func (m model) rowLine(listed row, selected bool) string {
 }
 
 // presenceMark is the cached dot: starting this entry serves what is already on
-// disk, or fetches it first (docs/specs/TUI.md).
-func (m model) presenceMark(id string) string {
-	cached, walked := m.cached[id]
+// disk, or fetches it first (docs/specs/TUI.md). The answer is the cache walk's
+// own — the same read the cache view lists (docs/specs/CACHE.md), asked one
+// entry at a time.
+func (m model) presenceMark(entry config.Entry) string {
 	switch {
-	case !walked:
+	case m.cache == nil:
 		return quietStyle.Render(unknownMark)
-	case cached:
+	case m.cache.Presence(entry).Cached:
 		return factStyle.Render(cachedMark)
 	}
 	return quietStyle.Render(absentMark)
@@ -235,7 +236,7 @@ func (m model) entryDetail(entry config.Entry, inner int) []string {
 	if len(entry.Args) > 0 {
 		add("args", strings.Join(entry.Args, " "), factStyle)
 	}
-	add("cached", m.cachedWord(entry.ID), quietStyle)
+	add("cached", m.cachedWord(entry), quietStyle)
 
 	command, refused := m.composedCommand(entry)
 	style := factStyle
@@ -247,12 +248,11 @@ func (m model) entryDetail(entry config.Entry, inner int) []string {
 }
 
 // cachedWord is the dot spelled out, for the pane that has room for words.
-func (m model) cachedWord(id string) string {
-	cached, walked := m.cached[id]
+func (m model) cachedWord(entry config.Entry) string {
 	switch {
-	case !walked:
+	case m.cache == nil:
 		return "not read yet"
-	case cached:
+	case m.cache.Presence(entry).Cached:
 		return "yes — starting it serves what is on disk"
 	}
 	return "no — starting it downloads first"

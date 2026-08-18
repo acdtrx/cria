@@ -1,6 +1,20 @@
 # Step 14 — cache view and tools pane
 
-**Phase 5 · Status: not started**
+**Phase 5 · Status: done (2026-08-18) — phase 5 ends green.** Suite green
+(92 tui test functions), all gates pass; verified live on the real cache:
+header total matches `du -sk` exactly, nested gguf tree with verbatim tags
+(UD- quants, mmproj-BF16.gguf), the 869 MiB real partial row, details with
+used-by join and serving-now, delete drill on a purpose-downloaded repo
+(confirm modal rendering the plan; reclaimed exactly; cache byte-identical
+after), served-guard refusals for quant and repo targets from the live
+server, global stop working from the cache view, used-by warning in the
+confirm, tools pane rendering the real report. Decisions: one walk feeds
+both views (model holds *hubcache.Cache; presence derives from it); walk
+rule = a list is visible (overlays don't walk) or a download runs; two
+cursors, x cache-only, ⏎ serve-only; used-by joins via MatchQuant while
+serving-now mirrors the deletion guard so pane and refusal cannot disagree;
+ServedError rendered verbatim; confirm counts "paths" not "files" (blobs +
+symlinks); tools report fetched fresh on open (deliberate user action).
 
 ## Intent
 

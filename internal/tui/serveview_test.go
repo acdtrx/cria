@@ -302,9 +302,10 @@ func TestKeybarOffersStartForTheSelection(t *testing.T) {
 	}
 }
 
-// The cache walk is paid where its answer is read: the dots while the list is on
-// screen, and a download's progress wherever the user is standing. Nowhere else
-// does a refresh walk every blob on disk (docs/specs/SERVE.md).
+// The cache walk is paid where its answer is read: whichever list is on screen —
+// the entry list's dots, the cache view itself — and a download's progress
+// wherever the user is standing. Nowhere else does a refresh walk every blob on
+// disk (docs/specs/SERVE.md, docs/specs/CACHE.md).
 func TestCacheIsWalkedOnlyWhereItIsRead(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -317,11 +318,12 @@ func TestCacheIsWalkedOnlyWhereItIsRead(t *testing.T) {
 			want:  true,
 		},
 		{
-			name: "the cache view is, with nothing downloading",
+			name: "the cache view is: it is the walk drawn out",
 			frame: func(m model) model {
 				m.view = viewCache
 				return m
 			},
+			want: true,
 		},
 		{
 			name: "the log tail is over the entry list",
@@ -331,9 +333,24 @@ func TestCacheIsWalkedOnlyWhereItIsRead(t *testing.T) {
 			},
 		},
 		{
-			name: "a download is running, wherever the user is standing",
+			name: "the tools report is over the cache view",
+			frame: func(m model) model {
+				m.view, m.toolsOpen = viewCache, true
+				return m
+			},
+		},
+		{
+			name: "a delete is waiting for its answer",
 			frame: func(m model) model {
 				m.view = viewCache
+				m.confirm = &deletion{plan: &hubcache.Plan{}}
+				return m
+			},
+		},
+		{
+			name: "a download is running behind whatever has the keyboard",
+			frame: func(m model) model {
+				m.log = logScreen{open: true}
 				m.listing = serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseDownloading)}}
 				return m
 			},
@@ -378,7 +395,11 @@ func TestUnwalkedEntriesClaimNothing(t *testing.T) {
 	world.cacheErr = errUnreadableCache
 	frame = load(t, frame)
 
-	if mark := plain(frame.presenceMark("qwen")); mark != unknownMark {
+	qwen, found := frame.entryNamed("qwen")
+	if !found {
+		t.Fatal("the test tree holds no qwen entry")
+	}
+	if mark := plain(frame.presenceMark(qwen)); mark != unknownMark {
 		t.Errorf("an entry the cache could not be asked about is marked %q, want %q", mark, unknownMark)
 	}
 	if drawn := plain(frame.View().Content); !strings.Contains(drawn, "cannot read the model cache") {

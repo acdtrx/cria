@@ -57,13 +57,26 @@ type servers interface {
 
 // host is everything the frame reads this machine through: the lifecycle, the
 // config tree it lists, the tool check that says what may be launched, and the
-// hub cache that says what is already on disk. One value, wired in Run and
-// replaced wholesale by the tests.
+// hub cache that says what is already on disk — read by the walk, written by the
+// surgery. One value, wired in Run and replaced wholesale by the tests.
 type host struct {
 	servers servers
 	entries func() (*config.Tree, error)
 	tools   func(config.Settings) tools.Report
 	cache   func() (*hubcache.Cache, error)
+	surgery surgery
+}
+
+// surgery is the deletion half of hubcache as the cache view drives it: one
+// planner per unit docs/specs/CACHE.md makes deletable, and the execute that
+// carries a plan out. Each is hubcache's own call rather than a dispatcher over
+// them (CODING-RULES §1); naming them here is what lets the whole delete flow —
+// the refusal, the confirmation, the drift — be exercised with no cache on disk.
+type surgery struct {
+	quant    func(repo *hubcache.Repo, quant string, served []hubcache.Served) (*hubcache.Plan, error)
+	repo     func(repo *hubcache.Repo, served []hubcache.Served) (*hubcache.Plan, error)
+	partials func(repo *hubcache.Repo, served []hubcache.Served) (*hubcache.Plan, error)
+	execute  func(plan *hubcache.Plan, served []hubcache.Served) (int64, error)
 }
 
 // view names the screen the frame is routed to. Two of them in v1
@@ -91,11 +104,6 @@ type alert struct {
 	bad  bool // cria could not do the thing, rather than merely did it
 }
 
-// pending is what a key whose action is not built yet answers with. The keybar
-// still offers it: the bar is the map of the frame, and a key that vanishes
-// until its screen exists would make the map change under the user.
-func pending(what string) alert { return alert{text: what + " is not wired yet"} }
-
 // The messages the frame runs on: the refresh tick, and every answer that comes
 // back off the UI thread.
 type (
@@ -104,16 +112,16 @@ type (
 		listing serve.StatusListing
 		err     error
 	}
-	// entriesMsg is one read of the config tree, and — when the entry list is
-	// what the user is looking at — the cache walk behind the cached dots. The
-	// two travel together because the walk is asked entry by entry.
+	// entriesMsg is one read of the config tree and — when a list that draws it
+	// is on screen — one walk of the hub cache. The two travel together because
+	// what either list says about a model is the two of them joined.
 	entriesMsg struct {
 		tree     *config.Tree
 		err      error
 		report   tools.Report
 		reported bool // the tool check ran; it runs once, on the first tree read
-		cached   map[string]bool
-		walked   bool // the cache was read, so cached is the whole answer
+		read     *hubcache.Cache
+		walked   bool // the cache was read, so read is the whole answer
 		cacheErr error
 	}
 )
@@ -137,12 +145,18 @@ type model struct {
 	treeErr  error
 	report   tools.Report
 	reported bool
-	cached   map[string]bool
+	cache    *hubcache.Cache
 	cacheErr error
 
-	selected int    // the highlighted row of the active backend's list
-	modal    *modal // the refusal a start came back with; nil when there is none
-	log      logScreen
+	// Each list keeps its own cursor: the entry list and the cache list hold
+	// different things, and coming back to a view lands where it was left.
+	selected      int
+	cacheSelected int
+
+	modal     *modal    // the refusal a start came back with; nil when there is none
+	confirm   *deletion // the delete waiting for its answer; nil when none is
+	toolsOpen bool      // the tools report is up, over whichever view is behind it
+	log       logScreen
 
 	width  int
 	height int
@@ -184,6 +198,12 @@ func machine(root string) host {
 		entries: readTree,
 		tools:   tools.Check,
 		cache:   readCache,
+		surgery: surgery{
+			quant:    hubcache.PlanQuant,
+			repo:     hubcache.PlanRepo,
+			partials: hubcache.PlanPartials,
+			execute:  hubcache.Execute,
+		},
 	}
 }
 
@@ -250,6 +270,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case holderKilledMsg:
 		return m.holderKilled(msg), nil
+	case plannedMsg:
+		return m.planned(msg), nil
+	case deletedMsg:
+		return m.deleted(msg)
+	case toolsMsg:
+		m.report, m.reported = msg.report, true
+		return m, nil
 	case logMsg:
 		m.log = m.log.read(msg)
 		return m, nil
@@ -301,22 +328,26 @@ func (m model) loaded(msg entriesMsg) model {
 		m.report, m.reported = msg.report, true
 	}
 	if msg.walked {
-		m.cached, m.cacheErr = msg.cached, nil
+		m.cache, m.cacheErr = msg.read, nil
 	}
 	if msg.cacheErr != nil {
 		m.cacheErr = msg.cacheErr
 	}
-	return m.reselect(m.selected)
+	return m.reselect(m.cursor())
 }
 
-// press routes one keystroke. A modal and the log screen each take the keyboard
-// while they are up: what they offer is what the bar draws, and every other key
-// would act on something the user is no longer looking at.
+// press routes one keystroke. A modal, the tools report and the log screen each
+// take the keyboard while they are up: what they offer is what the bar draws,
+// and every other key would act on something the user is no longer looking at.
 func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.modal != nil {
+	switch {
+	case m.modal != nil:
 		return m.pressInModal(pressed)
-	}
-	if m.log.open {
+	case m.confirm != nil:
+		return m.pressInConfirm(pressed)
+	case m.toolsOpen:
+		return m.pressInTools(pressed)
+	case m.log.open:
 		return m.pressInLog(pressed)
 	}
 
@@ -328,15 +359,17 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(pressed, m.keys.view):
 		m.view = m.view.other()
 		m.alert = alert{}
-		return m.reselect(m.selected), nil
+		return m.reselect(m.cursor()), nil
 	case key.Matches(pressed, m.keys.tools):
-		m.alert = pending("the tools pane")
+		return m.openTools()
 	case key.Matches(pressed, m.keys.up):
-		return m.reselect(m.selected - 1), nil
+		return m.reselect(m.cursor() - 1), nil
 	case key.Matches(pressed, m.keys.down):
-		return m.reselect(m.selected + 1), nil
+		return m.reselect(m.cursor() + 1), nil
 	case key.Matches(pressed, m.keys.start):
 		return m.startSelected()
+	case key.Matches(pressed, m.keys.remove):
+		return m.deleteSelected()
 	case key.Matches(pressed, m.keys.stop):
 		return m.stopShownServer()
 	case key.Matches(pressed, m.keys.forceKill):
@@ -365,31 +398,59 @@ func (m model) switchBackend() model {
 	if err := savePrefs(m.root, m.prefs); err != nil {
 		m.alert = alert{text: err.Error(), bad: true}
 	}
-	return m.reselect(0)
+	// The entry list is another backend's now, so its cursor starts at the top.
+	// The cache list holds the same models either way and keeps its place.
+	m.selected = 0
+	return m.reselect(m.cursor())
 }
 
-// reselect moves the cursor to a row that exists and matches the selection keys
-// to what it now points at. Every change that can move the list under the cursor
-// — a keypress, a re-read of the tree, a backend switch, a view switch — goes
-// through here, so the cursor never points past the end of a list and the bar
-// never offers a start there is no entry for.
+// reselect moves the visible list's cursor to a row that exists and matches the
+// selection keys to what it now points at. Every change that can move a list
+// under its cursor — a keypress, a re-read of the tree, a cache walk, a backend
+// switch, a view switch — goes through here, so a cursor never points past the
+// end of its list and the bar never offers an action there is no row for.
 func (m model) reselect(to int) model {
-	rows := m.rows()
-	switch {
-	case to < 0 || len(rows) == 0:
-		m.selected = 0
-	case to >= len(rows):
-		m.selected = len(rows) - 1
-	default:
-		m.selected = to
+	if m.view == viewCache {
+		m.cacheSelected = clamped(to, len(m.cacheRows()))
+	} else {
+		m.selected = clamped(to, len(m.rows()))
 	}
+	return m.rebindSelection()
+}
 
-	// The selection belongs to the entry list, so its keys are the serve view's
-	// alone: the cache view has a selection of its own (docs/specs/CACHE.md).
-	onList := m.view == viewServe && len(rows) > 0
-	m.keys.up.SetEnabled(onList)
-	m.keys.down.SetEnabled(onList)
-	m.keys.start.SetEnabled(onList && rows[m.selected].broken == nil)
+// clamped keeps a cursor on a row that exists.
+func clamped(to, rows int) int {
+	switch {
+	case to < 0 || rows == 0:
+		return 0
+	case to >= rows:
+		return rows - 1
+	}
+	return to
+}
+
+// cursor is where the visible list's cursor sits.
+func (m model) cursor() int {
+	if m.view == viewCache {
+		return m.cacheSelected
+	}
+	return m.selected
+}
+
+// rebindSelection matches the selection keys to the row the cursor is on. Each
+// view has its own selection and its own key — the entry list starts what it
+// highlights, the cache list deletes it (docs/specs/CACHE.md) — and a key the
+// bar does not draw does nothing when pressed.
+func (m model) rebindSelection() model {
+	entry, hasEntry := m.selectedRow()
+	_, hasCached := m.selectedCacheRow()
+	onEntryList := m.view == viewServe && hasEntry
+	onCacheList := m.view == viewCache && hasCached
+
+	m.keys.up.SetEnabled(onEntryList || onCacheList)
+	m.keys.down.SetEnabled(onEntryList || onCacheList)
+	m.keys.start.SetEnabled(onEntryList && entry.broken == nil)
+	m.keys.remove.SetEnabled(onCacheList)
 	return m
 }
 
@@ -402,8 +463,7 @@ func (m model) refresh() tea.Msg {
 
 // readEntries re-reads what the config tree declares — an agent writing an entry
 // while the TUI is open is the expected way one arrives (docs/cria.md, principle
-// 5) — and asks the cache which of those entries could start without
-// downloading.
+// 5) — and walks the cache the two lists are drawn from.
 //
 // The tool check runs once: it execs `llama-server --version`, and asking again
 // every two seconds would put an exec between the display and every frame. A
@@ -428,16 +488,22 @@ func (m model) readEntries() tea.Msg {
 		msg.cacheErr = err
 		return msg
 	}
-	msg.cached, msg.walked = presenceOf(tree, read), true
+	msg.read, msg.walked = read, true
 	return msg
 }
 
 // walksTheCache reports whether this tick has a reason to walk the cache. The
 // walk sizes every blob on disk, so it is paid only where its answer is read:
-// the entry list's cached dots while that list is on screen, and a download's
-// progress wherever the user is standing (docs/specs/SERVE.md).
+// whichever list is on screen — the entry list's cached dots, the cache view
+// itself — and a download's progress wherever the user is standing
+// (docs/specs/SERVE.md, docs/specs/CACHE.md).
+//
+// A screen that has taken the keyboard is drawn over both lists, so nothing on
+// it reads a walk. The delete confirmation is one of those, and doubly so: it
+// renders a plan made against the cache as it was, and the plan's own
+// re-derivation is what checks that against the cache as it is.
 func (m model) walksTheCache() bool {
-	if m.view == viewServe && !m.log.open && m.modal == nil {
+	if !m.log.open && !m.toolsOpen && m.modal == nil && m.confirm == nil {
 		return true
 	}
 	for _, status := range m.listing.Servers {
@@ -446,16 +512,6 @@ func (m model) walksTheCache() bool {
 		}
 	}
 	return false
-}
-
-// presenceOf answers, for every entry the tree declares, whether starting it
-// would download anything (docs/specs/TUI.md).
-func presenceOf(tree *config.Tree, read *hubcache.Cache) map[string]bool {
-	cached := make(map[string]bool, len(tree.Entries))
-	for _, entry := range tree.Entries {
-		cached[entry.ID] = read.Presence(entry).Cached
-	}
-	return cached
 }
 
 // scheduleRefresh arms the next tick.
@@ -537,11 +593,14 @@ func (m model) screen(width, rows int) string {
 	switch {
 	case m.log.open:
 		return m.log.panel(width, rows)
+	case m.toolsOpen:
+		return m.toolsPanel(width, rows)
 	case m.modal != nil:
 		return m.modal.panel(width, rows)
+	case m.confirm != nil:
+		return m.confirmPanel(width, rows)
 	case m.view == viewCache:
-		return pane("cache", width,
-			sizeLines([]string{quietStyle.Render("under construction — the model table and its surgery")}, rows-2))
+		return m.cacheScreen(width, rows)
 	}
 	return m.serveScreen(width, rows)
 }
@@ -558,12 +617,16 @@ func (m model) groups() []keyGroup {
 	switch {
 	case m.modal != nil:
 		return []keyGroup{{label: modalScope, bindings: []key.Binding{m.keys.killHolder, m.keys.leaveModal}}, global}
+	case m.confirm != nil:
+		return []keyGroup{{label: deleteScope, bindings: []key.Binding{m.keys.confirmDelete, m.keys.cancelDelete}}, global}
+	case m.toolsOpen:
+		return []keyGroup{{label: toolsScope, bindings: []key.Binding{m.keys.leaveTools}}, global}
 	case m.log.open:
 		return []keyGroup{{label: logScope, bindings: []key.Binding{m.keys.leaveLog}}, global}
 	}
 
 	return []keyGroup{
-		{label: selectionScope, bindings: []key.Binding{m.keys.start}},
+		{label: selectionScope, bindings: []key.Binding{m.keys.start, m.keys.remove}},
 		{label: serverScope, bindings: []key.Binding{m.keys.stop, m.keys.forceKill, m.keys.log, m.keys.restart, m.keys.dismiss}},
 		{label: globalScope, bindings: []key.Binding{m.keys.backend, m.keys.view, m.keys.tools, m.keys.quit}},
 	}
@@ -584,9 +647,10 @@ func (m model) frameWidth() int {
 // keymap is every key the frame binds, in the three scopes the bar groups them
 // by plus the two a screen taking the keyboard offers.
 type keymap struct {
-	start key.Binding
-	up    key.Binding
-	down  key.Binding
+	start  key.Binding
+	remove key.Binding
+	up     key.Binding
+	down   key.Binding
 
 	stop      key.Binding
 	forceKill key.Binding
@@ -599,9 +663,12 @@ type keymap struct {
 	tools   key.Binding
 	quit    key.Binding
 
-	killHolder key.Binding
-	leaveModal key.Binding
-	leaveLog   key.Binding
+	killHolder    key.Binding
+	leaveModal    key.Binding
+	confirmDelete key.Binding
+	cancelDelete  key.Binding
+	leaveTools    key.Binding
+	leaveLog      key.Binding
 }
 
 // newKeymap is the frame's keys as they are bound and as the bar spells them.
@@ -610,21 +677,25 @@ type keymap struct {
 // obvious off a narrow bar.
 func newKeymap() keymap {
 	return keymap{
-		start:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "start")),
-		up:         key.NewBinding(key.WithKeys("up", "k")),
-		down:       key.NewBinding(key.WithKeys("down", "j")),
-		stop:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "stop")),
-		forceKill:  key.NewBinding(key.WithKeys("K"), key.WithHelp("K", "kill")),
-		log:        key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log")),
-		restart:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
-		dismiss:    key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "dismiss")),
-		backend:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("⇥", "backend")),
-		view:       key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "view")),
-		tools:      key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "tools")),
-		quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
-		killHolder: key.NewBinding(key.WithKeys("k"), key.WithHelp("k", "kill it")),
-		leaveModal: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "leave it alone")),
-		leaveLog:   key.NewBinding(key.WithKeys("esc", "l"), key.WithHelp("esc", "close")),
+		start:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "start")),
+		remove:        key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "delete")),
+		up:            key.NewBinding(key.WithKeys("up", "k")),
+		down:          key.NewBinding(key.WithKeys("down", "j")),
+		stop:          key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "stop")),
+		forceKill:     key.NewBinding(key.WithKeys("K"), key.WithHelp("K", "kill")),
+		log:           key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log")),
+		restart:       key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
+		dismiss:       key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "dismiss")),
+		backend:       key.NewBinding(key.WithKeys("tab"), key.WithHelp("⇥", "backend")),
+		view:          key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "view")),
+		tools:         key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "tools")),
+		quit:          key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+		killHolder:    key.NewBinding(key.WithKeys("k"), key.WithHelp("k", "kill it")),
+		leaveModal:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "leave it alone")),
+		confirmDelete: key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "delete")),
+		cancelDelete:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+		leaveTools:    key.NewBinding(key.WithKeys("esc", "t"), key.WithHelp("esc", "close")),
+		leaveLog:      key.NewBinding(key.WithKeys("esc", "l"), key.WithHelp("esc", "close")),
 	}
 }
 

@@ -19,6 +19,8 @@ const (
 	serverScope    = "server"
 	globalScope    = "global"
 	modalScope     = "held port"
+	deleteScope    = "delete"
+	toolsScope     = "tools"
 	logScope       = "log"
 )
 
