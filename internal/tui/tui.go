@@ -53,6 +53,7 @@ type servers interface {
 	Kill(record serve.Record) error
 	Dismiss(record serve.Record) error
 	Warm(record serve.Record) error
+	Bench(record serve.Record, spec serve.BenchSpec, report func(serve.BenchStep)) serve.BenchResult
 	PortUse(port int) (serve.PortUse, error)
 	KillHolder(holder serve.Holder) error
 }
@@ -162,6 +163,14 @@ type model struct {
 	pick      *pick     // the server key waiting for the server it means; nil when none is
 	toolsOpen bool      // the tools report is up, over whichever view is behind it
 	log       logScreen
+
+	// This session's benchmarks: the pane that shows them, every sweep that has
+	// finished, and the one still running (benchpane.go). They live as long as
+	// this cria does — a measurement is of this machine at this moment, and
+	// nothing about it is written down.
+	benchOpen bool
+	benchLog  []serve.BenchResult
+	benching  *benchRun
 
 	width  int
 	height int
@@ -283,6 +292,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toolsMsg:
 		m.report, m.reported = msg.report, true
 		return m, nil
+	case benchStepMsg:
+		return m.benchStepped(msg)
+	case benchedMsg:
+		return m.benched(msg)
 	case logMsg:
 		m.log = m.log.read(msg)
 		return m, nil
@@ -360,7 +373,12 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case m.log.open:
 		return m.pressInLog(pressed)
 	case m.pick != nil:
+		// The pick comes before the bench pane rather than after it: ⏎ in that
+		// pane is what arms the pick, and the question is answered in the status
+		// box above the pane it was asked from.
 		return m.pressInPick(pressed)
+	case m.benchOpen:
+		return m.pressInBench(pressed)
 	}
 
 	switch {
@@ -381,6 +399,8 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.show(viewServe), nil
 	case key.Matches(pressed, m.keys.tools):
 		return m.openTools()
+	case key.Matches(pressed, m.keys.bench):
+		return m.openBench()
 	case key.Matches(pressed, m.keys.up):
 		return m.reselect(m.cursor() - 1), nil
 	case key.Matches(pressed, m.keys.down):
@@ -553,7 +573,7 @@ func (m model) readEntries() tea.Msg {
 // renders a plan made against the cache as it was, and the plan's own
 // re-derivation is what checks that against the cache as it is.
 func (m model) walksTheCache() bool {
-	if !m.log.open && !m.toolsOpen && m.modal == nil && m.confirm == nil {
+	if !m.log.open && !m.toolsOpen && !m.benchOpen && m.modal == nil && m.confirm == nil {
 		return true
 	}
 	for _, status := range m.listing.Servers {
@@ -651,6 +671,8 @@ func (m model) screen(width, rows int) string {
 		return m.log.panel(width, rows)
 	case m.toolsOpen:
 		return m.toolsPanel(width, rows)
+	case m.benchOpen:
+		return m.benchPanel(width, rows)
 	case m.modal != nil:
 		return m.modal.panel(width, rows)
 	case m.confirm != nil:
@@ -683,12 +705,14 @@ func (m model) groups() []keyGroup {
 		return []keyGroup{{label: logScope, bindings: []key.Binding{m.keys.leaveLog}}, global}
 	case m.pick != nil:
 		return []keyGroup{{label: m.pick.action.scope(), bindings: []key.Binding{m.keys.runPick, m.keys.cancelPick}}, global}
+	case m.benchOpen:
+		return []keyGroup{{label: benchScope, bindings: []key.Binding{m.keys.runBench, m.keys.leaveBench}}, global}
 	}
 
 	return []keyGroup{
 		{label: selectionScope, bindings: []key.Binding{m.keys.start, m.keys.remove}},
 		{label: serverScope, bindings: []key.Binding{m.keys.stop, m.keys.forceKill, m.keys.log, m.keys.restart, m.keys.dismiss}},
-		{label: globalScope, bindings: []key.Binding{m.keys.backend, m.keys.cache, m.keys.clearAlert, m.keys.back, m.keys.tools, m.keys.quit}},
+		{label: globalScope, bindings: []key.Binding{m.keys.backend, m.keys.cache, m.keys.clearAlert, m.keys.back, m.keys.tools, m.keys.bench, m.keys.quit}},
 	}
 }
 
@@ -723,6 +747,7 @@ type keymap struct {
 	back       key.Binding
 	clearAlert key.Binding
 	tools      key.Binding
+	bench      key.Binding
 	quit       key.Binding
 
 	killHolder    key.Binding
@@ -731,6 +756,8 @@ type keymap struct {
 	cancelDelete  key.Binding
 	leaveTools    key.Binding
 	leaveLog      key.Binding
+	runBench      key.Binding
+	leaveBench    key.Binding
 
 	pickUp     key.Binding
 	pickDown   key.Binding
@@ -763,6 +790,7 @@ func newKeymap() keymap {
 		back:          key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 		clearAlert:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "dismiss")),
 		tools:         key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "tools")),
+		bench:         key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "bench")),
 		quit:          key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 		killHolder:    key.NewBinding(key.WithKeys("k"), key.WithHelp("k", "kill it")),
 		leaveModal:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "leave it alone")),
@@ -770,6 +798,8 @@ func newKeymap() keymap {
 		cancelDelete:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 		leaveTools:    key.NewBinding(key.WithKeys("esc", "t"), key.WithHelp("esc", "close")),
 		leaveLog:      key.NewBinding(key.WithKeys("esc", "l"), key.WithHelp("esc", "close")),
+		runBench:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "bench")),
+		leaveBench:    key.NewBinding(key.WithKeys("esc", "b"), key.WithHelp("esc", "close")),
 		pickUp:        key.NewBinding(key.WithKeys("up", "k")),
 		pickDown:      key.NewBinding(key.WithKeys("down", "j")),
 		runPick:       key.NewBinding(key.WithKeys("enter")),

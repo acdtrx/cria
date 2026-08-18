@@ -22,6 +22,7 @@ const (
 	deleteScope    = "delete"
 	toolsScope     = "tools"
 	logScope       = "log"
+	benchScope     = "bench"
 )
 
 // How the bar reads: keys within a scope are separated by a thin dot, scopes by

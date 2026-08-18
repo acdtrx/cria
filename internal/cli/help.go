@@ -22,6 +22,7 @@ SUBCOMMANDS
   start <id> [--wait]       start the entry <id>; --wait blocks until it serves or fails
   stop [<id>]               stop a running server; the id is required when several run
   status [--json]           what every server cria started is doing right now
+  bench [<id>] [flags]      measure a running server: prefill and decode tokens/second
   list [--paths]            the entries the config tree declares
   new <id> [--llama|--mlx]  scaffold an entry file and open your editor on it
   edit <id>                 open an entry's file in $VISUAL, else $EDITOR
@@ -31,7 +32,10 @@ SUBCOMMANDS
 
 FLAGS
   --wait      start: block until the server answers its health endpoint, or fails
-  --json      status: emit the same facts as one JSON document
+  --json      status, bench: emit the same facts as one JSON document
+  --sizes     bench: prompt sizes in tokens, comma-separated (default 16,4096,16384)
+  --runs      bench: measured runs per size (default 3)
+  --gen       bench: tokens each run asks the server to generate (default 256)
   --paths     list: add each entry's file path
   --llama     new: scaffold a llama entry — the backend a bare cria new takes
   --mlx       new: scaffold an mlx entry

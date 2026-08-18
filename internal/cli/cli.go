@@ -36,7 +36,7 @@ const (
 // subcommands is the whole v1 surface (docs/specs/CLI.md), in the order the help
 // page presents it: the server lifecycle, then the config tree, then the two
 // generators. Bare `cria` opens the TUI instead of naming a subcommand.
-var subcommands = []string{"start", "stop", "status", "list", "new", "edit", "docs", "wired-limit"}
+var subcommands = []string{"start", "stop", "status", "bench", "list", "new", "edit", "docs", "wired-limit"}
 
 // The flags the surface has, all booleans (docs/specs/CLI.md). `cria new` takes
 // two because they are peers: the backend it scaffolds can be named either way,
@@ -88,6 +88,7 @@ type servers interface {
 	PortUse(port int) (serve.PortUse, error)
 	ListensOn(record serve.Record) (bool, []int, error)
 	Warm(record serve.Record) error
+	Bench(record serve.Record, spec serve.BenchSpec, report func(serve.BenchStep)) serve.BenchResult
 }
 
 // app is one invocation: its two output streams and the subsystems it drives.
@@ -157,6 +158,8 @@ func (a *app) run(args []string, version string) int {
 		return a.stop(args[1:])
 	case "status":
 		return a.status(args[1:])
+	case "bench":
+		return a.bench(args[1:])
 	case "list":
 		return a.list(args[1:])
 	case "new":

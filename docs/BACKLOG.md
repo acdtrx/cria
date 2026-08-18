@@ -52,6 +52,19 @@ Group entries under headings as themes emerge.
   Revisit trigger: MLX first-starts of large models become common and the
   running-but-actually-fetching window proves confusing in daily use.
 
+## Config
+
+- **Seed `cria new` from a URL (`--from <url>`).** Pull an entry TOML from a
+  hosted profile collection (e.g. a personal GitHub repo) as the scaffold
+  instead of the schema example — still create-only, still opened in the editor
+  so pulled args get eyes before they ever reach a server. Deliberately NOT a
+  registry (anti-goals; profiles are half machine-specific anyway), and the
+  durability half of the original idea needs no feature: the config tree is
+  plain TOML and versions perfectly as its own git repo. (noted 2026-08-19,
+  idea not fully framed by the user's own account.) Revisit trigger: a profile
+  actually gets exchanged between people or machines and re-creating it via
+  agent/docs feels like friction.
+
 ## Cache view
 
 - **Aliased blobs show as one file.** The walker keys a repo's files by blob, so

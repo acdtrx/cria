@@ -120,3 +120,31 @@ failure states.
   phase, uptime, memory (RSS) and CPU, health, log path. `--json` emits the same
   facts as one JSON document — the machine contract for agents. Exits zero when at
   least one server is live, non-zero when none is.
+
+## Benchmarking (settled 2026-08-19)
+
+`cria bench` measures a running server's prefill and decode rates per prompt
+size, through its OpenAI HTTP endpoint — a deliberate user action against a
+documented interface, uniform across backends by construction:
+
+- **Client-side measurement only.** Prefill = the server's own
+  `usage.prompt_tokens` over time-to-first-token; decode = streamed tokens over
+  the first-to-last-token window (the first token closes the prefill and is not
+  counted in decode). llama-server's proprietary `timings` field is never read —
+  asymmetric data would break the llama-vs-mlx comparison the bench exists for.
+- **Streaming facts, verified live (2026-08-19)**: `stream_options.include_usage`
+  is always sent (mlx_lm.server reports usage only with it; llama-server always
+  does); SSE comment lines are skipped (mlx emits `: keepalive` while
+  prefilling — read as content it would fake the TTFT); llama enforces its
+  context size with HTTP 400 while mlx enforces nothing.
+- **Honest numbers**: every run gets a unique prompt (llama caches prompt
+  prefixes — a repeated prompt fakes an instant prefill; `cached_tokens` is
+  watched and a material share is warned about); the unmeasured warmup doubles
+  as chars-per-token calibration so sizes land near their targets, and sizes
+  are labeled by the server's actual token count; filler that the model answers
+  tersely leaves nothing to time, so runs the model ended early are excluded
+  from decode means rather than averaged in as zero. The smallest size is 16
+  tokens — never an empty prompt (it wedges mlx_lm.server).
+- A size that fails carries its reason and the sweep continues; one bench runs
+  at a time. The TUI's bench pane (`docs/specs/TUI.md`) always runs the default
+  sweep; sizing flags are CLI-only.

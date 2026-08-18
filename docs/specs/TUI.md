@@ -38,6 +38,14 @@ keybinds get detailed as they are built.
   before the keypress.
 - **The tools report is a pane toggled by a global keybind**, hidden by default
   (`docs/specs/TOOLS.md` owns its content).
+- **The bench pane** (settled 2026-08-19, user-designed): a global keybind opens
+  the session's bench log — every completed sweep appended with its per-size
+  table, kept for the session only, never persisted. ⏎ inside the pane starts a
+  bench: one live server measures immediately, several arm the pick ("which
+  server to bench"), one bench at a time. The pane always runs the default
+  sweep — sizing flags are CLI territory. Closing the pane leaves a running
+  bench going; its completion lands on the notice line, its result in the log.
+  The measurement contract is `docs/specs/SERVE.md`'s.
 - **The notice line is one permanently reserved row** under the status box
   (settled 2026-08-18): it carries only what the boxes cannot show — refusals,
   errors, outcomes with information (bytes reclaimed, a freed port), and the

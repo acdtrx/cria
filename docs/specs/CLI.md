@@ -28,6 +28,13 @@ its subsystem.
   unknown id, or a non-zero editor exit refuse with exit 1.
 - `cria --help` / `-h` / `help` — one page: the subcommands, the flags, the
   exit-code rule, and the pointers agents need (`cria docs`, the validate loop).
+- `cria bench [<id>] [--sizes 16,4096,16384] [--runs N] [--gen N] [--json]`
+  (settled 2026-08-19) — measures a running server's prefill and decode rates
+  per prompt size (`docs/specs/SERVE.md` owns the measurement contract). No id
+  follows stop's convention (one live server measures it, several refuse naming
+  them). The smallest size is 16 tokens; `--sizes 0` clamps to it with a note.
+  Exit 0 when every size measured; 1 when any size had nothing to measure —
+  partial results still print.
 - `cria wired-limit <MB>` (settled 2026-08-18, user-designed) — generates the
   launchd plist that pins `iogpu.wired_limit_mb` at boot (Apple-silicon Macs
   reset it, and big models need the headroom): the plist to **stdout** so a
@@ -39,9 +46,9 @@ its subsystem.
 
 Nothing else: no cache operations from the CLI (`docs/BACKLOG.md`).
 
-Flags: `--wait` on start, `--json` on status, `--paths` on list, `--llama`/`--mlx`
-on new, `--version` and `--help` on the bare binary — nothing else speaks machine
-or takes options.
+Flags: `--wait` on start, `--json` on status and bench, `--paths` on list,
+`--llama`/`--mlx` on new, `--sizes`/`--runs`/`--gen` on bench, `--version` and
+`--help` on the bare binary — nothing else speaks machine or takes options.
 
 ## Rules
 

@@ -36,11 +36,19 @@ type fakeServers struct {
 
 	warmErr error
 
+	// What a sweep comes back with, and the progress it reports on the way. A
+	// test that only cares that a bench ran leaves all three empty.
+	benchSizes []serve.BenchSize
+	benchSteps []serve.BenchStep
+	benchAt    time.Time
+
 	started   []string
 	stopped   []string
 	killed    []string
 	dismissed []string
 	warmed    []string
+	benched   []string // the servers Bench was asked to measure, in order
+	specs     []serve.BenchSpec
 	holders   []int
 	asked     []int // the ports a start asked about, in the order it asked
 }
@@ -105,6 +113,18 @@ func (f *fakeServers) Warm(record serve.Record) error {
 	}
 	f.warmed = append(f.warmed, record.EntryID)
 	return f.warmErr
+}
+
+// Bench answers with the sizes a test scripted, reporting whatever progress it
+// gave along the way. The sweep itself is serve's — what is exercised here is
+// which server the pane measured, and how the answer is drawn.
+func (f *fakeServers) Bench(record serve.Record, spec serve.BenchSpec, report func(serve.BenchStep)) serve.BenchResult {
+	f.benched = append(f.benched, record.EntryID)
+	f.specs = append(f.specs, spec)
+	for _, step := range f.benchSteps {
+		report(step)
+	}
+	return serve.BenchResult{Record: record, StartedAt: f.benchAt, Spec: spec, Sizes: f.benchSizes}
 }
 
 func (f *fakeServers) PortUse(port int) (serve.PortUse, error) {

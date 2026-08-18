@@ -37,8 +37,15 @@ type fakeServers struct {
 	started  []config.Entry // the entries Start was called with, in order
 	stopped  []string       // the entries Stop was called for, in order
 	warmed   []string       // the servers Warm was asked to load, in order
-	asked    []int          // the ports PortUse was asked about, in order
-	observed int            // how many snapshots the wait took
+	benched  []string       // the servers Bench was asked to measure, in order
+	specs    []serve.BenchSpec
+	asked    []int // the ports PortUse was asked about, in order
+	observed int   // how many snapshots the wait took
+
+	// What a sweep comes back with, and the progress it reports on the way. A
+	// test that only cares that a bench ran leaves both empty.
+	benchSizes []serve.BenchSize
+	benchSteps []serve.BenchStep
 
 	// onWarm runs while Warm is in flight, so a test can read what cria had
 	// printed by the time it started loading the weights.
@@ -137,6 +144,24 @@ func (f *fakeServers) Warm(record serve.Record) error {
 	return f.warmErr
 }
 
+// Bench answers with the sizes a test scripted, reporting whatever progress it
+// gave along the way. The sweep itself is serve's — what is exercised here is
+// which server the command picked, what it asked for, and how it printed the
+// answer.
+func (f *fakeServers) Bench(record serve.Record, spec serve.BenchSpec, report func(serve.BenchStep)) serve.BenchResult {
+	f.benched = append(f.benched, record.EntryID)
+	f.specs = append(f.specs, spec)
+	for _, step := range f.benchSteps {
+		report(step)
+	}
+	return serve.BenchResult{
+		Record:    record,
+		StartedAt: time.Date(2026, 8, 19, 9, 30, 0, 0, time.UTC),
+		Spec:      spec,
+		Sizes:     f.benchSizes,
+	}
+}
+
 func (f *fakeServers) PortUse(port int) (serve.PortUse, error) {
 	f.asked = append(f.asked, port)
 	if f.portErr != nil {
@@ -220,7 +245,7 @@ func TestRouting(t *testing.T) {
 	}{
 		{name: "the version is printed", args: []string{"--version"}, want: exitOK, contains: "cria 9.9.9-test"},
 		{name: "docs prints the config schema", args: []string{"docs"}, want: exitOK, contains: "backend"},
-		{name: "an unknown subcommand names the valid set", args: []string{"serve"}, want: exitUsage, contains: "valid subcommands are: start, stop, status, list, new, edit, docs, wired-limit"},
+		{name: "an unknown subcommand names the valid set", args: []string{"serve"}, want: exitUsage, contains: "valid subcommands are: start, stop, status, bench, list, new, edit, docs, wired-limit"},
 		{name: "start needs an entry id", args: []string{"start"}, want: exitUsage, contains: "usage: cria start <id> [--wait]"},
 		{name: "start takes one entry id", args: []string{"start", "a", "b"}, want: exitUsage, contains: "one entry at a time (got a, b)"},
 		{name: "start refuses a flag it does not know", args: []string{"start", "qwen", "--now"}, want: exitUsage, contains: "unknown flag --now"},

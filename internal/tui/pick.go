@@ -7,7 +7,8 @@ import (
 	"cria/internal/serve"
 )
 
-// This file answers "which server?".
+// This file answers "which server?" — for the server keys, and for the one key
+// in a pane that acts on a server too (benchpane.go).
 //
 // The server keys act on what the status box shows (docs/specs/TUI.md), and the
 // box shows every record cria holds — several at once whenever entries declare
@@ -30,6 +31,7 @@ const (
 	pickLog
 	pickDismiss
 	pickRestart
+	pickBench
 )
 
 // pick is one armed key: what it will do, and where its cursor stands.
@@ -82,6 +84,8 @@ func (m model) carryOut(action pickAction, record serve.Record) (tea.Model, tea.
 		return m.dismissRecord(record)
 	case pickRestart:
 		return m.restartServer(record)
+	case pickBench:
+		return m.startBench(record)
 	}
 	return m.showLog(record)
 }
@@ -150,13 +154,14 @@ func (m model) pickable(action pickAction) []int {
 }
 
 // answers reports whether a server in this phase is something the action can be
-// pointed at: stop, kill and restart mean a server cria can still see — a
-// restart of one is its stop and its start — dismiss means a crash report, and
-// the log is the one thing every record has either way (docs/specs/SERVE.md).
+// pointed at: stop, kill, restart and bench mean a server cria can still see —
+// a restart of one is its stop and its start, and a bench is a request only a
+// running server can answer — dismiss means a crash report, and the log is the
+// one thing every record has either way (docs/specs/SERVE.md).
 func (a pickAction) answers(phase serve.Phase) bool {
 	exited := phase == serve.PhaseExited
 	switch a {
-	case pickStop, pickKill, pickRestart:
+	case pickStop, pickKill, pickRestart, pickBench:
 		return !exited
 	case pickDismiss:
 		return exited
@@ -211,6 +216,8 @@ func (a pickAction) verb() string {
 		return "dismiss"
 	case pickRestart:
 		return "restart"
+	case pickBench:
+		return "bench"
 	}
 	return "log"
 }
