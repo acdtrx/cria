@@ -9,6 +9,31 @@ trigger** — the observed condition that would make it worth building (features
 their place). Date rulings inline: `(ruled YYYY-MM-DD: wait to see if needed.)`.
 Group entries under headings as themes emerge.
 
+## Dropped from v1
+
+- **`cria new` scaffolder.** Generate a commented entry file from an embedded
+  template. (ruled 2026-08-18: agents write config from scratch against `cria
+  docs`, which carries full example configs.) Revisit trigger: writing configs from
+  the docs output proves error-prone in practice, or a human without an agent wants
+  to onboard a model.
+- **Profile layer over entries.** Multiple named param-sets per model with a
+  "current" one, instead of flat launchable entries. (ruled 2026-08-18: reality is
+  one param-set per model; a variant is just another entry file.) Revisit trigger:
+  same-repo entries duplicating args becomes felt friction — e.g. a param change
+  that has to touch many files.
+- **Cache-view growth.** Initiating downloads from the view, scaffolding a config
+  entry from a cached model, richer model details (GGUF header metadata, Hub-API
+  info). (ruled 2026-08-18: the v1 cache view is visibility and cleaning only,
+  `docs/specs/CACHE.md`.) Revisit trigger: wanting to pre-warm a model without
+  starting a server, or the browse-then-ask-an-agent loop proving clunky in daily
+  use.
+- **Hub browsing in the TUI.** Searching `mlx-community` for MLX repos, and listing
+  a repo's quants with sizes before downloading. (ruled 2026-08-18: repo research is
+  the agent's job, on the Hub; in-TUI quant browsing is of the cache, for deletion.
+  The Hub API client exists regardless — download progress needs it.) Revisit
+  trigger: sizing up a repo before download becomes a felt need the agent flow
+  doesn't cover.
+
 ## Platform & distribution
 
 - **Linux as a supported platform.** `linux/amd64` must keep compiling (`CLAUDE.md`,
@@ -30,8 +55,8 @@ Group entries under headings as themes emerge.
 
 - **llama-server router mode.** Recent llama-server hosts several models in one
   process — auto-discovery from the cache, `GET /models`, `POST /models/load` and
-  `/models/unload`, `--models-max`. Could replace process-per-profile on the llama
-  side. Revisit trigger: wanting several GGUF models resident at once, or per-profile
+  `/models/unload`, `--models-max`. Could replace process-per-entry on the llama
+  side. Revisit trigger: wanting several GGUF models resident at once, or per-entry
   process management proving to be daily friction. (noted 2026-08-18: documented and
   maintained upstream, so it clears the bar that log parsing never did.)
 

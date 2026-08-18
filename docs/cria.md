@@ -31,16 +31,27 @@ don't own.
 3. **Servers outlive the TUI; there is no daemon** (settled 2026-08-18). cria spawns
    servers detached, records them in runtime state, and re-attaches on next launch.
    The TUI exists to start, check and stop — closing it stops nothing.
-4. **The config tree is the interface** (settled 2026-08-18). A folder per model
-   holding a `model.toml` and one TOML file per launch profile. The TUI drives what
-   the tree declares and invents no state of its own. Editing config is a text-editor
-   or coding-agent activity; `cria new <model>` scaffolds the folder with commented
-   templates so there is always something to copy and trim.
-5. **Agent-operable by design** (settled 2026-08-18). The expected way a new profile
+4. **The config tree is the interface** (settled 2026-08-18). One TOML file per
+   launchable entry — backend, Hub reference, port, passthrough args; a quant is its
+   own entry, which keeps the backends symmetric, since an MLX quant is its own repo
+   anyway (resettled 2026-08-18 from folder-per-model with profiles: two files of
+   ceremony for a one-param-set-per-model reality; `docs/specs/CONFIG.md` owns the
+   contract, a profile layer waits in `docs/BACKLOG.md`). The TUI drives what the
+   tree declares and invents no serving state of its own; UI preferences live in the
+   state dir, never the tree. Editing config is a text-editor or coding-agent
+   activity: files are written from scratch against `cria docs` (settled 2026-08-18
+   — a `cria new` scaffolder was dropped from v1, `docs/BACKLOG.md`). cria's only
+   writes into the tree are creating the root and an `AGENTS.md` on first run when
+   missing.
+5. **Agent-operable by design** (settled 2026-08-18). The expected way a new entry
    gets written is asking a coding agent to derive one from the model provider's
    recommended parameters. So the binary documents itself: `cria docs` prints the
    config schema from the same definitions the parser uses — the docs cannot drift
-   from the binary — and the config root carries an `AGENTS.md` pointing agents at it.
+   from the binary — plus a complete commented example config per backend, and the
+   config root carries an `AGENTS.md` pointing agents at it. Lifecycle is scriptable
+   for the same reason (settled 2026-08-18): `cria start/stop/status` work without
+   the TUI, and `cria status --json` lets an agent verify that an entry it just
+   wrote actually serves.
 6. **Status over telemetry** (settled 2026-08-18). cria reports what stable
    interfaces expose: process alive, port answering, health endpoint green, raw log
    tail. It never parses log streams for stats — that was llama-runner's mistake, and
@@ -54,18 +65,31 @@ don't own.
 ## v1 surface (the seed scope)
 
 - **Models view** — every model in the HF cache with its quants and true disk sizes
-  (direct cache walk; per-file granularity is the point).
-- **Pick a quant** — given a repo, list its files with sizes via the Hub API; the
-  pick lands in config (via `cria new` or an agent edit). Nothing is fetched until
-  first start.
+  (direct cache walk; per-file granularity is the point). Quant browsing happens
+  here, in the cache, for deletion — pre-download repo research is the agent's job,
+  on the Hub (settled 2026-08-18, `docs/BACKLOG.md`).
 - **Cache surgery** — delete a single GGUF quant; delete an MLX repo; report the
   space reclaimed.
-- **Serve** — pick model + profile, start detached, see status (pid, port, health,
-  uptime), tail the raw log, stop. A first start fetches the model; cria shows a
-  distinct *downloading* state, rendering progress from on-disk cache bytes versus
-  Hub-API sizes — filesystem observation, never parsing anyone's output.
-- **Scaffolding** — `cria new <model>` creates the model folder with a commented
-  `model.toml` and a starter profile; `cria docs` prints the schema.
+- **Serve** — pick an entry, start detached, see status (pid, port, health,
+  uptime), tail the raw log, stop. Ports are fixed in config (per entry or the
+  tree-wide default), servers bind `0.0.0.0` unless config says otherwise, and a
+  busy port refuses loudly, naming the holder — no auto-swap, swapping is
+  stop-then-start (settled 2026-08-18: entries are expected to share one port, one
+  model at a time behind a stable endpoint, so the consuming agent's config never
+  changes; several servers at once is just entries declaring different ports). A
+  first start fetches the model; cria shows a distinct *downloading* state,
+  rendering progress from on-disk cache bytes versus Hub-API sizes — filesystem
+  observation, never parsing anyone's output.
+- **Lifecycle subcommands** — `cria start`, `cria stop`, `cria status` (with
+  `--json`) alongside the TUI, sharing the same lifecycle layer (settled 2026-08-18:
+  agent validation of freshly written entries is the use case).
+- **Foreign servers** — `llama-server` / `mlx_lm.server` processes cria didn't start
+  are detected and shown with pid, command line and working directory, with an
+  offered kill (settled 2026-08-18) — the forgotten-terminal case, and the answer to
+  "who is holding my port".
+- **Scaffolding** — first run creates `~/.config/cria/` and drops an `AGENTS.md`
+  when missing, nothing else; `cria docs` prints the schema and full example
+  configs, and entry files are written by hand or by an agent.
 - **Tool check** — on start, report which of `hf` / `llama-server` / `mlx_lm.server`
   are present, which features their absence disables, and whether `llama-server` is
   recent enough to share the hub cache.
@@ -75,13 +99,3 @@ don't own.
 Not a daemon, not a proxy or auto-swapper (llama-swap exists), not a model registry
 (ollama exists), not a chat client, not a metrics dashboard. Features earn their
 place (`CLAUDE.md`, Scope) — this list is the standing reminder.
-
-## Open questions for the first planning session
-
-- Simultaneous servers (llama + mlx side by side seems obviously wanted) and port
-  allocation: fixed per profile, or a managed range with collision checks?
-- `cria new` exact UX: how backend and repo are given, what the starter profile
-  contains, how a second profile is added (`cria new <model> <profile>`?).
-- How MLX models are found and browsed (search `mlx-community`? paste a repo id?).
-- State-record details: staleness detection, crash cleanup, whether logs rotate.
-- Whether start/stop also become plain subcommands (scriptability vs surface creep).

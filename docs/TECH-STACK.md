@@ -33,9 +33,11 @@
   and stable (verified 2026-08-18; note the `charm.land/...` import paths). Exact
   versions are whatever `go get` resolves as latest stable at scaffold time
   (CODING-RULES §3).
-- The binary carries subcommands besides the TUI: `cria new <model>` scaffolds a model
-  folder, `cria docs` prints the config schema. Whether lifecycle operations
-  (start/stop) also become subcommands is an open question in `docs/cria.md`.
+- The binary carries subcommands besides the TUI: `cria docs` prints the config
+  schema with full example configs, and `cria start` / `cria stop` / `cria status`
+  (with `--json`) drive the lifecycle without the TUI (settled 2026-08-18 — agent
+  validation of freshly written entries is the use case; a `cria new` scaffolder was
+  dropped from v1, `docs/BACKLOG.md`).
 
 ## Configuration: TOML, read-only (settled 2026-08-18)
 
@@ -46,15 +48,19 @@
   TOML over YAML/JSON: comments survive in scaffolded files, no indentation traps, and
   deleting an unneeded key degrades gracefully — the tree is meant to be edited by
   hand and by coding agents.
-- cria **reads** config; it never rewrites a config file. New files come only from
-  `cria new`, which scaffolds commented templates embedded in the binary (`go:embed`).
+- cria **reads** config; it never rewrites a config file. Its only writes into the
+  tree: creating the root and an `AGENTS.md` (embedded via `go:embed`) on first run
+  when missing (settled 2026-08-18). Example configs live in the `cria docs` output,
+  not as scaffolded files.
 - Config hygiene: unknown keys or wrong types are rejected loudly at load — a typo
   must fail, never silently default.
 
 ## Runtime state (settled 2026-08-18)
 
-- `~/.local/state/cria/` — pidfiles, one JSON record per managed server (model,
-  profile, resolved flags, port, log path, start time), and the server log files.
+- `~/.local/state/cria/` — pidfiles, one JSON record per managed server (entry,
+  resolved flags, port, log path, start time), the server log files, and a small
+  UI-preferences file (active backend, last-started entry — settled 2026-08-18: UI
+  memory is machine-owned state, never written into the config tree).
 - State records are how the TUI re-attaches after restart: scan records, verify the
   pid is alive and the port answers, flag the rest stale. `encoding/json` — this is
   machine-owned state; comments are not needed and cria owns the format.
@@ -73,6 +79,12 @@ cria orchestrates tools the host already has; it installs nothing.
   check must flag). Status via its documented HTTP endpoints, never its log format.
 - **`mlx_lm.server`** (mlx-lm) — MLX serving, Apple silicon only, launched with
   `--model org/repo`; fetches via huggingface_hub into the same cache.
+- **`ps` / `lsof`** (settled 2026-08-18) — foreign-process detection: finding
+  `llama-server` / `mlx_lm.server` processes cria didn't start, and attributing a
+  busy port (pid, command line, working directory, offered kill). Both ship with
+  macOS; exec'd with explicit field selectors (`ps -o ...`, `lsof -F`), never
+  parsing the human-format tables. macOS has no `/proc`, so exec is the only
+  cgo-free route (CODING-RULES §7 bar: confirmed 2026-08-18).
 - Each found on `PATH`, overridable in `config.toml`. Missing tools degrade features
   and are reported; `mlx_lm.server` absent on Linux is normal, not an error.
 

@@ -35,8 +35,9 @@ english.
 - Hard constraints: single-host tool (one binary per machine, no remote management);
   daemonless — managed servers are detached processes that outlive the TUI; the
   Hugging Face cache is the single source of truth for models; the config tree
-  (`~/.config/cria/`) is the interface — cria reads and drives it, creating files only
-  through `cria new` scaffolding; server logs are never parsed for data.
+  (`~/.config/cria/`) is the interface — cria reads and drives it, and its only writes
+  there are creating the root and `AGENTS.md` on first run; server logs are never
+  parsed for data.
 - Do not add new dependencies without asking first. Every dependency enters at its latest
   stable version, verified maintained (`docs/CODING-RULES.md` §3).
 - Full stack details and the reasoning behind them: `docs/TECH-STACK.md`.
@@ -192,8 +193,8 @@ history-narrating comment you meet up to this rule.
   and `scp` to the target — Go ad-hoc-signs darwin/arm64 binaries and scp sets no
   quarantine xattr, so the copy just runs. No installers, no services, no packaging
   until someone outside the household asks for a binary (`docs/BACKLOG.md`).
-- cria writes to exactly two places: config in `~/.config/cria/` (human/agent-edited,
-  scaffolded by `cria new`) and runtime state in `~/.local/state/cria/` (pidfiles,
+- cria writes to exactly two places: config in `~/.config/cria/` (human/agent-edited;
+  cria only creates the root + `AGENTS.md`) and runtime state in `~/.local/state/cria/` (pidfiles,
   server state records, server logs). The Hugging Face cache is **managed, not owned** —
   cria mutates it only through deliberate cache operations, never as a side effect.
 - The host provides the tools (`llama-server`, `mlx_lm.server`, `hf`); cria detects and
@@ -231,8 +232,8 @@ Replace this section with a migration policy when the project graduates.
   every llama.cpp release. Logs are displayed raw (tail); information comes from
   documented HTTP endpoints and the filesystem only.
 - **cria reads the config tree, it never edits it.** Humans and coding agents own those
-  files — comments and formatting included; cria's only writes there are new files
-  scaffolded by `cria new` from embedded templates.
+  files — comments and formatting included; cria's only writes there are creating the
+  root folder and an embedded `AGENTS.md` on first run when missing.
 - **Schema and docs are one source.** `cria docs` prints the config schema for coding
   agents; it is generated from the same definitions the parser uses, so a schema change
   updates the docs in the same edit by construction.
