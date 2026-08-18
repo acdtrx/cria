@@ -62,7 +62,7 @@ func TestComposedCommand(t *testing.T) {
 
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := composeCommand(test.entry, report)
+			got, err := ComposedCommand(test.entry, report)
 			if err != nil {
 				t.Fatalf("composing: %v", err)
 			}
@@ -118,7 +118,7 @@ func TestStartGateRefusesAnUnusableTool(t *testing.T) {
 
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := composeCommand(test.entry, test.report)
+			_, err := ComposedCommand(test.entry, test.report)
 			if err == nil {
 				t.Fatal("an unusable tool composed a command line")
 			}

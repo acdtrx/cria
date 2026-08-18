@@ -151,7 +151,7 @@ func startOne(t *testing.T, manager *Manager, host *fakeHost, entry config.Entry
 	t.Helper()
 	spawner := &fakeSpawner{pid: pid}
 	manager.spawn = spawner.launch
-	command, err := composeCommand(entry, usableReport())
+	command, err := ComposedCommand(entry, usableReport())
 	if err != nil {
 		t.Fatalf("composing the command of %s: %v", entry.ID, err)
 	}

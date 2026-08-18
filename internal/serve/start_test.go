@@ -176,7 +176,7 @@ func TestTheLaunchWritesToItsOwnLog(t *testing.T) {
 	host.alive = map[int]procs.Identity{}
 
 	entry := llamaEntry()
-	command, err := composeCommand(entry, usableReport())
+	command, err := ComposedCommand(entry, usableReport())
 	if err != nil {
 		t.Fatalf("composing: %v", err)
 	}

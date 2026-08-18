@@ -35,7 +35,7 @@ type spawner func(launch) (int, error)
 // An entry runs once at a time. A live record refuses the start; a record whose
 // process is gone is replaced by this launch.
 func (m *Manager) Start(entry config.Entry, report tools.Report) (Record, error) {
-	command, err := composeCommand(entry, report)
+	command, err := ComposedCommand(entry, report)
 	if err != nil {
 		return Record{}, fmt.Errorf("cannot start %s: %w", entry.ID, err)
 	}

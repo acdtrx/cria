@@ -15,12 +15,17 @@ import (
 // user on the host (CODING-RULES §9).
 const hfTokenVar = "HF_TOKEN"
 
-// composeCommand builds the argv that serves one entry, program first. cria owns
+// ComposedCommand builds the argv that serves one entry, program first. cria owns
 // exactly four flags — the model reference, the host and the port — and hands
 // everything else through verbatim in the order the entry wrote it
 // (docs/specs/CONFIG.md); the entry loader has already refused an args list that
 // restates one of them.
-func composeCommand(entry config.Entry, report tools.Report) ([]string, error) {
+//
+// It is exported because the composed line is the entry's documentation: the TUI's
+// detail pane shows exactly what a start would run (docs/specs/CONFIG.md), and it
+// shows it by asking for the same composition Start spawns, so the two can never
+// drift apart.
+func ComposedCommand(entry config.Entry, report tools.Report) ([]string, error) {
 	tool, err := LaunchTool(entry.Backend, report)
 	if err != nil {
 		return nil, err

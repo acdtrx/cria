@@ -1,6 +1,20 @@
 # Step 13 — serve view
 
-**Phase 5 · Status: not started**
+**Phase 5 · Status: done (2026-08-18)** — suite green (66 tui tests), all
+gates pass; the full loop verified live in the real TUI with a real
+llama-server: list with cached dots and a broken entry shown dimmed with its
+key error, ⏎ start → starting → running on the ticker, raw log tail, stop,
+restart-from-stopped, foreign drill (modal with pid/command/cwd, k kill →
+port re-checked and freed, deliberate second ⏎), crash drill (kill -9 →
+exited crash report → d dismiss), stacked layout at 80 columns, empty-state
+pointer at `cria docs`. Decisions: config tree re-read every tick (an agent
+writing entries while the TUI is open is the expected flow); cache walk only
+when the serve view is visible or a download runs; tool check execs once, a
+start asks fresh; serve exports ComposedCommand (detail pane shows exactly
+what spawns) and Manager.KillHolder (refuses pids of live records — those are
+stopped by entry); modal/log hold the keyboard and the keybar swaps scope;
+refused entry files appear under both tabs (their backend key is what failed);
+log view is a 200-line tail, no scrollback (deliberate).
 
 ## Intent
 

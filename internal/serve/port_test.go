@@ -84,6 +84,47 @@ func TestPortUseDescribesAForeignHolder(t *testing.T) {
 	}
 }
 
+// The kill the TUI offers on a foreign holder ends that process and nothing
+// else (docs/specs/SERVE.md).
+func TestKillHolderEndsAForeignProcess(t *testing.T) {
+	host := &fakeHost{
+		alive:     map[int]procs.Identity{99: identityOf("/opt/homebrew/bin/llama-server -m gemma.gguf --port 8080")},
+		listening: map[int][]int{8080: {99}},
+		dieOnKill: true,
+	}
+	manager := newManager(t, host)
+
+	if err := manager.KillHolder(Holder{PID: 99}); err != nil {
+		t.Fatalf("killing the process holding the port: %v", err)
+	}
+	if len(host.sent) != 1 || host.sent[0] != "KILL 99" {
+		t.Errorf("cria sent %v, want one SIGKILL to the holder", host.sent)
+	}
+	if _, alive := host.alive[99]; alive {
+		t.Error("the holder outlived the kill")
+	}
+}
+
+// A pid that belongs to a live record is refused: that is a server cria started,
+// and stopping it by its entry is what removes its record too. Killing it here
+// would leave a crash report for something the user asked for.
+func TestKillHolderRefusesAManagedServer(t *testing.T) {
+	host := &fakeHost{}
+	manager := newManager(t, host)
+	record, _ := startOne(t, manager, host, llamaEntry(), 4242)
+
+	err := manager.KillHolder(Holder{PID: record.PID})
+	if err == nil {
+		t.Fatal("cria killed one of its own servers through the foreign-holder kill")
+	}
+	if !strings.Contains(err.Error(), record.EntryID) {
+		t.Errorf("the refusal reads %q, want it to name the entry to stop instead", err)
+	}
+	if len(host.sent) != 0 {
+		t.Errorf("cria signalled %v anyway", host.sent)
+	}
+}
+
 // A holder the process table cannot describe is still a holder: the pid alone
 // refuses the start, rather than the refusal turning into a lookup failure.
 func TestPortUseReportsAHolderItCannotDescribe(t *testing.T) {

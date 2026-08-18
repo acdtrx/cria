@@ -11,10 +11,15 @@ import (
 // anywhere, and global keys navigate. The grouping is what makes "what works
 // right now" legible without a help screen, so the labels are part of the bar
 // rather than decoration on it.
+// A screen that takes the keyboard names its own scope in place of the first
+// two: a refusal to answer, or a log to leave. The bar always says what works
+// right now, and while one of those is up, what works is theirs.
 const (
 	selectionScope = "selection"
 	serverScope    = "server"
 	globalScope    = "global"
+	modalScope     = "held port"
+	logScope       = "log"
 )
 
 // How the bar reads: keys within a scope are separated by a thin dot, scopes by

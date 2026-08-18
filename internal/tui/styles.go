@@ -27,15 +27,20 @@ var (
 
 // The styles every screen draws with. One file holds them so a change of palette
 // is one edit rather than a hunt through the views.
+// selectedStyle is the highlighted row of a list, and brokenStyle a row that is
+// listed but cannot be acted on: dimmed red says "this file is yours to fix"
+// without borrowing the weight of a server that has crashed.
 var (
-	frameStyle  = lipgloss.NewStyle().Foreground(faint)
-	titleStyle  = lipgloss.NewStyle().Foreground(muted).Bold(true)
-	factStyle   = lipgloss.NewStyle().Foreground(ink)
-	labelStyle  = lipgloss.NewStyle().Foreground(faint)
-	keyStyle    = lipgloss.NewStyle().Foreground(muted).Bold(true)
-	quietStyle  = lipgloss.NewStyle().Foreground(faint)
-	noticeStyle = lipgloss.NewStyle().Foreground(amber)
-	alarmStyle  = lipgloss.NewStyle().Foreground(red)
+	frameStyle    = lipgloss.NewStyle().Foreground(faint)
+	titleStyle    = lipgloss.NewStyle().Foreground(muted).Bold(true)
+	factStyle     = lipgloss.NewStyle().Foreground(ink)
+	labelStyle    = lipgloss.NewStyle().Foreground(faint)
+	keyStyle      = lipgloss.NewStyle().Foreground(muted).Bold(true)
+	quietStyle    = lipgloss.NewStyle().Foreground(faint)
+	noticeStyle   = lipgloss.NewStyle().Foreground(amber)
+	alarmStyle    = lipgloss.NewStyle().Foreground(red)
+	selectedStyle = lipgloss.NewStyle().Foreground(ink).Bold(true)
+	brokenStyle   = lipgloss.NewStyle().Foreground(red).Faint(true)
 )
 
 // phaseTone is the colour a phase is spelled in (docs/specs/SERVE.md names the
@@ -74,9 +79,15 @@ func phaseColor(phase serve.Phase) color.Color {
 // two border cells and two padding columns before it can hold a single
 // character, and a terminal narrower than that has nothing to show either way.
 // The frame draws at the floor there rather than computing a negative box.
+// The frame's heights. defaultRows is what a view is given before the terminal
+// has said how tall it is, and minPaneRows is the least a box can be: two border
+// rows and one line worth reading. A screen with less than that left drops the
+// view pane rather than drawing a box with nothing in it.
 const (
 	defaultWidth = 80
 	minWidth     = 8
+	defaultRows  = 12
+	minPaneRows  = 3
 )
 
 // pane draws one bordered box with its title sitting in the top border. Every

@@ -1,5 +1,7 @@
 package serve
 
+import "fmt"
+
 // PortUse is who holds a port right now, answered in the order a start has to
 // ask (docs/specs/SERVE.md): the server cria itself has running there, else
 // whatever the operating system attributes the port to.
@@ -55,6 +57,29 @@ func (m *Manager) PortUse(port int) (PortUse, error) {
 		return PortUse{}, nil
 	}
 	return PortUse{Holders: holders}, nil
+}
+
+// KillHolder ends a process that is holding a port cria did not start it on —
+// the kill the TUI offers on the foreign-holder refusal, and the only place cria
+// signals a process it has no record of (docs/specs/SERVE.md). The CLI never
+// offers it (docs/specs/CLI.md).
+//
+// A pid that belongs to a live record is refused: that is a server cria started,
+// and stopping it by its entry is what removes its record too. Killing it here
+// would leave the record behind as a crash report for something the user asked
+// for.
+func (m *Manager) KillHolder(holder Holder) error {
+	listing, err := m.List()
+	if err != nil {
+		return err
+	}
+	for _, server := range listing.Servers {
+		if server.Live && server.PID == holder.PID {
+			return fmt.Errorf("pid %d is %s, a server cria started; stop %s rather than killing its process",
+				holder.PID, server.EntryID, server.EntryID)
+		}
+	}
+	return m.host.Kill(holder.PID)
 }
 
 // describe fills in what one holder is running and where.
