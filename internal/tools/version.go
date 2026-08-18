@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -18,8 +19,12 @@ import (
 const hubCacheBuild = 8498
 
 // versionTimeout bounds the only program this package runs: a llama-server that
-// hangs on --version must not hang cria's startup check.
-const versionTimeout = 3 * time.Second
+// hangs on --version must not hang cria's startup check. Generous on purpose —
+// the first exec after a brew upgrade revalidates signatures over ~15 MB of
+// dylibs, and a machine busy serving a model pages them in slowly; both were
+// seen pushing an otherwise-40ms run over an earlier 3s budget, whose kill was
+// then misread as an unverifiable build.
+const versionTimeout = 10 * time.Second
 
 // The two positions llama.cpp has printed its build number in. See parseBuild.
 const (
@@ -45,6 +50,11 @@ func runVersion(path string) (string, error) {
 	// the read alive past the kill, and the timeout would not bound this call.
 	cmd.WaitDelay = time.Second
 	output, err := cmd.CombinedOutput()
+	if err != nil && ctx.Err() != nil {
+		// The kill was cria's own timeout: say that, not "signal: killed" — the
+		// reader is deciding whether the binary is broken or the machine busy.
+		err = fmt.Errorf("took longer than %s: %w", versionTimeout, err)
+	}
 	return string(output), err
 }
 

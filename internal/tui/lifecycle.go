@@ -87,6 +87,15 @@ func (m model) launch(entry config.Entry) tea.Cmd {
 
 // startEntry runs that sequence off the UI thread.
 func startEntry(entry config.Entry, settings config.Settings, check func(config.Settings) tools.Report, servers servers) startedMsg {
+	// Already running comes first (docs/specs/SERVE.md): it costs a record
+	// read, where the gates behind it exec programs — pressing ⏎ on the server
+	// that is already up must answer instantly and run nothing.
+	if held, running, err := servers.Running(entry.ID); err != nil {
+		return startedMsg{entry: entry, err: err}
+	} else if running {
+		return startedMsg{entry: entry, err: managedRefusal(entry, held)}
+	}
+
 	report := check(settings)
 	if _, err := serve.LaunchTool(entry.Backend, report); err != nil {
 		return startedMsg{entry: entry, err: err}

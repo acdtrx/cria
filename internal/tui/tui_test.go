@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +47,23 @@ func (f *fakeServers) Snapshots() (serve.StatusListing, error) {
 		return serve.StatusListing{}, f.err
 	}
 	return f.listing, nil
+}
+
+// Running answers off the same listing Snapshots serves: the live server with
+// that entry id, if the fixture holds one. A stop or kill removes the record on
+// the real manager, so an entry the test has already stopped is not running —
+// without that, a restart's second leg would be refused by its own first leg.
+func (f *fakeServers) Running(entryID string) (serve.Server, bool, error) {
+	for _, status := range f.listing.Servers {
+		if status.Phase == serve.PhaseExited || status.EntryID != entryID {
+			continue
+		}
+		if slices.Contains(f.stopped, entryID) || slices.Contains(f.killed, entryID) {
+			continue
+		}
+		return serve.Server{Record: status.Record, Live: true}, true, nil
+	}
+	return serve.Server{}, false, nil
 }
 
 func (f *fakeServers) Start(entry config.Entry, _ tools.Report) (serve.Record, error) {
@@ -248,6 +266,50 @@ func TestFrameDrawsBoxScreenAndKeybar(t *testing.T) {
 
 // c opens the cache and esc comes back, and the status box stays: it appears in
 // every view, the cache view included (docs/specs/TUI.md).
+// esc answers what is on screen: a visible alert first, the cache view's way
+// back second — and the bar names whichever of the two is next
+// (docs/specs/TUI.md).
+func TestEscDismissesTheAlertBeforeLeading(t *testing.T) {
+	frame, _ := testFrame(t, &fakeServers{})
+	frame = frame.show(viewCache)
+	frame.alert = alert{text: "port 8080 is held by a process cria did not start", bad: true}
+
+	bar := plain(renderKeybar(200, frame.groups()...))
+	if !strings.Contains(bar, "esc dismiss") || strings.Contains(bar, "esc back") {
+		t.Errorf("the bar reads %q while an alert shows, want esc to dismiss it", bar)
+	}
+
+	frame, _ = press(t, frame, escape)
+	if frame.alert.text != "" {
+		t.Errorf("esc left the alert up: %q", frame.alert.text)
+	}
+	if frame.view != viewCache {
+		t.Error("esc changed the view while it was dismissing the alert")
+	}
+
+	bar = plain(renderKeybar(200, frame.groups()...))
+	if !strings.Contains(bar, "esc back") || strings.Contains(bar, "esc dismiss") {
+		t.Errorf("the bar reads %q after the dismissal, want esc to lead back", bar)
+	}
+	frame, _ = press(t, frame, escape)
+	if frame.view != viewServe {
+		t.Error("the second esc did not lead back to the serve view")
+	}
+}
+
+// The notice row is reserved: a frame with nothing to say is exactly as tall as
+// one with an alert, so nothing shifts when a notice appears or goes
+// (docs/specs/TUI.md).
+func TestTheNoticeRowIsReserved(t *testing.T) {
+	frame, _ := testFrame(t, &fakeServers{})
+	quiet := lipgloss.Height(frame.frame())
+
+	frame.alert = alert{text: "reclaimed 84.1 MiB from unsloth/SmolLM2-135M-Instruct-GGUF:Q2_K"}
+	if talking := lipgloss.Height(frame.frame()); talking != quiet {
+		t.Errorf("the frame grew from %d to %d rows when the alert appeared", quiet, talking)
+	}
+}
+
 func TestViewKeysSwitchScreens(t *testing.T) {
 	frame, _ := testFrame(t, &fakeServers{})
 

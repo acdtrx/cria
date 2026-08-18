@@ -59,6 +59,17 @@ func (f *fakeServers) List() (serve.Listing, error) {
 	return f.listing, nil
 }
 
+// Running answers off the same listing List serves: the live server with that
+// entry id, if the fixture holds one.
+func (f *fakeServers) Running(entryID string) (serve.Server, bool, error) {
+	for _, server := range f.listing.Servers {
+		if server.Live && server.EntryID == entryID {
+			return server, true, nil
+		}
+	}
+	return serve.Server{}, false, nil
+}
+
 func (f *fakeServers) Snapshots() (serve.StatusListing, error) {
 	if f.snapshotErr != nil {
 		return serve.StatusListing{}, f.snapshotErr

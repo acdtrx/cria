@@ -40,15 +40,25 @@ func (a *app) start(args []string) int {
 		return a.refuseUnknownEntry(tree, id)
 	}
 
+	manager, err := a.servers()
+	if err != nil {
+		return a.fail("start %s: %v", id, err)
+	}
+
+	// Already running comes first (docs/specs/SERVE.md): it costs a record read,
+	// where the gates behind it exec programs — and an entry that is already up
+	// deserves that answer, not a tool or port complaint.
+	if held, running, err := manager.Running(entry.ID); err != nil {
+		return a.fail("start %s: %v", id, err)
+	} else if running {
+		return a.fail("start %s: %s is already running as pid %d on port %d; stop it first",
+			id, held.EntryID, held.PID, held.Port)
+	}
+
 	// The tool gate before the port check: a host without llama-server has to
 	// hear about llama-server, not about a busy port (docs/specs/SERVE.md).
 	report := a.tools(tree.Settings)
 	if _, err := serve.LaunchTool(entry.Backend, report); err != nil {
-		return a.fail("start %s: %v", id, err)
-	}
-
-	manager, err := a.servers()
-	if err != nil {
 		return a.fail("start %s: %v", id, err)
 	}
 

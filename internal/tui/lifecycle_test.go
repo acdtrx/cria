@@ -86,6 +86,31 @@ func TestStartLaunchesTheSelectedEntry(t *testing.T) {
 	}
 }
 
+// ⏎ on the entry that is already running answers from the records alone: no
+// tool check, no port question, nothing spawned (docs/specs/SERVE.md — the
+// already-running refusal comes first). The tool check execs `llama-server
+// --version`, which under load once took long enough to be killed and misread
+// as an unverifiable build; this path must never reach it.
+func TestStartOfARunningEntryConsultsNothing(t *testing.T) {
+	fake := &fakeServers{listing: serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning)}}}
+	frame, world, _ := startFrame(t, fake)
+	frame = frame.observed(snapshotMsg{listing: fake.listing})
+	checked := world.checks
+
+	frame, cmd := press(t, frame, enter)
+	frame = answer(t, frame, cmd)
+
+	if !frame.alert.bad || !strings.Contains(frame.alert.text, "already running") {
+		t.Errorf("the frame says %q, want the already-running refusal", frame.alert.text)
+	}
+	if world.checks != checked {
+		t.Errorf("the tool check ran %d more time(s) for an entry that is already up", world.checks-checked)
+	}
+	if len(fake.asked) != 0 || len(fake.started) != 0 {
+		t.Errorf("asked ports %v and started %v, want neither touched", fake.asked, fake.started)
+	}
+}
+
 // The tool gate comes before the port check: a host without llama-server has to
 // hear about llama-server, not about a busy port (docs/specs/SERVE.md).
 func TestStartRefusedByAnUnusableTool(t *testing.T) {
@@ -200,8 +225,12 @@ func TestModalStaysUpWhileThePortIsStillHeld(t *testing.T) {
 // esc leaves the holder alone, and nothing underneath the modal acts while it is
 // up: a start refused for a busy port must not become a stop of something else.
 func TestModalHoldsTheKeyboard(t *testing.T) {
+	// The live server is another entry: a start of the selected one has to get
+	// past its own already-running check to reach the port and raise the modal.
+	other := liveStatus(serve.PhaseRunning)
+	other.EntryID = "gemma"
 	fake := &fakeServers{
-		listing: serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning)}},
+		listing: serve.StatusListing{Servers: []serve.Status{other}},
 		use:     serve.PortUse{Holders: []serve.Holder{{PID: 9111, Command: "llama-server"}}},
 	}
 	frame, _, _ := startFrame(t, fake)

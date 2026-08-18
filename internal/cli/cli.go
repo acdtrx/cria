@@ -77,6 +77,7 @@ type servers interface {
 	Start(entry config.Entry, report tools.Report) (serve.Record, error)
 	Stop(record serve.Record) error
 	List() (serve.Listing, error)
+	Running(entryID string) (serve.Server, bool, error)
 	Snapshot(record serve.Record) (serve.Status, error)
 	Snapshots() (serve.StatusListing, error)
 	PortUse(port int) (serve.PortUse, error)

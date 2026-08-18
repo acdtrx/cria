@@ -22,6 +22,24 @@ func (m *Manager) Live(record Record) (bool, error) {
 	return record.Identity.SameProcess(identity), nil
 }
 
+// Running is whether an entry has a live server right now — the first question
+// a start asks (docs/specs/SERVE.md): it costs one record read and one process
+// lookup, where the checks behind it exec programs, so an entry that is already
+// up is refused before anything else runs.
+func (m *Manager) Running(entryID string) (Server, bool, error) {
+	record, found, err := m.loadRecord(entryID)
+	if err != nil || !found {
+		// A record cria cannot read is List's to report; this entry simply has
+		// no live server to refuse over.
+		return Server{}, false, nil
+	}
+	live, err := m.Live(record)
+	if err != nil || !live {
+		return Server{}, false, err
+	}
+	return Server{Record: record, Live: true}, true, nil
+}
+
 // List reads every state record and judges it against the process table. It is
 // how a fresh cria invocation re-attaches to the servers a previous one started
 // (docs/specs/SERVE.md).

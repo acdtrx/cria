@@ -47,6 +47,7 @@ const refreshInterval = 2 * time.Second
 // server on the host.
 type servers interface {
 	Snapshots() (serve.StatusListing, error)
+	Running(entryID string) (serve.Server, bool, error)
 	Start(entry config.Entry, report tools.Report) (serve.Record, error)
 	Stop(record serve.Record) error
 	Kill(record serve.Record) error
@@ -339,6 +340,8 @@ func (m model) loaded(msg entriesMsg) model {
 // take the keyboard while they are up: what they offer is what the bar draws,
 // and every other key would act on something the user is no longer looking at.
 func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// esc means what is on screen right now, whatever path set the alert.
+	m = m.syncEscScope()
 	switch {
 	case m.modal != nil:
 		return m.pressInModal(pressed)
@@ -357,6 +360,13 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.switchBackend(), nil
 	case key.Matches(pressed, m.keys.cache):
 		return m.show(viewCache), nil
+	case key.Matches(pressed, m.keys.clearAlert):
+		// esc answers the alert before it leads anywhere: the line is the
+		// newest thing on screen, and dismissing it is §5's user-dismiss. The
+		// sticky observation failures re-state themselves every failing tick,
+		// so esc has nothing lasting to say to them.
+		m.alert = alert{}
+		return m.syncEscScope(), nil
 	case key.Matches(pressed, m.keys.back):
 		return m.show(viewServe), nil
 	case key.Matches(pressed, m.keys.tools):
@@ -468,9 +478,19 @@ func (m model) rebindContext() model {
 
 	// One of the two navigation keys is live at a time: c goes to the cache, esc
 	// comes back. esc closes whatever has the keyboard first — a screen over the
-	// view is what the key is reached for there (press).
+	// view is what the key is reached for there (press) — then a visible alert,
+	// then the way back (syncEscScope).
 	m.keys.cache.SetEnabled(m.view == viewServe)
-	m.keys.back.SetEnabled(m.view == viewCache)
+	return m.syncEscScope()
+}
+
+// syncEscScope points esc at what it answers right now, in its settled order:
+// an overlay is press's to close, a visible alert is dismissed next, and only
+// then does esc lead back out of the cache view. The bar draws whichever of the
+// two is live, so the key's next meaning is always the one on screen.
+func (m model) syncEscScope() model {
+	m.keys.clearAlert.SetEnabled(m.alert.text != "")
+	m.keys.back.SetEnabled(m.view == viewCache && m.alert.text == "")
 	return m
 }
 
@@ -602,6 +622,12 @@ func (m model) notes(width int) []string {
 		}
 		notes = append(notes, fit(style.Render(m.alert.text), width))
 	}
+	if len(notes) == 0 {
+		// The row is reserved even when it has nothing to say: a line that
+		// appears and disappears would shift everything under it on every
+		// notice (docs/specs/TUI.md).
+		notes = append(notes, fit("", width))
+	}
 	return notes
 }
 
@@ -633,6 +659,8 @@ func (m model) screen(width, rows int) string {
 // the bar is the map of what works right now, and it must never draw a key the
 // screen in front of the user does not answer to.
 func (m model) groups() []keyGroup {
+	// The bar is drawn from this frame's truth, whatever path set the alert.
+	m = m.syncEscScope()
 	global := keyGroup{label: globalScope, bindings: []key.Binding{m.keys.quit}}
 	switch {
 	case m.modal != nil:
@@ -648,7 +676,7 @@ func (m model) groups() []keyGroup {
 	return []keyGroup{
 		{label: selectionScope, bindings: []key.Binding{m.keys.start, m.keys.remove}},
 		{label: serverScope, bindings: []key.Binding{m.keys.stop, m.keys.forceKill, m.keys.log, m.keys.restart, m.keys.dismiss}},
-		{label: globalScope, bindings: []key.Binding{m.keys.backend, m.keys.cache, m.keys.back, m.keys.tools, m.keys.quit}},
+		{label: globalScope, bindings: []key.Binding{m.keys.backend, m.keys.cache, m.keys.clearAlert, m.keys.back, m.keys.tools, m.keys.quit}},
 	}
 }
 
@@ -678,11 +706,12 @@ type keymap struct {
 	restart   key.Binding
 	dismiss   key.Binding
 
-	backend key.Binding
-	cache   key.Binding
-	back    key.Binding
-	tools   key.Binding
-	quit    key.Binding
+	backend    key.Binding
+	cache      key.Binding
+	back       key.Binding
+	clearAlert key.Binding
+	tools      key.Binding
+	quit       key.Binding
 
 	killHolder    key.Binding
 	leaveModal    key.Binding
@@ -710,6 +739,7 @@ func newKeymap() keymap {
 		backend:       key.NewBinding(key.WithKeys("tab"), key.WithHelp("⇥", "backend")),
 		cache:         key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "cache")),
 		back:          key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+		clearAlert:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "dismiss")),
 		tools:         key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "tools")),
 		quit:          key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 		killHolder:    key.NewBinding(key.WithKeys("k"), key.WithHelp("k", "kill it")),
