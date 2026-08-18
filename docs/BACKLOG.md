@@ -64,9 +64,12 @@ Group entries under headings as themes emerge.
 
 ## Platform & distribution
 
-- **Linux as a supported platform.** `linux/amd64` must keep compiling (`CLAUDE.md`,
-  Project Facts) but nothing is tested or distributed. Revisit trigger: a Linux
-  machine joins the household, or a friend on Linux asks for a binary.
+- **Linux as a supported platform.** `linux/amd64` must keep compiling
+  (`CLAUDE.md`, Project Facts); release builds exist and a first real
+  linux/amd64 smoke test passed (2026-08-18: profile added, download with
+  progress, serve, logs, stop). Still short of *supported*: CI runs only the
+  short suite there and nobody lives on it. Revisit trigger: a Linux machine
+  runs cria daily, or a linux-specific bug arrives.
 - **Homebrew tap / browser-download story.** GitHub Releases + the curl
   installer cover distribution (curl sets no quarantine xattr); a binary saved
   through a *browser* still carries it and needs `xattr -d`, which a tap or

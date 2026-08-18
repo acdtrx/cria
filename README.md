@@ -13,10 +13,13 @@ nothing, and the next launch re-attaches. No downloader and no model registry of
 its own: servers fetch their models by Hub reference into the standard Hugging
 Face cache, and cria watches the bytes arrive.
 
+![the cria TUI: serve view with a running server](docs/cria.png)
+
 ## Install
 
-Apple silicon macOS (the lived-on platform), or Linux x64/arm64 (builds provided,
-untested):
+Apple silicon macOS (the lived-on platform), or Linux — x64 works in light
+real-world testing (serve, download with progress, logs, stop); arm64 builds are
+provided untested:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/acdtrx/cria/main/install.sh | sh
