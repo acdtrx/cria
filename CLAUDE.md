@@ -184,8 +184,8 @@ history-narrating comment you meet up to this rule.
 - **Tags are anchors.** Annotated semver tags on main (`0.5.1`), tagged after notable
   merges and **always immediately before a large plan's implementation begins** — the
   tag names the world the plan started from, for diffing and for bailing out. The
-  message says what the anchor holds in one line. Tags stay local for now — the project
-  has no remote; decide tag routing when one is added. `[PROJECT]`
+  message says what the anchor holds in one line. Tags push to every remote alongside
+  main (settled 2026-08-18, when `cala` became the first remote). `[PROJECT]`
 
 ## Deployability `[PROJECT]`
 
