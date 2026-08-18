@@ -122,8 +122,8 @@ var entrySchema = schema{
 		name:           "args",
 		kind:           kindStringList,
 		rules:          "extra flags passed to the server verbatim; cria composes the model, port and host flags itself",
-		example:        `["--ctx-size", "16384"]`,
-		backendExample: map[Backend]string{BackendMLX: `["--max-tokens", "4096"]`},
+		example:        `["--ctx-size", "16384", "--jinja"]`,
+		backendExample: map[Backend]string{BackendMLX: `["--max-tokens", "32768"]`},
 		check:          checkArgs,
 	},
 }

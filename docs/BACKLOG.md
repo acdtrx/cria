@@ -11,11 +11,6 @@ Group entries under headings as themes emerge.
 
 ## Dropped from v1
 
-- **`cria new` scaffolder.** Generate a commented entry file from an embedded
-  template. (ruled 2026-08-18: agents write config from scratch against `cria
-  docs`, which carries full example configs.) Revisit trigger: writing configs from
-  the docs output proves error-prone in practice, or a human without an agent wants
-  to onboard a model.
 - **Profile layer over entries.** Multiple named param-sets per model with a
   "current" one, instead of flat launchable entries. (ruled 2026-08-18: reality is
   one param-set per model; a variant is just another entry file.) Revisit trigger:

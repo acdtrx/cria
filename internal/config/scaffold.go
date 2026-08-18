@@ -40,17 +40,52 @@ func Scaffold(root string) error {
 	return createMissingFile(filepath.Join(root, agentsFile), agentsPage)
 }
 
+// CreateEntry writes a new models/<id>.toml holding the commented example for
+// backend — the very string `cria docs` prints, so what `cria new` hands someone
+// and what the docs teach cannot diverge. It returns the file's path whether or
+// not it managed to create it, because every refusal is about that path.
+//
+// It is create-only: an id whose file already exists comes back as fs.ErrExist,
+// refused entry files included. cria does not rewrite files in the tree
+// (docs/specs/CONFIG.md) — a file that is already there is someone's work, and
+// `cria edit` is what opens it.
+//
+// A missing models/ directory comes back as fs.ErrNotExist naming the directory:
+// Scaffold creates it on every invocation, so its absence is something to report,
+// not to paper over.
+func CreateEntry(root, id string, backend Backend) (string, error) {
+	dir := filepath.Join(root, entriesDir)
+	path := filepath.Join(dir, id+tomlExt)
+
+	err := createExclusive(path, []byte(ExampleEntry(backend)))
+	if errors.Is(err, fs.ErrNotExist) {
+		return path, fmt.Errorf("the entries directory %s does not exist: %w", dir, err)
+	}
+	return path, err
+}
+
 // createMissingFile writes content to path, and leaves a file that is already
-// there exactly as it is — including one the user has rewritten. O_EXCL makes
-// "does it exist" and "create it" one step, so two cria processes starting at once
-// cannot have one overwrite the other's file.
+// there exactly as it is — including one the user has rewritten.
 func createMissingFile(path string, content []byte) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, filePerm)
+	err := createExclusive(path, content)
 	if errors.Is(err, fs.ErrExist) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("cannot create %s: %w", path, err)
+	}
+	return nil
+}
+
+// createExclusive writes content to a file it creates itself. O_EXCL makes "does
+// it exist" and "create it" one step, so two cria processes starting at once
+// cannot have one overwrite the other's file — and the caller decides what an
+// existing file means: nothing to do for the scaffold, a refusal for `cria new`.
+// The open error travels unwrapped, so both callers can read it with errors.Is.
+func createExclusive(path string, content []byte) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, filePerm)
+	if err != nil {
+		return err
 	}
 	if _, err := file.Write(content); err != nil {
 		file.Close()

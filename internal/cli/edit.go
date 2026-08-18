@@ -46,7 +46,14 @@ func (a *app) edit(args []string) int {
 	if len(command) == 0 {
 		return a.fail("edit %s: no editor is set; set $EDITOR (or $VISUAL) to use cria edit — the file is %s", id, path)
 	}
+	return a.openEditor(command, "edit", id, path)
+}
 
+// openEditor hands one entry file to the user's editor and waits for it to close.
+// `cria edit` and `cria new` do the same thing here — the terminal goes to the
+// editor, and the file that comes back is whatever was saved — so one place does
+// it; subcommand is the name the refusals speak under.
+func (a *app) openEditor(command []string, subcommand, id, path string) int {
 	editor := exec.Command(command[0], append(command[1:], path)...)
 	// The editor takes over the terminal cria was invoked from: it reads keys and
 	// draws a screen, so it gets the process's own streams rather than this
@@ -56,9 +63,9 @@ func (a *app) edit(args []string) int {
 	if err := editor.Run(); err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			return a.fail("edit %s: %s exited %d; check %s before starting the entry", id, command[0], exit.ExitCode(), path)
+			return a.fail("%s %s: %s exited %d; check %s before starting the entry", subcommand, id, command[0], exit.ExitCode(), path)
 		}
-		return a.fail("edit %s: cannot run %s: %v", id, strings.Join(command, " "), err)
+		return a.fail("%s %s: cannot run %s: %v", subcommand, id, strings.Join(command, " "), err)
 	}
 	return exitOK
 }

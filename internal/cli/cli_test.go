@@ -220,7 +220,7 @@ func TestRouting(t *testing.T) {
 	}{
 		{name: "the version is printed", args: []string{"--version"}, want: exitOK, contains: "cria 9.9.9-test"},
 		{name: "docs prints the config schema", args: []string{"docs"}, want: exitOK, contains: "backend"},
-		{name: "an unknown subcommand names the valid set", args: []string{"serve"}, want: exitUsage, contains: "valid subcommands are: start, stop, status, list, edit, docs, wired-limit"},
+		{name: "an unknown subcommand names the valid set", args: []string{"serve"}, want: exitUsage, contains: "valid subcommands are: start, stop, status, list, new, edit, docs, wired-limit"},
 		{name: "start needs an entry id", args: []string{"start"}, want: exitUsage, contains: "usage: cria start <id> [--wait]"},
 		{name: "start takes one entry id", args: []string{"start", "a", "b"}, want: exitUsage, contains: "one entry at a time (got a, b)"},
 		{name: "start refuses a flag it does not know", args: []string{"start", "qwen", "--now"}, want: exitUsage, contains: "unknown flag --now"},
@@ -228,6 +228,9 @@ func TestRouting(t *testing.T) {
 		{name: "stop refuses a flag it does not know", args: []string{"stop", "--all"}, want: exitUsage, contains: "unknown flag --all"},
 		{name: "status takes no arguments", args: []string{"status", "qwen"}, want: exitUsage, contains: "takes no arguments (got qwen)"},
 		{name: "status refuses a flag it does not know", args: []string{"status", "--yaml"}, want: exitUsage, contains: "unknown flag --yaml"},
+		{name: "new needs an entry id", args: []string{"new"}, want: exitUsage, contains: "usage: cria new <id> [--llama|--mlx]"},
+		{name: "new takes one entry id", args: []string{"new", "a", "b"}, want: exitUsage, contains: "one entry at a time (got a, b)"},
+		{name: "new refuses both backends at once", args: []string{"new", "a", "--llama", "--mlx"}, want: exitUsage, contains: "name different backends"},
 	}
 
 	for _, test := range cases {

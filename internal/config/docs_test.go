@@ -26,7 +26,7 @@ func TestDocsNamesEveryDefinedKey(t *testing.T) {
 func TestDocsExamplesShowEveryKeyOfTheirBackend(t *testing.T) {
 	for _, backend := range []Backend{BackendLlama, BackendMLX} {
 		t.Run(string(backend), func(t *testing.T) {
-			example := exampleEntry(backend)
+			example := ExampleEntry(backend)
 			for _, k := range entrySchema {
 				assignment := k.name + " = " + k.exampleFor(backend)
 				if k.onlyBackend != "" && k.onlyBackend != backend {
@@ -98,8 +98,8 @@ func TestDocsFollowsTheDefinitions(t *testing.T) {
 func TestDocsExamplesLoadAsAConfigTree(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		settingsFile: exampleSettings(),
-		path.Join(entriesDir, "llama-example.toml"): exampleEntry(BackendLlama),
-		path.Join(entriesDir, "mlx-example.toml"):   exampleEntry(BackendMLX),
+		path.Join(entriesDir, "llama-example.toml"): ExampleEntry(BackendLlama),
+		path.Join(entriesDir, "mlx-example.toml"):   ExampleEntry(BackendMLX),
 	})
 
 	tree, err := Load(root)

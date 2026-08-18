@@ -12,6 +12,12 @@ its subsystem.
 - `cria stop [<id>]` — `docs/specs/SERVE.md`.
 - `cria status [--json]` — `docs/specs/SERVE.md`.
 - `cria docs` — prints the config schema and full examples; `docs/specs/CONFIG.md`.
+- `cria new <id> [--llama|--mlx]` (settled 2026-08-18, reinstated from the
+  backlog) — scaffolds `models/<id>.toml` from the schema-rendered example
+  (create-only; an existing file refuses toward `cria edit`), opens the editor
+  on it, and reports the file's verdict when the editor closes — valid names
+  the start command, broken names the key and the fix. The two backend flags
+  are peers; bare defaults to llama.
 - `cria list [--paths]` (settled 2026-08-18) — one aligned line per entry (id,
   backend, repo:quant, port; `--paths` appends the entry's file — how an agent
   locates a profile), refused files listed after with their key errors; an
@@ -31,10 +37,11 @@ its subsystem.
   (loud refusal at ≥ RAM or off macOS); the file carries its own uninstall
   steps in a comment.
 
-Nothing else: no cache operations, no scaffolding (`docs/BACKLOG.md`).
+Nothing else: no cache operations from the CLI (`docs/BACKLOG.md`).
 
-Flags: `--wait` on start, `--json` on status, `--paths` on list, `--version` and
-`--help` on the bare binary — nothing else speaks machine or takes options.
+Flags: `--wait` on start, `--json` on status, `--paths` on list, `--llama`/`--mlx`
+on new, `--version` and `--help` on the bare binary — nothing else speaks machine
+or takes options.
 
 ## Rules
 

@@ -39,10 +39,11 @@ don't own.
    contract, a profile layer waits in `docs/BACKLOG.md`). The TUI drives what the
    tree declares and invents no serving state of its own; UI preferences live in the
    state dir, never the tree. Editing config is a text-editor or coding-agent
-   activity: files are written from scratch against `cria docs` (settled 2026-08-18
-   — a `cria new` scaffolder was dropped from v1, `docs/BACKLOG.md`). cria's only
-   writes into the tree are creating the root and an `AGENTS.md` on first run when
-   missing.
+   activity: files are written against `cria docs`, or seeded by `cria new` from
+   the same schema-rendered example (dropped from v1 2026-08-18, reinstated
+   2026-08-18 when its revisit trigger fired). cria's only writes into the tree
+   are creating the root and an `AGENTS.md` on first run, and the create-only
+   files `cria new` scaffolds — it never edits an existing file.
 5. **Agent-operable by design** (settled 2026-08-18). The expected way a new entry
    gets written is asking a coding agent to derive one from the model provider's
    recommended parameters. So the binary documents itself: `cria docs` prints the
@@ -88,8 +89,11 @@ don't own.
   offered kill (settled 2026-08-18) — the forgotten-terminal case, and the answer to
   "who is holding my port".
 - **Scaffolding** — first run creates `~/.config/cria/` and drops an `AGENTS.md`
-  when missing, nothing else; `cria docs` prints the schema and full example
-  configs, and entry files are written by hand or by an agent.
+  when missing; `cria docs` prints the schema and full example configs, and entry
+  files are written by hand, by an agent, or seeded by `cria new <id>` — which
+  writes the same schema-rendered example `cria docs` prints (create-only, never
+  overwrites) and opens the editor on it (reinstated 2026-08-18: the backlog's
+  revisit trigger — a human onboarding models without an agent — fired).
 - **Tool check** — on start, report which of `hf` / `llama-server` / `mlx_lm.server`
   are present, which features their absence disables, and whether `llama-server` is
   recent enough to share the hub cache.

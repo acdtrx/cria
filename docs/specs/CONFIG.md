@@ -16,8 +16,12 @@ construction.
     └── <id>.toml      # one launchable entry per file
 ```
 
-- cria creates the root, `models/` and `AGENTS.md` on first run when missing — its
-  only writes into the tree. It never edits an existing file.
+- cria's writes into the tree are create-only and never touch an existing file:
+  the root, `models/` and `AGENTS.md` on first run when missing, and the entry
+  file `cria new <id>` scaffolds (settled 2026-08-18, reinstated from the
+  backlog) — whose content is the schema-rendered example `cria docs` prints,
+  from the same definitions the parser uses, so the scaffold cannot drift from
+  the binary.
 - An entry's **id** is its filename minus `.toml`; ids appear in the TUI and as CLI
   arguments (`cria start <id>`). Allowed: letters, digits, `-`, `_`, `.` — anything
   else is rejected loudly.

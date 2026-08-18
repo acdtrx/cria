@@ -36,14 +36,17 @@ const (
 // subcommands is the whole v1 surface (docs/specs/CLI.md), in the order the help
 // page presents it: the server lifecycle, then the config tree, then the two
 // generators. Bare `cria` opens the TUI instead of naming a subcommand.
-var subcommands = []string{"start", "stop", "status", "list", "edit", "docs", "wired-limit"}
+var subcommands = []string{"start", "stop", "status", "list", "new", "edit", "docs", "wired-limit"}
 
-// The flags the surface has: one per subcommand, all booleans
-// (docs/specs/CLI.md).
+// The flags the surface has, all booleans (docs/specs/CLI.md). `cria new` takes
+// two because they are peers: the backend it scaffolds can be named either way,
+// and neither is a special case.
 const (
 	waitFlag  = "--wait"
 	jsonFlag  = "--json"
 	pathsFlag = "--paths"
+	llamaFlag = "--llama"
+	mlxFlag   = "--mlx"
 )
 
 // How `--wait` watches a start it has just triggered.
@@ -156,6 +159,8 @@ func (a *app) run(args []string, version string) int {
 		return a.status(args[1:])
 	case "list":
 		return a.list(args[1:])
+	case "new":
+		return a.newEntry(args[1:])
 	case "edit":
 		return a.edit(args[1:])
 	case "docs":

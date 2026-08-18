@@ -19,19 +19,22 @@ USAGE
   cria <subcommand> [flags]
 
 SUBCOMMANDS
-  start <id> [--wait]   start the entry <id>; --wait blocks until it serves or fails
-  stop [<id>]           stop a running server; the id is required when several run
-  status [--json]       what every server cria started is doing right now
-  list [--paths]        the entries the config tree declares
-  edit <id>             open an entry's file in $VISUAL, else $EDITOR
-  docs                  print the config schema and a complete example of every file
-  wired-limit <MB>      generate the launchd plist that pins iogpu.wired_limit_mb
-  help                  this page
+  start <id> [--wait]       start the entry <id>; --wait blocks until it serves or fails
+  stop [<id>]               stop a running server; the id is required when several run
+  status [--json]           what every server cria started is doing right now
+  list [--paths]            the entries the config tree declares
+  new <id> [--llama|--mlx]  scaffold an entry file and open your editor on it
+  edit <id>                 open an entry's file in $VISUAL, else $EDITOR
+  docs                      print the config schema and a complete example of every file
+  wired-limit <MB>          generate the launchd plist that pins iogpu.wired_limit_mb
+  help                      this page
 
 FLAGS
   --wait      start: block until the server answers its health endpoint, or fails
   --json      status: emit the same facts as one JSON document
   --paths     list: add each entry's file path
+  --llama     new: scaffold a llama entry — the backend a bare cria new takes
+  --mlx       new: scaffold an mlx entry
   --version   print the version of this binary
   --help, -h  this page
 

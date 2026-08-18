@@ -14,6 +14,9 @@ learn the schema from this page.
 
 - One file per launchable thing: `models/<id>.toml`. The id is the filename minus
   `.toml`, and it is what `cria start <id>` takes.
+- `cria new <id> [--llama|--mlx]` scaffolds a commented starting file (the same
+  example `cria docs` prints) and opens `$EDITOR` on it — or write the file from
+  scratch; both end at the same schema.
 - Another quant, or another set of args, is another entry file — not another
   section in this one.
 - cria composes the model, port and host flags itself. Every other server flag

@@ -98,11 +98,19 @@ func loadSettings(path string) (Settings, error) {
 	return settings, nil
 }
 
+// ValidID reports whether id may name an entry: the charset a filename must hold
+// for the loader to read it back as an entry (docs/specs/CONFIG.md). `cria new`
+// asks before it creates anything, so it never writes a file the tree would then
+// refuse.
+func ValidID(id string) bool {
+	return isName(id)
+}
+
 // loadEntry reads one entry file and resolves it against the tree settings. Every
 // error it returns belongs to this entry alone — it disables this entry and
 // nothing else.
 func loadEntry(id, path string, settings Settings) (*Entry, error) {
-	if !isName(id) {
+	if !ValidID(id) {
 		return nil, fmt.Errorf("invalid entry id %q: an id is the filename minus .toml and may hold only letters, digits, '-', '_' and '.'", id)
 	}
 

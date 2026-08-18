@@ -35,7 +35,7 @@ func TestHelpNamesTheWholeSurface(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		waitFlag, jsonFlag, pathsFlag, "--version",
+		waitFlag, jsonFlag, pathsFlag, llamaFlag, mlxFlag, "--version",
 		"0 the asked-for thing is true or done, 1 it is not, 2 the command line could not be routed",
 		"config schema and examples: cria docs",
 		"agents: cria docs prints everything needed to write entries",

@@ -29,8 +29,8 @@ func Docs() string {
 	return fmt.Sprintf(docsPage,
 		keyTable(entrySchema),
 		keyTable(treeSchema),
-		exampleEntry(BackendLlama),
-		exampleEntry(BackendMLX),
+		ExampleEntry(BackendLlama),
+		ExampleEntry(BackendMLX),
 		exampleSettings(),
 	)
 }
@@ -154,11 +154,16 @@ func schemaRows(s schema, prefix string) []docsRow {
 	return rows
 }
 
-// exampleEntry renders a complete entry file for one backend: every key that
+// ExampleEntry renders a complete entry file for one backend: every key that
 // backend takes, each under the rules that govern it. It is the template an agent
 // copies, and it is built from the schema, so a new key joins the template the
 // moment it is declared.
-func exampleEntry(backend Backend) string {
+//
+// It is exported because `cria new` writes it into the tree as a fresh entry
+// file: the template someone is handed and the template `cria docs` teaches are
+// the same string, not two copies that drift (CLAUDE.md: schema and docs are one
+// source).
+func ExampleEntry(backend Backend) string {
 	var file strings.Builder
 	writeComment(&file, fmt.Sprintf(exampleEntryPreamble, backend, entrySchema.requiredNames()))
 	for _, k := range entrySchema {

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,6 +127,55 @@ func TestAgentsPagePointsAtTheBinary(t *testing.T) {
 		if !strings.Contains(page, want) {
 			t.Errorf("%s never mentions %q", agentsFile, want)
 		}
+	}
+}
+
+// CreateEntry writes the backend's example into a new entry file, and creates
+// only: an id whose file exists comes back as fs.ErrExist — the sentinel
+// `cria new` phrases its refusal from — with the file exactly as it was.
+func TestCreateEntryWritesTheExampleOnce(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "cria")
+	if err := Scaffold(root); err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+
+	path, err := CreateEntry(root, "demo", BackendMLX)
+	if err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
+	if want := filepath.Join(root, entriesDir, "demo"+tomlExt); path != want {
+		t.Errorf("CreateEntry wrote %s, want %s", path, want)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read the created entry: %v", err)
+	}
+	if string(content) != ExampleEntry(BackendMLX) {
+		t.Errorf("the created entry is not the mlx example:\n%s", content)
+	}
+
+	again, err := CreateEntry(root, "demo", BackendLlama)
+	if !errors.Is(err, fs.ErrExist) {
+		t.Errorf("a second CreateEntry answered %v, want fs.ErrExist", err)
+	}
+	if again != path {
+		t.Errorf("the refusal names %s, want the file that is already there, %s", again, path)
+	}
+	if rewritten, _ := os.ReadFile(path); string(rewritten) != string(content) {
+		t.Errorf("the file that was already there changed to:\n%s", rewritten)
+	}
+}
+
+// The entries directory is created on every invocation, so a missing one is a
+// failure that names it rather than a directory CreateEntry conjures.
+func TestCreateEntryReportsAMissingEntriesDirectory(t *testing.T) {
+	root := t.TempDir()
+	_, err := CreateEntry(root, "demo", BackendLlama)
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("CreateEntry answered %v, want fs.ErrNotExist", err)
+	}
+	if dir := filepath.Join(root, entriesDir); !strings.Contains(err.Error(), dir) {
+		t.Errorf("the failure reads %q, want it to name %s", err, dir)
 	}
 }
 

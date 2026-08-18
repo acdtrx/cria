@@ -36,8 +36,8 @@ You bring the servers — cria orchestrates and never installs:
 ## Quick start
 
 ```sh
+cria new qwen3-30b        # scaffolds the entry and opens your $EDITOR on it
 cria docs                 # the whole config schema, with complete examples
-$EDITOR ~/.config/cria/models/qwen3-30b.toml
 ```
 
 ```toml
