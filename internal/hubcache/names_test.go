@@ -64,11 +64,11 @@ func TestTheUDPrefixIsPartOfTheTag(t *testing.T) {
 	}
 }
 
-// An entry names a quant the way its author spells it, and llama-server accepts
-// the tag with or without unsloth's prefix. The lookup follows: an exact
-// spelling always wins, one unambiguous item answers for a tag spelled the
-// other way, and anything ambiguous is reported absent rather than guessed.
-func TestMatchQuantAcceptsBothSpellingsOfATag(t *testing.T) {
+// An entry names a quant the way the repo's files spell it. The lookup matches
+// that spelling and no other: cria does not normalize provider naming, so a tag
+// written differently from the one published is absent, visibly, rather than
+// guessed at.
+func TestMatchQuantMatchesTheTagExactly(t *testing.T) {
 	tests := []struct {
 		name   string
 		labels []string
@@ -82,43 +82,28 @@ func TestMatchQuantAcceptsBothSpellingsOfATag(t *testing.T) {
 			want:   "UD-Q2_K_XL",
 		},
 		{
+			// llama.cpp's own -hf repo:TAG resolution ignores case, so this is
+			// the one difference that still finds the item.
+			name:   "the same tag in another case",
+			labels: []string{"UD-Q2_K_XL", "Q8_0"},
+			quant:  "ud-q2_k_xl",
+			want:   "UD-Q2_K_XL",
+		},
+		{
 			name:   "the tag without the prefix the files carry",
 			labels: []string{"UD-Q2_K_XL", "Q8_0"},
 			quant:  "Q2_K_XL",
-			want:   "UD-Q2_K_XL",
 		},
 		{
 			name:   "the tag with a prefix the files omit",
 			labels: []string{"Q4_K_M", "Q8_0"},
 			quant:  "UD-Q4_K_M",
-			want:   "Q4_K_M",
 		},
 		{
-			name:   "either spelling in either case",
-			labels: []string{"ud-q2_k_xl"},
-			quant:  "Q2_K_XL",
-			want:   "ud-q2_k_xl",
-		},
-		{
-			name:   "an exact match beats one that needs the prefix set aside",
+			name:   "each spelling finds its own item",
 			labels: []string{"UD-Q4_K_XL", "Q4_K_XL"},
 			quant:  "Q4_K_XL",
 			want:   "Q4_K_XL",
-		},
-		{
-			// Every shard of one item carries the item's label; they are one
-			// item, not several candidates.
-			name:   "the shards of one item are one item",
-			labels: []string{"UD-Q4_K_XL", "UD-Q4_K_XL", "UD-Q4_K_XL"},
-			quant:  "Q4_K_XL",
-			want:   "UD-Q4_K_XL",
-		},
-		{
-			// A repo that published the same tag in two spellings holds two
-			// items; nothing in the entry says which one it meant.
-			name:   "two items answer to the same tag",
-			labels: []string{"UD-Q4_K_XL", "ud-q4_k_xl"},
-			quant:  "Q4_K_XL",
 		},
 		{
 			name:   "a tag the repo does not publish",
@@ -127,7 +112,7 @@ func TestMatchQuantAcceptsBothSpellingsOfATag(t *testing.T) {
 		},
 		{
 			name:   "a projector is never the answer to a quant",
-			labels: []string{"mmproj-BF16"},
+			labels: []string{"mmproj-BF16.gguf"},
 			quant:  "BF16",
 		},
 	}
@@ -151,17 +136,19 @@ func TestMatchQuantAcceptsBothSpellingsOfATag(t *testing.T) {
 	}
 }
 
-// A file whose name carries no tag is its own item, named after the file minus
-// its extension — the shape draft and projector files take (docs/specs/CACHE.md).
+// A file whose name carries no tag is its own item, named exactly as the Hub
+// names the file, extension included — the shape draft and projector files take
+// (docs/specs/CACHE.md). Shards still fold, and the series takes the name of
+// the file its parts belong to.
 func TestFilesWithoutATagAreTheirOwnItem(t *testing.T) {
 	tests := []struct {
 		name  string
 		label string
 	}{
-		{"mtp-gemma-4-26B-A4B-it.gguf", "mtp-gemma-4-26B-A4B-it"},
-		{"model.gguf", "model"},
-		{"Qwen3-30B-A3B.gguf", "Qwen3-30B-A3B"},
-		{"draft-00001-of-00002.gguf", "draft"},
+		{"mtp-gemma-4-26B-A4B-it.gguf", "mtp-gemma-4-26B-A4B-it.gguf"},
+		{"model.gguf", "model.gguf"},
+		{"Qwen3-30B-A3B.gguf", "Qwen3-30B-A3B.gguf"},
+		{"draft-00001-of-00002.gguf", "draft.gguf"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -183,11 +170,11 @@ func TestProjectorsAreNeverQuantItems(t *testing.T) {
 		name  string
 		label string
 	}{
-		{"mmproj-BF16.gguf", "mmproj-BF16"},
-		{"mmproj-F16.gguf", "mmproj-F16"},
-		{"mmproj-model-f16.gguf", "mmproj-model-f16"},
-		{"MMPROJ-BF16.gguf", "MMPROJ-BF16"},
-		{"mmproj-BF16-00001-of-00002.gguf", "mmproj-BF16"},
+		{"mmproj-BF16.gguf", "mmproj-BF16.gguf"},
+		{"mmproj-F16.gguf", "mmproj-F16.gguf"},
+		{"mmproj-model-f16.gguf", "mmproj-model-f16.gguf"},
+		{"MMPROJ-BF16.gguf", "MMPROJ-BF16.gguf"},
+		{"mmproj-BF16-00001-of-00002.gguf", "mmproj-BF16.gguf"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -211,7 +198,7 @@ func TestGGUFItemAnswersOnlyForGGUFFiles(t *testing.T) {
 		{name: "Qwen3-30B-A3B-Q4_K_M.gguf", label: "Q4_K_M", gguf: true},
 		{name: "BF16/Qwen3-30B-A3B-BF16-00001-of-00002.gguf", label: "BF16", gguf: true},
 		{name: "Qwen3-30B-A3B-Q4_K_M.GGUF", label: "Q4_K_M", gguf: true},
-		{name: "mmproj-BF16.gguf", label: "mmproj-BF16", gguf: true},
+		{name: "mmproj-BF16.gguf", label: "mmproj-BF16.gguf", gguf: true},
 		{name: "config.json"},
 		{name: "README.md"},
 		{name: "model-00001-of-00002.safetensors"},

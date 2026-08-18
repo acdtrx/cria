@@ -63,13 +63,8 @@ func TestTotalOfALlamaEntry(t *testing.T) {
 			want:  Total{Bytes: 1500, Known: true},
 		},
 		{
-			// The same tag written without the prefix: one file answers to it.
-			name:  "the tag without the prefix the repo carries",
-			quant: "Q2_K_XL",
-			want:  Total{Bytes: 1500, Known: true},
-		},
-		{
-			// llama-server's -hf repo:TAG matching ignores case, so the answer must too.
+			// llama.cpp's -hf repo:TAG resolution ignores case, so the answer
+			// must too — the one difference in spelling that still resolves.
 			name:  "spelled in another case",
 			quant: "ud-q4_k_xl",
 			want:  Total{Bytes: 2000, Known: true},
@@ -83,7 +78,7 @@ func TestTotalOfALlamaEntry(t *testing.T) {
 		},
 		{
 			name:  "the projector is its own item",
-			quant: "mmproj-BF16",
+			quant: "mmproj-BF16.gguf",
 			want:  Total{Bytes: 400, Known: true},
 		},
 	}
@@ -98,18 +93,35 @@ func TestTotalOfALlamaEntry(t *testing.T) {
 	}
 }
 
-// A quant the repo does not publish has no total. Zero would read as a finished
-// download; the reason names what was looked for instead.
+// A quant the repo does not publish under that exact tag has no total. Zero
+// would read as a finished download; the reason names what was looked for
+// instead.
 func TestTotalOfAQuantTheRepoDoesNotHave(t *testing.T) {
 	hub := newHub(t, "unsloth/Qwen3-30B-A3B-GGUF", ggufRepo...)
 
-	total := totalOf(t, hub, "", config.Entry{Backend: config.BackendLlama, Repo: hub.repo, Quant: "Q2_K"})
-
-	if total.Known || total.Bytes != 0 {
-		t.Fatalf("total is %+v, want no total", total)
+	tests := []struct {
+		name  string
+		quant string
+	}{
+		{name: "a tag the repo does not publish", quant: "Q2_K"},
+		// The repo publishes UD-Q2_K_XL. cria does not add or strip a
+		// provider's prefix to make an entry fit what is there.
+		{name: "the tag without the prefix the repo carries", quant: "Q2_K_XL"},
 	}
-	if !strings.Contains(total.Reason, "Q2_K") || !strings.Contains(total.Reason, hub.repo) {
-		t.Errorf("reason is %q, want it to name Q2_K and the repo", total.Reason)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			entry := config.Entry{Backend: config.BackendLlama, Repo: hub.repo, Quant: test.quant}
+
+			total := totalOf(t, hub, "", entry)
+
+			if total.Known || total.Bytes != 0 {
+				t.Fatalf("total is %+v, want no total", total)
+			}
+			if !strings.Contains(total.Reason, test.quant) || !strings.Contains(total.Reason, hub.repo) {
+				t.Errorf("reason is %q, want it to name %s and the repo", total.Reason, test.quant)
+			}
+		})
 	}
 }
 

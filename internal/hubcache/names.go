@@ -27,12 +27,11 @@ var shardSuffix = regexp.MustCompile(`-(\d{5})-of-(\d{5})$`)
 // matching ignores case too, and older repos write theirs in lower case.
 var quantToken = regexp.MustCompile(`(?i)^(?:[IT]?Q\d[0-9A-Z_]*|B?F(?:16|32)|MXFP4[0-9A-Z_]*)$`)
 
-// udPrefix is the token unsloth puts in front of its dynamic quantizations, and
-// it belongs to the tag rather than to the model name: llama.cpp resolves
-// `-hf repo:TAG` through the Hub's manifest endpoint, which serves the full
-// UD-Q4_K_XL spelling unsloth's own documentation tells people to ask for. A
-// label that dropped it would leave the documented entry value matching
-// nothing — neither the item on disk nor the Hub's size for it.
+// udPrefix is the token unsloth puts in front of its dynamic quantizations. It
+// is part of the tag the repo publishes — llama.cpp's `-hf repo:TAG` resolves
+// the full UD-Q4_K_XL spelling and unsloth's documentation tells people to ask
+// for it — so the label keeps it, like every other character of a name a
+// provider chose (docs/specs/CACHE.md).
 const udPrefix = "UD"
 
 // parseRepoDir reads a cache directory name — models--org--name — into the Hub
@@ -93,55 +92,29 @@ func quantLabel(name string) (string, bool) {
 
 // MatchQuant picks which of a repo's item labels the quant a config entry names
 // refers to, and reports its position. The labels are the cache's items or the
-// ones the Hub's file listing spells; a label repeated across shards is the one
-// item it names, not several.
+// ones the Hub's file listing spells.
 //
-// Matching ignores case, the way llama-server's `-hf repo:TAG` does. An entry
-// that spells the tag without unsloth's UD- prefix — or with one the repo's
-// files omit — still finds its item, but only when nothing matches outright and
-// exactly one label matches with the prefix set aside. A repo publishing both
-// spellings is two items, and cria will not guess which one was meant: it
-// reports the quant absent, which is visible, where a guess would be plausible
-// and wrong (CODING-RULES §4).
+// The match is exact, on the tag as the repo's files spell it: cria does not
+// normalize provider naming, so an entry naming Q2_K_XL where the repo publishes
+// UD-Q2_K_XL finds nothing, and says so (docs/specs/CACHE.md). Case is the one
+// difference tolerated, because llama.cpp's own `-hf repo:TAG` resolution is
+// case-insensitive.
 func MatchQuant(labels []string, quant string) (int, bool) {
 	for i, label := range labels {
 		if strings.EqualFold(label, quant) {
 			return i, true
 		}
 	}
-
-	wanted := withoutUD(quant)
-	match, hits := 0, 0
-	for i, label := range labels {
-		if !strings.EqualFold(withoutUD(label), wanted) {
-			continue
-		}
-		if hits > 0 && label == labels[match] {
-			continue // another shard of the item already matched
-		}
-		match, hits = i, hits+1
-	}
-	if hits != 1 {
-		return 0, false
-	}
-	return match, true
-}
-
-// withoutUD sets unsloth's dynamic-quantization prefix aside, so the two
-// spellings of one quantization can be compared.
-func withoutUD(tag string) string {
-	prefix := udPrefix + "-"
-	if len(tag) > len(prefix) && strings.EqualFold(tag[:len(prefix)], prefix) {
-		return tag[len(prefix):]
-	}
-	return tag
+	return 0, false
 }
 
 // itemLabel is the name a GGUF file's item carries: its quantization when the
-// name spells one, the file name without its extension otherwise — a file cria
-// cannot label is still a thing on disk worth showing and deleting
-// (docs/specs/CACHE.md). A label is an item's identity, not a file name; the
-// files keep their own names in Item.Files. Shards fold into one item either way.
+// name spells one, the file's own name otherwise — a file cria cannot read a
+// tag off is still a thing on disk worth showing and deleting, and it shows
+// under the name the Hub gives it (docs/specs/CACHE.md). A label is an item's
+// identity, not a file name; the files keep their own names in Item.Files.
+// Shards fold into one item either way, and a fallback series is named after
+// the file its shards are parts of.
 //
 // A projector is the exception that has to come first: it carries a precision
 // token that reads exactly like a quantization (mmproj-BF16.gguf) but pairs with
@@ -149,14 +122,13 @@ func withoutUD(tag string) string {
 // things into one row — and one delete.
 func itemLabel(name string) string {
 	base, _, _, _ := splitShard(name)
-	stem := strings.TrimSuffix(base, filepath.Ext(base))
 	if isProjector(base) {
-		return stem
+		return base
 	}
 	if label, ok := quantLabel(name); ok {
 		return label
 	}
-	return stem
+	return base
 }
 
 // GGUFItem names the item a file belongs to and reports whether it is a GGUF

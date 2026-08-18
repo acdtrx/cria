@@ -92,8 +92,8 @@ var entrySchema = schema{
 		name:        "quant",
 		kind:        kindString,
 		onlyBackend: BackendLlama,
-		rules:       "the quantization to serve; omit it and the server picks the repo's default (an mlx quantization is its own repo)",
-		example:     `"Q4_K_M"`,
+		rules:       "the quantization to serve, spelled exactly as the repo's files name it, UD- prefix and all; omit it and the server picks the repo's default (an mlx quantization is its own repo)",
+		example:     `"UD-Q4_K_XL"`,
 		check:       checkNonEmpty,
 	},
 	{

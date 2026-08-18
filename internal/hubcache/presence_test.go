@@ -38,10 +38,11 @@ func TestPresenceOfALlamaEntry(t *testing.T) {
 			want:  Presence{Cached: true, Bytes: 3000},
 		},
 		{
-			// The same tag written without the prefix: one item answers to it.
-			name:  "the quant is on disk, spelled without the UD prefix",
+			// The same tag written without the prefix the file carries is a
+			// different tag: cria does not reshape what the repo published.
+			name:  "the entry drops the prefix the file carries",
 			entry: config.Entry{Backend: config.BackendLlama, Repo: "unsloth/Qwen3.8-27B-GGUF", Quant: "Q4_K_XL"},
-			want:  Presence{Cached: true, Bytes: 3000},
+			want:  Presence{},
 		},
 		{
 			// llama-server's -hf repo:TAG matching ignores case, so the answer must too.
@@ -63,7 +64,7 @@ func TestPresenceOfALlamaEntry(t *testing.T) {
 			// One shard landed, one is still coming: not servable, and both the
 			// finished shard and the partial are progress.
 			name:  "the quant is mid-download, shard by shard",
-			entry: config.Entry{Backend: config.BackendLlama, Repo: "unsloth/Qwen3-235B-GGUF", Quant: "Q4_K_XL"},
+			entry: config.Entry{Backend: config.BackendLlama, Repo: "unsloth/Qwen3-235B-GGUF", Quant: "UD-Q4_K_XL"},
 			want:  Presence{Bytes: 1250},
 		},
 		{

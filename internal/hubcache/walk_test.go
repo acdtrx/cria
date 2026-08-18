@@ -40,14 +40,14 @@ func TestReadListsAGGUFRepoQuantByQuant(t *testing.T) {
 	if repo.Revision != "revision-one" {
 		t.Errorf("the current revision is %q, want revision-one", repo.Revision)
 	}
-	want := []string{"UD-IQ2_M", "UD-Q4_K_XL", "mmproj-BF16", "mtp-gemma-4-26B-A4B-it"}
+	want := []string{"UD-IQ2_M", "UD-Q4_K_XL", "mmproj-BF16.gguf", "mtp-gemma-4-26B-A4B-it.gguf"}
 	if got := itemLabels(repo); !reflect.DeepEqual(got, want) {
 		t.Fatalf("the repo lists %v, want %v", got, want)
 	}
 	for _, test := range []struct {
 		label string
 		bytes int64
-	}{{"UD-Q4_K_XL", 4000}, {"UD-IQ2_M", 2000}, {"mmproj-BF16", 500}, {"mtp-gemma-4-26B-A4B-it", 300}} {
+	}{{"UD-Q4_K_XL", 4000}, {"UD-IQ2_M", 2000}, {"mmproj-BF16.gguf", 500}, {"mtp-gemma-4-26B-A4B-it.gguf", 300}} {
 		item, ok := repo.Item(test.label)
 		if !ok {
 			t.Fatalf("the repo has no item %q", test.label)
@@ -112,8 +112,8 @@ func TestReadFoldsShardsIntoOneItem(t *testing.T) {
 
 // A repo that publishes a dynamic quantization beside a plain one holds two
 // items: unsloth's prefix is part of the tag, so the two keep their own rows —
-// and their own deletes. An entry that spells the tag either way still finds
-// the one item that answers to it.
+// and their own deletes. An entry finds the one whose tag it spells, and only
+// that one.
 func TestReadKeepsUDQuantsApartFromPlainOnes(t *testing.T) {
 	tree := newCacheTree(t)
 	tree.repo("models--unsloth--Qwen3-30B-A3B-GGUF").
@@ -139,11 +139,6 @@ func TestReadKeepsUDQuantsApartFromPlainOnes(t *testing.T) {
 		{quant: "UD-Q4_K_XL", label: "UD-Q4_K_XL", files: 1, bytes: 4000},
 		{quant: "Q4_K_M", label: "Q4_K_M", files: 1, bytes: 3000},
 		{quant: "UD-Q2_K_XL", label: "UD-Q2_K_XL", files: 2, bytes: 1500},
-		// The tag spelled without the prefix the files carry: one item answers,
-		// so the entry finds it.
-		{quant: "Q2_K_XL", label: "UD-Q2_K_XL", files: 2, bytes: 1500},
-		// And with a prefix the file does not carry.
-		{quant: "UD-Q4_K_M", label: "Q4_K_M", files: 1, bytes: 3000},
 	} {
 		t.Run(test.quant, func(t *testing.T) {
 			item, ok := repo.Item(test.quant)
@@ -156,6 +151,16 @@ func TestReadKeepsUDQuantsApartFromPlainOnes(t *testing.T) {
 			if len(item.Files) != test.files || item.Bytes != test.bytes {
 				t.Errorf("%s holds %d files worth %d bytes, want %d worth %d",
 					item.Label, len(item.Files), item.Bytes, test.files, test.bytes)
+			}
+		})
+	}
+
+	// A tag spelled differently from the file's own is a different tag: cria
+	// does not strip or add a provider's prefix to make it fit.
+	for _, quant := range []string{"Q2_K_XL", "UD-Q4_K_M"} {
+		t.Run("no item for "+quant, func(t *testing.T) {
+			if item, ok := repo.Item(quant); ok {
+				t.Errorf("%q finds item %q, want no item — the repo spells its tags otherwise", quant, item.Label)
 			}
 		})
 	}
@@ -183,13 +188,13 @@ func TestReadKeepsProjectorsOutOfQuantItems(t *testing.T) {
 
 	// The full-precision weights and the projector both spell BF16 and stay apart.
 	paired := repoOf(t, cache, "unsloth/Qwen3-30B-A3B-GGUF")
-	if got, want := itemLabels(paired), []string{"BF16", "mmproj-BF16"}; !reflect.DeepEqual(got, want) {
+	if got, want := itemLabels(paired), []string{"BF16", "mmproj-BF16.gguf"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("the repo lists %v, want %v", got, want)
 	}
 	for _, test := range []struct {
 		label string
 		bytes int64
-	}{{"BF16", 6000}, {"mmproj-BF16", 500}} {
+	}{{"BF16", 6000}, {"mmproj-BF16.gguf", 500}} {
 		item, ok := paired.Item(test.label)
 		if !ok {
 			t.Fatalf("the repo has no item %q", test.label)
@@ -202,7 +207,7 @@ func TestReadKeepsProjectorsOutOfQuantItems(t *testing.T) {
 
 	// Shards still fold, and the projector beside them is still its own item.
 	sharded := repoOf(t, cache, "unsloth/Qwen3-235B-GGUF")
-	if got, want := itemLabels(sharded), []string{"UD-Q4_K_XL", "mmproj-F16"}; !reflect.DeepEqual(got, want) {
+	if got, want := itemLabels(sharded), []string{"UD-Q4_K_XL", "mmproj-F16.gguf"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("the repo lists %v, want %v", got, want)
 	}
 	quant, _ := sharded.Item("UD-Q4_K_XL")
@@ -210,9 +215,9 @@ func TestReadKeepsProjectorsOutOfQuantItems(t *testing.T) {
 		t.Errorf("UD-Q4_K_XL holds %d files worth %d bytes (complete=%v), want its 2 shards worth 1800, complete",
 			len(quant.Files), quant.Bytes, quant.Complete)
 	}
-	projector, _ := sharded.Item("mmproj-F16")
+	projector, _ := sharded.Item("mmproj-F16.gguf")
 	if len(projector.Files) != 1 || projector.Bytes != 400 {
-		t.Errorf("mmproj-F16 holds %d files worth %d bytes, want 1 worth 400", len(projector.Files), projector.Bytes)
+		t.Errorf("mmproj-F16.gguf holds %d files worth %d bytes, want 1 worth 400", len(projector.Files), projector.Bytes)
 	}
 }
 
@@ -231,12 +236,12 @@ func TestReadCountsABlobSharedBySnapshotsOnce(t *testing.T) {
 	if len(repo.Files) != 2 {
 		t.Fatalf("the repo lists %d files, want 2 distinct blobs: %v", len(repo.Files), names(repo.Files))
 	}
-	item, ok := repo.Item("Q4_K_XL")
+	item, ok := repo.Item("UD-Q4_K_XL")
 	if !ok {
-		t.Fatal("the repo has no Q4_K_XL item")
+		t.Fatal("the repo has no UD-Q4_K_XL item")
 	}
 	if item.Bytes != 3000 {
-		t.Errorf("Q4_K_XL holds %d bytes, want the 3000 of its one blob", item.Bytes)
+		t.Errorf("UD-Q4_K_XL holds %d bytes, want the 3000 of its one blob", item.Bytes)
 	}
 	if len(item.Files[0].Links) != 2 {
 		t.Errorf("the shared blob is reached by %d snapshot entries, want 2 — a delete has to remove both",

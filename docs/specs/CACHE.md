@@ -20,6 +20,14 @@ and the deletion contract. v1 is visibility and cleaning only; growth ideas wait
   huggingface_hub leaves `.incomplete` blobs, llama-server — which fetches every
   GGUF cria serves — leaves `.downloadInProgress` ones. Reading only `.incomplete`
   would miss every partial the llama path produces, which is most of them.
+- **Names are the provider's** (settled 2026-08-18): a repo, a file and a quant tag
+  render exactly as Hugging Face spells them — unsloth's `UD-Q4_K_XL` keeps its
+  prefix, a file cria reads no tag off shows under its own file name, extension
+  included. cria never normalizes, strips or prettifies provider naming, and never
+  matches it tolerantly: an entry's `quant` finds the item whose tag it spells and
+  no other, so a tag written differently is honestly absent rather than quietly
+  resolved to something near it. Case is the single exception, because llama.cpp's
+  own `-hf repo:TAG` resolution is case-insensitive.
 - A details panel for the selected item shows what the filesystem already knows:
   snapshot revision, file list with sizes (shards summed), on-disk dates, which
   config entries reference it, and whether it is being served right now. Richer
