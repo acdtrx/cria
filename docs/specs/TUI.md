@@ -19,17 +19,28 @@ keybinds get detailed as they are built.
   with progress / running / unhealthy), uptime, memory (RSS) and CPU via `ps`, plus
   what the backend's documented endpoints expose (`/health`; llama-server's
   `/props`). Everything shown is obtainable from stable interfaces (`docs/cria.md`,
-  principle 6); nothing comes from logs — the log itself is available as a raw tail.
+  principle 6); nothing comes from logs — the log itself is available as a raw
+  tail. The box sits at the top and appears in **every** view, the cache view
+  included; it carries no key hints of its own.
 - **Stop is global, start is scoped.** Stop/kill keybinds act on the running server
   no matter what is selected; only starting requires selecting an entry. A
   restart-last keybind covers the one-keypress swap-back.
+- **All keybinds live in one bottom bar, grouped by scope**: *selection* keys read
+  the highlighted item (start; delete in the cache view), *server* keys act on the
+  running server from anywhere (stop, log, restart-last; dismiss while an exited
+  record shows), *global* keys navigate (backend toggle, view switch, tools,
+  quit). The groups make "what works right now" legible without a help screen.
+- **The entry list marks each entry cached / not cached** — from the same cache
+  walk the cache view uses — so starting reads as "serve now" vs "download first"
+  before the keypress.
+- **The tools report is a pane toggled by a global keybind**, hidden by default
+  (`docs/specs/TOOLS.md` owns its content).
 - **UI preferences are state, not config**: active backend and last-started entry
   live in a small file under `~/.local/state/cria/`. The config tree stays
   human-owned; cria never records preferences there.
 
 ## Open
 
-- Foreign-server surfacing, tool-check display, log tail presentation, exact
-  keybinds and layout — settled when those screens are designed. The cache view's
-  behavior is owned by `docs/specs/CACHE.md`; how it is reached and laid out is
-  part of the layout question.
+- Foreign-server surfacing, log tail presentation, exact key choices and layout
+  details — settled when those screens are designed. The cache view's behavior is
+  owned by `docs/specs/CACHE.md`.
