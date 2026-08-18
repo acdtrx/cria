@@ -115,6 +115,7 @@ func newTestApp(tree *config.Tree, fake *fakeServers) (*app, *bytes.Buffer, *byt
 		tree:           func() (*config.Tree, error) { return tree, nil },
 		tools:          func(config.Settings) tools.Report { return usableReport() },
 		servers:        func() (servers, error) { return fake, nil },
+		memoryMB:       func() (int, error) { return 16384, nil }, // a 16 GiB machine
 		tui:            func() error { return nil },
 		poll:           time.Millisecond,
 		startWindow:    200 * time.Millisecond,

@@ -12,6 +12,14 @@ its subsystem.
 - `cria stop [<id>]` — `docs/specs/SERVE.md`.
 - `cria status [--json]` — `docs/specs/SERVE.md`.
 - `cria docs` — prints the config schema and full examples; `docs/specs/CONFIG.md`.
+- `cria wired-limit <MB>` (settled 2026-08-18, user-designed) — generates the
+  launchd plist that pins `iogpu.wired_limit_mb` at boot (Apple-silicon Macs
+  reset it, and big models need the headroom): the plist to **stdout** so a
+  redirect yields a clean file, the install/verify/uninstall instructions to
+  **stderr**, every sudo step the user's to run — cria generates, it never
+  installs (principle 1). The value is validated against the machine's memory
+  (loud refusal at ≥ RAM or off macOS); the file carries its own uninstall
+  steps in a comment.
 
 Nothing else: no cache operations, no scaffolding (`docs/BACKLOG.md`).
 

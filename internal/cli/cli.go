@@ -35,7 +35,7 @@ const (
 
 // subcommands is the whole v1 surface (docs/specs/CLI.md). Bare `cria` opens the
 // TUI instead of naming a subcommand.
-var subcommands = []string{"start", "stop", "status", "docs"}
+var subcommands = []string{"start", "stop", "status", "docs", "wired-limit"}
 
 // The flags the surface has: one per subcommand, both booleans
 // (docs/specs/CLI.md).
@@ -88,9 +88,10 @@ type app struct {
 	out io.Writer
 	err io.Writer
 
-	tree    func() (*config.Tree, error)       // the config tree, read on demand
-	tools   func(config.Settings) tools.Report // the host's managed tools
-	servers func() (servers, error)            // the state directory and the process table
+	tree     func() (*config.Tree, error)       // the config tree, read on demand
+	tools    func(config.Settings) tools.Report // the host's managed tools
+	servers  func() (servers, error)            // the state directory and the process table
+	memoryMB func() (int, error)                // the machine's memory; refuses off macOS
 
 	// tui is the program bare `cria` opens. It arrives as a function rather
 	// than an import so this package stays a command-line router: routing to
@@ -121,6 +122,7 @@ func newApp(tui func() error) *app {
 		tree:           loadTree,
 		tools:          tools.Check,
 		servers:        newManager,
+		memoryMB:       physicalMemoryMB,
 		tui:            tui,
 		poll:           waitPoll,
 		startWindow:    waitStartWindow,
@@ -148,6 +150,8 @@ func (a *app) run(args []string, version string) int {
 	case "docs":
 		a.printf("%s", config.Docs())
 		return exitOK
+	case "wired-limit":
+		return a.wiredLimit(args[1:])
 	default:
 		return a.usage("unknown subcommand %q; valid subcommands are: %s",
 			args[0], strings.Join(subcommands, ", "))
