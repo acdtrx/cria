@@ -74,6 +74,12 @@ the model card. Everything supports that loop:
 - a broken entry file disables only itself, and the error names the file, the
   key, and the fix
 
+In practice, adding a model is one prompt to your coding agent:
+
+> Create a cria entry for `unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL` with the model
+> maker's recommended parameters for coding-agent use. Run `cria docs` to see
+> how entries work, then prove yours serves with `cria start <id> --wait`.
+
 ## What it deliberately is not
 
 Not a daemon, not a proxy or auto-swapper, not a model registry, not a chat
