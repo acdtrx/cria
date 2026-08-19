@@ -2,6 +2,7 @@ package serve
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -56,6 +57,13 @@ func TestWarmingARealServer(t *testing.T) {
 		sent                      warmRequest
 	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The warm asks the health endpoint whether there is anything to warm
+		// before it asks for a completion (warm.go); only the completion is what
+		// this test is reading.
+		if r.URL.Path == mlxHealthPath {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		method, path, contentType = r.Method, r.URL.Path, r.Header.Get("Content-Type")
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -124,7 +132,11 @@ func TestALlamaServerIsNeverWarmed(t *testing.T) {
 // reason it gave: the endpoint answers its errors as a short JSON object, and
 // that is the half the status code does not carry.
 func TestARefusedWarmCarriesTheReason(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == mlxHealthPath {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		w.WriteHeader(http.StatusNotFound)
 		io.WriteString(w, `{"error": "Repository Not Found for url: .../mlx-community/Qwen3-30B-A3B-4bit"}`)
 	}))
@@ -144,11 +156,16 @@ func TestARefusedWarmCarriesTheReason(t *testing.T) {
 	}
 }
 
-// A server that never answers ends the warm at its budget, saying so — the
-// failure is that no completion came back, not that the server is gone.
+// A server that answers but never finishes the completion ends the warm at its
+// budget, saying so — the failure is that no completion came back, not that the
+// server is gone.
 func TestAWarmThatIsNeverAnsweredEndsAtItsBudget(t *testing.T) {
 	held := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == mlxHealthPath {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		<-held
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -159,6 +176,7 @@ func TestAWarmThatIsNeverAnsweredEndsAtItsBudget(t *testing.T) {
 	manager.warm = newHTTPWarm()
 	manager.warmWithin = 50 * time.Millisecond
 
+	began := time.Now()
 	err := manager.Warm(recordAt(t, mlxEntry(), server.URL))
 	if err == nil {
 		t.Fatal("a completion that never came back was reported as loaded")
@@ -166,26 +184,115 @@ func TestAWarmThatIsNeverAnsweredEndsAtItsBudget(t *testing.T) {
 	if !strings.Contains(err.Error(), "no answer within 50ms") {
 		t.Errorf("the failure reads %q, want the budget it was bound by", err)
 	}
+	if waited := time.Since(began); waited > time.Second {
+		t.Errorf("the warm took %s to give up on a 50ms budget", waited)
+	}
 }
 
-// A server that is not listening at all fails the warm with what the connection
-// said, not with a paragraph wrapping the whole request.
-func TestAWarmOfADeadPortSaysWhatHappened(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	address := server.URL
-	server.Close()
+// A server cria has just spawned is not listening yet: mlx_lm.server binds its
+// port seconds after the spawn, and the TUI fires the warm the moment the
+// record is written. So the warm waits for the server to answer — on the
+// backend's own health endpoint — and asks for a completion only once it does.
+// A completion sent into that gap comes back "connection refused" from a server
+// that is loading perfectly well, which is the whole failure this prevents.
+func TestAWarmWaitsForTheServerToAnswer(t *testing.T) {
+	host := &fakeHost{}
+	manager := newManager(t, host)
+	record, _ := startOne(t, manager, host, mlxEntry(), 4242)
 
-	manager := newManager(t, &fakeHost{})
-	manager.warm = newHTTPWarm()
-
-	err := manager.Warm(recordAt(t, mlxEntry(), address))
-	if err == nil {
-		t.Fatal("warming a port with nothing on it came back as a load")
+	var (
+		probes    int
+		probed    string
+		atWarm    int
+		completed int
+	)
+	manager.probe = func(url string) Health {
+		probes, probed = probes+1, url
+		if probes < 4 {
+			return Health{URL: url, Detail: "connection refused"}
+		}
+		return Health{URL: url, Green: true, Status: 200, Detail: "200 OK"}
 	}
-	if !strings.Contains(err.Error(), "connection refused") {
-		t.Errorf("the failure reads %q, want it to say the connection was refused", err)
+	manager.warm = func(string, string, time.Duration) error {
+		atWarm, completed = probes, completed+1
+		return nil
+	}
+
+	if err := manager.Warm(record); err != nil {
+		t.Fatalf("warming a server that came up: %v", err)
+	}
+	if completed != 1 {
+		t.Fatalf("the warm sent %d completions, want the one that loads the weights", completed)
+	}
+	if atWarm != 4 {
+		t.Errorf("the completion went after %d probe(s), want it held until the server answered (4)", atWarm)
+	}
+	if probed != probeURL(record) {
+		t.Errorf("the wait asked %q, want the backend's own health endpoint (%q)", probed, probeURL(record))
+	}
+}
+
+// A server whose port never comes up ends the warm at its budget, naming where
+// cria was asking: the process is alive, so this is a load that never got
+// anywhere rather than a server that is gone.
+func TestAWarmOfAPortThatNeverComesUpEndsAtItsBudget(t *testing.T) {
+	host := &fakeHost{}
+	manager := newManager(t, host)
+	record, _ := startOne(t, manager, host, mlxEntry(), 4242)
+	manager.warmWithin = 20 * time.Millisecond
+	manager.probe = func(url string) Health { return Health{URL: url, Detail: "connection refused"} }
+	manager.warm = func(string, string, time.Duration) error {
+		t.Error("a completion was sent to a server that never answered")
+		return nil
+	}
+
+	err := manager.Warm(record)
+	if err == nil {
+		t.Fatal("a server that never answered was reported as loaded")
+	}
+	if !strings.Contains(err.Error(), "did not answer within 20ms") || !strings.Contains(err.Error(), mlxHealthPath) {
+		t.Errorf("the failure reads %q, want the endpoint it waited on and the budget it waited for", err)
+	}
+	if errors.Is(err, ErrServerGone) {
+		t.Error("a server that is still running was reported as gone")
+	}
+}
+
+// A server that dies while the warm is waiting for it ends the wait there: it
+// has nothing left to answer, and sitting out a budget measured in minutes to
+// say so would only delay the truth. The answer names it as gone, so a caller
+// already showing that the server exited has nothing to add
+// (docs/specs/TUI.md).
+func TestAWarmEndsWhenTheServerDiesWhileItWaits(t *testing.T) {
+	host := &fakeHost{}
+	manager := newManager(t, host)
+	record, _ := startOne(t, manager, host, mlxEntry(), 4242)
+
+	probes := 0
+	manager.probe = func(url string) Health {
+		probes++
+		if probes == 2 {
+			delete(host.alive, record.PID)
+		}
+		return Health{URL: url, Detail: "connection refused"}
+	}
+	manager.warm = func(string, string, time.Duration) error {
+		t.Error("a completion was sent to a server that had died")
+		return nil
+	}
+
+	err := manager.Warm(record)
+	if err == nil {
+		t.Fatal("a server that died before it answered was reported as loaded")
+	}
+	if !errors.Is(err, ErrServerGone) {
+		t.Errorf("the failure reads %q, want it to name the server as gone", err)
+	}
+	if !strings.Contains(err.Error(), "qwen-mlx did not load its weights") {
+		t.Errorf("the failure reads %q, want it to name the entry it was warming", err)
+	}
+	if probes > 3 {
+		t.Errorf("the wait probed %d times after the process died, want it to stop at the death", probes)
 	}
 }
 

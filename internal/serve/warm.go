@@ -3,6 +3,7 @@ package serve
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,11 +40,20 @@ const (
 	// proves the model generated.
 	warmTokens = 1
 
-	// warmBudget bounds one warm. Loading weights is minutes of work for a large
-	// model on a cold cache — an order of magnitude more than any probe cria
-	// takes — so the budget is generous: it is here to end a wait that will never
-	// finish, not to judge a slow load.
+	// warmBudget bounds each of the two waits a warm is made of: for the server
+	// to answer at all, and then for the completion that loads its weights.
+	// Loading weights is minutes of work for a large model on a cold cache — an
+	// order of magnitude more than any probe cria takes — so the budget is
+	// generous: it is here to end a wait that will never finish, not to judge a
+	// slow load. One budget each rather than one shared between them, so
+	// whichever wait a warm ends in says what it was given.
 	warmBudget = 15 * time.Minute
+
+	// warmPoll is how often the wait asks whether the server is answering yet.
+	// A fresh mlx server binds its port seconds after the spawn, so this is
+	// short enough that the completion follows the listener closely and long
+	// enough that a minutes-long load is not thousands of probes.
+	warmPoll = 250 * time.Millisecond
 
 	// warmReason is how much of a refused warm's body is quoted back. The
 	// servers answer errors as one short JSON object; this is enough of it to
@@ -76,10 +86,23 @@ type warmer func(url, model string, within time.Duration) error
 // to load (docs/specs/SERVE.md).
 func LoadsLazily(backend config.Backend) bool { return backend == config.BackendMLX }
 
+// ErrServerGone is a warm that had nothing left to warm: the process died while
+// cria was waiting for its port to answer. It is named so a caller can tell it
+// apart from a server that is up and would not answer — the state records
+// already say a dead server is dead, and a caller with a display of them has
+// nothing to add (docs/specs/TUI.md).
+var ErrServerGone = errors.New("it exited before it answered")
+
 // Warm makes a server load its weights now, so the first request a caller sends
 // meets a model that is ready. A backend that loads at startup has nothing to
 // warm and Warm does nothing for it — the rule lives here rather than in each
 // caller.
+//
+// It waits for the server to answer before asking it for anything. A start
+// returns as soon as the record is written (start.go) and the port comes up
+// afterwards, so the two callers are on opposite sides of that gap: `--wait`
+// warms a server it has already watched go green, while the TUI fires the warm
+// straight off the start. The wait is what makes them the same call.
 //
 // The error is what happened, never a verdict on the server: a warm that fails
 // says the completion did not come back, and the server may well still be
@@ -88,10 +111,48 @@ func (m *Manager) Warm(record Record) error {
 	if !LoadsLazily(record.Backend) {
 		return nil
 	}
+	if err := m.awaitAnswer(record); err != nil {
+		return fmt.Errorf("%s did not load its weights: %w", record.EntryID, err)
+	}
 	if err := m.warm(warmURL(record), record.Repo, m.warmWithin); err != nil {
 		return fmt.Errorf("%s did not load its weights: %w", record.EntryID, err)
 	}
 	return nil
+}
+
+// awaitAnswer holds the warm until the server is answering.
+//
+// A completion sent the moment a server was spawned is answered by nothing:
+// mlx_lm.server binds its port seconds after the spawn, and the request lands
+// in that gap as "connection refused" — a load that is going perfectly well,
+// reported as a server that did not load. The signal waited on is the one a
+// phase is read from (health.go), which for a lazily-loading backend goes green
+// before a single weight is read: exactly the moment there is something to warm.
+//
+// The wait ends on the pid as well as on the clock. A server that has died has
+// nothing left to answer, and sitting out a budget measured in minutes to say so
+// would delay the truth rather than establish it.
+func (m *Manager) awaitAnswer(record Record) error {
+	deadline := time.Now().Add(m.warmWithin)
+	url := probeURL(record)
+	for {
+		if health := m.probe(url); health.Green {
+			return nil
+		}
+		live, err := m.Live(record)
+		if err != nil {
+			return err
+		}
+		if !live {
+			return ErrServerGone
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("%s did not answer within %s", url, m.warmWithin)
+		}
+		// Observation on an interval: whether a port has come up lives in another
+		// process, and there is no event to wait on (CODING-RULES §6).
+		time.Sleep(m.warmPoll)
+	}
 }
 
 // warmURL is where a warm is sent: the same address a probe goes to — loopback

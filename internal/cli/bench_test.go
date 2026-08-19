@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -57,7 +58,7 @@ func TestBenchReportsATable(t *testing.T) {
 	}
 	for _, want := range []string{
 		"qwen  llama  unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL  pid 4242 on 0.0.0.0:8080",
-		"16/4096/16384 tokens of prompt, 3 runs each, 256 tokens generated per run",
+		fmt.Sprintf("%d/4096/16384 tokens of prompt, 3 runs each, 256 tokens generated per run", serve.BenchMinSize),
 		"size  tokens  prefill t/s       ttft   decode t/s",
 		"16    17      1200 (1190–1210)  120ms  78.4 (78.3–78.5)",
 		"4096  4097    3800 (3790–3810)  120ms  72.1 (72.0–72.2)",
@@ -251,7 +252,7 @@ func TestBenchFlags(t *testing.T) {
 			name: "a size below the smallest rung is raised to it",
 			args: []string{"--sizes", "0,4096"},
 			want: serve.BenchSpec{Sizes: []int{serve.BenchMinSize, 4096}, Runs: 3, GenTokens: 256},
-			note: "measuring the smallest rung (16 tokens) instead",
+			note: fmt.Sprintf("measuring the smallest rung (%d tokens) instead", serve.BenchMinSize),
 		},
 	}
 
@@ -447,6 +448,31 @@ func TestBenchReportsWhatTheModelActuallyWrote(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "the model ended its answer early on the 4096-token size (171 of 256 tokens on average)") {
 		t.Errorf("cria said %q, want the early stop called out", errOut)
+	}
+}
+
+// A story that runs out a handful of tokens short of the count is what a model
+// writing prose does, and it says nothing: the rate was measured over every run
+// and over almost every token of them, so a note would only be one more true
+// thing to read.
+func TestBenchSaysNothingAboutAnAnswerThatEndedJustShort(t *testing.T) {
+	short := measuredSize(4096, 3800, 72.5)
+	for i := range short.Runs {
+		short.Runs[i].GenTokens = 250
+	}
+	short.Mean.GenTokens = 250
+
+	fake := &fakeServers{
+		listing:    serve.Listing{Servers: []serve.Server{serverNamed("qwen", 4242, true)}},
+		benchSizes: []serve.BenchSize{short},
+	}
+	app, _, errOut := newTestApp(testTree(), fake)
+
+	if code := app.bench(nil); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if strings.Contains(errOut.String(), "ended its answer early") {
+		t.Errorf("cria said %q about 250 of 256 tokens, want the line kept for a real shortfall", errOut)
 	}
 }
 

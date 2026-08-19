@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -491,6 +492,25 @@ func TestALlamaStartLoadsNothing(t *testing.T) {
 		if _, warmed := msg.(warmedMsg); warmed {
 			t.Error("a llama start answered with a load")
 		}
+	}
+}
+
+// A server that died before it ever answered says nothing under the box: the
+// box is already showing it exited, with its log one keypress away, and the
+// line under it is for what the box cannot show (docs/specs/TUI.md).
+func TestAServerThatDiedBeforeItLoadedIsLeftToTheBox(t *testing.T) {
+	fake := &fakeServers{warmErr: fmt.Errorf("mlx-qwen did not load its weights: %w", serve.ErrServerGone)}
+	frame := mlxFrame(t, fake)
+
+	frame, cmd := press(t, frame, enter)
+	frame, followUp := answering(t, frame, cmd)
+	for _, msg := range msgsOf(t, followUp) {
+		next, _ := frame.Update(msg)
+		frame = next.(model)
+	}
+
+	if frame.alert.text != "" {
+		t.Errorf("the frame says %q about a server that exited, want the line left to the box", frame.alert.text)
 	}
 }
 

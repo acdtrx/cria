@@ -127,6 +127,7 @@ func newManager(t *testing.T, host procs.Host) *Manager {
 	manager.poll = time.Millisecond
 	manager.settle = 50 * time.Millisecond
 	manager.settlePoll = time.Millisecond
+	manager.warmPoll = time.Millisecond
 	return manager
 }
 

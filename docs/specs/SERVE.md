@@ -87,7 +87,12 @@ failure states.
    sends one minimal completion (`POST /v1/completions`, one token, the
    record's own model reference — never an empty prompt, which wedges the
    server; found by live probing) and reports only after it answers: green
-   means loaded, under its own generous budget. The TUI fires the same warm in
+   means loaded, under its own generous budget. The warm first waits for the
+   server's health signal within that budget (amended 2026-08-19: the TUI fires
+   the warm right after the spawn, and mlx binds its port seconds later — a
+   completion sent into that gap read as "connection refused" for a server that
+   was loading fine); a pid that dies during the wait ends it silently — the
+   box shows exited, the log is the evidence. The TUI fires the same warm in
    the background after an mlx start. llama loads at startup and is never
    warmed; which backends load lazily is one rule in serve. A no-wait start
    cannot carry the request and says so in a note.
@@ -141,10 +146,22 @@ documented interface, uniform across backends by construction:
   prefixes — a repeated prompt fakes an instant prefill; `cached_tokens` is
   watched and a material share is warned about); the unmeasured warmup doubles
   as chars-per-token calibration so sizes land near their targets, and sizes
-  are labeled by the server's actual token count; filler that the model answers
-  tersely leaves nothing to time, so runs the model ended early are excluded
-  from decode means rather than averaged in as zero. The smallest size is 16
-  tokens — never an empty prompt (it wedges mlx_lm.server).
+  are labeled by the server's actual token count. Runs the model ended early
+  are excluded from decode means rather than averaged in as zero, and the
+  early-end note fires only when it is material (a run with no decode window,
+  or a mean under 3/4 of what was asked).
+- **Filler sizes the prefill; a seeded story instruction drives the decode**
+  (amended 2026-08-19, from field failures): the prompt is a nonce, English
+  filler cut to size, then an instruction to write an unending story with its
+  opening sentence already seeded. Each clause is evidence: continuation-style
+  prompts let models EOS instantly (zero tokens to time); a bounded ask
+  produces short *complete* stories; an unseeded ask lets mlx_lm.server enter a
+  spontaneous think block that renders as **empty text** — 256 invisible
+  tokens; and realistic story text keeps speculative/MTP decode rates honest,
+  where repetitive continuation inflated and destabilized them. Decode is
+  monotone-decreasing with prompt size on dense, MTP and mlx models under this
+  prompt. The smallest size is 96 tokens — the nonce+instruction alone
+  tokenizes to ~66, and no prompt is ever empty (it wedges mlx_lm.server).
 - A size that fails carries its reason and the sweep continues; one bench runs
   at a time. The TUI's bench pane (`docs/specs/TUI.md`) always runs the default
   sweep; sizing flags are CLI-only.

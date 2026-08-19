@@ -297,10 +297,12 @@ func (a *app) reportBench(result serve.BenchResult) {
 		if size.Cached() {
 			a.note("the server answered the %d-token size partly out of its prompt cache; its prefill rate is optimistic", size.Tokens)
 		}
-		// A model that ends its answer early is not a slow model, but its decode
-		// rate was measured over fewer tokens than were asked for — which is the
-		// difference between a number and a stable one.
-		if len(size.Runs) > 0 && size.Mean.GenTokens < float64(result.Spec.GenTokens) {
+		// A model that ends its answer early is not a slow model, but a size
+		// whose answers were cut materially short had its decode rate measured
+		// over a fraction of them — which is the difference between a number and
+		// a stable one. Which shortfalls are material is serve's (EndedEarly):
+		// the ordinary story that stops a few tokens short is not worth a line.
+		if size.EndedEarly(result.Spec.GenTokens) {
 			a.note("the model ended its answer early on the %d-token size (%.0f of %d tokens on average); its decode rate is measured over what it wrote",
 				size.Tokens, size.Mean.GenTokens, result.Spec.GenTokens)
 		}

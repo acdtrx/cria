@@ -40,13 +40,16 @@ const (
 	// exact size stays a prompt of that size.
 	benchPath = warmPath
 
-	// BenchMinSize is the smallest prompt a sweep measures. A prefill of a
-	// handful of tokens is dominated by request overhead rather than by the
-	// model, and this is the rung where that is still readable as a number;
-	// below it there is nothing left to measure. It is also what keeps the
-	// never-empty-prompt rule trivially true — an empty prompt wedges
-	// mlx_lm.server (warm.go).
-	BenchMinSize = 16
+	// BenchMinSize is the smallest prompt a sweep measures. Two things set it:
+	// a prefill of a handful of tokens is dominated by request overhead rather
+	// than by the model, and every prompt carries the generation instruction
+	// (benchInstruction) whole — the nonce and that instruction together
+	// tokenize to 66-67 tokens on the models measured 2026-08-19 (Qwen3.6-35B
+	// under llama and under MLX, Qwen3.8-27B), so a smaller rung would be a
+	// size cria cannot send, and this one leaves room for a tokenizer that
+	// spells it less economically. It is also what keeps the never-empty-prompt
+	// rule trivially true — an empty prompt wedges mlx_lm.server (warm.go).
+	BenchMinSize = 96
 
 	// benchRuns is how many times each size is measured, and benchGenTokens how
 	// much answer each run asks for. Three runs is enough for the spread to show
@@ -86,6 +89,14 @@ const (
 	// server's cache before the prefill rate is worth doubting: one part in
 	// this many.
 	benchCacheShare = 20
+
+	// benchWholeAnswer is how much of the answer it asked for a size has to
+	// have been given before the decode rate beside it is read as the model's
+	// own rather than as a rate taken from a scrap (EndedEarly). Three quarters
+	// leaves the ordinary case — a story that runs out a few tokens short of
+	// the count — unremarked, which is what a note has to do to stay worth
+	// reading.
+	benchWholeAnswer = 0.75
 
 	// nonceChars is how much of a prompt the uniqueness header takes: "nonce ",
 	// sixteen hex digits and the newline. No prompt is ever cut into it — the
@@ -245,6 +256,27 @@ func (s BenchSize) Cached() bool {
 	return false
 }
 
+// EndedEarly reports whether the model stopped short of the answer it was asked
+// for by enough to put the decode rate beside it in doubt.
+//
+// A model ending a few tokens early is not worth a line: it wrote most of what
+// was asked for, over a window long enough to measure, and the rate is the
+// rate. What is worth a line is a run with no decode window at all — the
+// absence stays out of the mean (benchMean), so the rate above it is measured
+// over fewer runs than the row claims — and a size whose runs came back so
+// short that the rate is taken from a fraction of the answer.
+func (s BenchSize) EndedEarly(asked int) bool {
+	if len(s.Runs) == 0 {
+		return false
+	}
+	for _, run := range s.Runs {
+		if !run.Decoded() {
+			return true
+		}
+	}
+	return s.Mean.GenTokens < float64(asked)*benchWholeAnswer
+}
+
 // BenchStep is where a sweep has got to, handed to the caller as each request
 // is about to be sent. A sweep is minutes of waiting, and this is what lets the
 // waiting be legible — a progress line on stderr, a line in a pane — without
@@ -369,15 +401,21 @@ func benchMean(runs []BenchRun) BenchMean {
 // benchFiller is the text a prompt is padded with: ordinary English sentences,
 // because that is what the tokenizers these models ship with were fitted to —
 // repeated punctuation or random characters would tokenize at a wildly
-// different ratio and measure a prompt nobody sends.
+// different ratio and measure a prompt nobody sends. They are laid out as a
+// numbered list, which keeps the padding legible as padding; how repetitive it
+// is does not matter, because nothing is asked *about* it (benchInstruction).
 //
-// They are laid out as a numbered list, and that is a measurement rather than a
-// style. A model asked to continue a long stretch of loose prose frequently
-// ends its answer immediately, which leaves a run with no decode to time: on
-// LFM2.5-2.6B at 16k tokens, prose came back with nothing at all on three of
-// four attempts, while the same sentences numbered came back with the full 256
-// tokens on four of four (measured 2026-08-19). A list has an obvious next
-// item, and a benchmark needs the model to keep writing.
+// The filler sizes the prefill and nothing else. What the model writes is the
+// instruction's job, and the split is what the alternative cost: a sweep that
+// asked the model to continue this list measured the list rather than the
+// model. Continuing a numbered list is trivially predictable, so a
+// speculative-decoding build feasts on it — Qwen3.6-35B-A3B-MTP
+// (--spec-type draft-mtp) decoded at 71-143 t/s across the sweep, the number
+// rising and falling with the size rather than describing the model — and it
+// is also an answer a model is free to decline: the same build streamed
+// nothing at all on three of six runs at 4096 and 16384 tokens (measured
+// 2026-08-19), and Qwen3.8-27B has ended it at 175-207 of the 256 tokens
+// asked for.
 var benchFiller = []string{
 	"The cache holds every model the servers have fetched so far.",
 	"A record names the process it launched and the port it listens on.",
@@ -388,6 +426,32 @@ var benchFiller = []string{
 	"Nothing here is read out of a log file, and nothing is guessed.",
 	"The same measurement has to mean the same thing on either backend.",
 }
+
+// benchInstruction is what every prompt ends with, and it is what the decode
+// rate is a rate of: ordinary prose, written from an instruction of the kind a
+// model is asked for all day, at a speed a caller would actually see.
+//
+// Every clause of it is load-bearing, and the wording was settled by measuring
+// (2026-08-19, 256 tokens asked for, on Qwen3.6-35B-A3B-MTP and Qwen3.8-27B
+// under llama-server and Qwen3.6-35B-A3B under mlx_lm.server):
+//
+//   - naming what to ignore keeps the filler in front of it padding rather than
+//     a question, so a long prompt does not come back answered in a sentence;
+//   - a length the story has to reach, and the refusal to end it, are what keep
+//     the answer running to the full count. Without them a model composes a
+//     short complete story instead and stops around a third of the way in —
+//     93 and 140 of 256 tokens on two of nine runs;
+//   - the opening words are what make the answer a continuation rather than a
+//     reply. A model handed an instruction is free to think about it first, and
+//     a thinking model is invisible here: mlx_lm.server streams reasoning
+//     tokens as empty text, so a run spent thinking arrives as a completion of
+//     256 tokens carrying no text at all — four of eight runs at the smallest
+//     rung, and none once the story was already under way.
+//
+// It is a story about llamas because a benchmark this long is read by people.
+const benchInstruction = "\n\nIgnore the list above. Write a story about a herd of llamas crossing the " +
+	"mountains: at least 2000 words, and do not bring it to an end.\n\nStory:\n\n" +
+	"The herd had been climbing since before dawn, and"
 
 // benchCalibrate reads this model's chars-per-token off the warmup: cria knows
 // exactly how much text it sent, and the server has just said how many tokens
@@ -404,18 +468,25 @@ func benchCalibrate(prompt string, tokens int) float64 {
 	return min(max(float64(len(prompt))/float64(tokens), benchLeastChars), benchMostChars)
 }
 
-// benchPrompt builds one run's prompt: a nonce, then filler shuffled behind it,
-// long enough to aim at tokens at the given chars-per-token.
+// benchPrompt builds one run's prompt: a nonce, filler shuffled behind it to
+// reach the size, and the instruction that says what to write.
 //
 // The nonce comes first and it is what makes the prompt unique. Both servers
 // cache the longest prefix they have already read, so a prompt that begins the
 // same way as the last one skips exactly the work a prefill measurement is
 // about; a prompt that differs in its first line shares nothing.
+//
+// The instruction comes last and it is never cut. It is the only part of the
+// prompt the model is answering, so what gets trimmed to land on a size is the
+// filler in front of it, down to none at all: a size with no room for the
+// instruction is sent as the nonce and the instruction, which is the size
+// BenchMinSize exists to keep a sweep above. The instruction's tokens count
+// towards what the server reads, and what it read is what every run reports.
 func benchPrompt(tokens int, charsPerToken float64) string {
 	var prompt strings.Builder
 	fmt.Fprintf(&prompt, "nonce %016x\n", rand.Uint64())
 
-	budget := int(float64(tokens) * charsPerToken)
+	budget := int(float64(tokens)*charsPerToken) - len(benchInstruction)
 	order := rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64()))
 	for item := 1; prompt.Len() < budget; {
 		for _, i := range order.Perm(len(benchFiller)) {
@@ -427,16 +498,14 @@ func benchPrompt(tokens int, charsPerToken float64) string {
 		}
 	}
 
-	// Cut to the budget rather than to the last whole sentence. Two reasons, and
-	// both matter: the size lands where it was aimed, and the prompt ends
-	// mid-word — a completed sentence is an invitation to answer with nothing,
-	// and a model that ends its answer at once leaves no decode to measure
-	// (Decoded). The filler and the nonce are ASCII, so the cut is a cut.
+	// Cut the filler to the budget rather than to the last whole sentence, so
+	// the size lands where it was aimed. The filler and the nonce are ASCII, so
+	// the cut is a cut.
 	text := prompt.String()
 	if len(text) > budget && budget > nonceChars {
 		text = text[:budget]
 	}
-	return text
+	return text + benchInstruction
 }
 
 // benchRequest is one measured completion as the endpoint takes it.

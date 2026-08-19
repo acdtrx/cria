@@ -127,10 +127,11 @@ type Manager struct {
 	settle     time.Duration
 	settlePoll time.Duration
 
-	// How long a warm may take, and how long one benchmark run may take, held
-	// for the same reason again — no test waits out a budget measured in
-	// minutes.
+	// How long a warm may take, how often it asks whether the server is
+	// answering yet, and how long one benchmark run may take, held for the same
+	// reason again — no test waits out a budget measured in minutes.
 	warmWithin  time.Duration
+	warmPoll    time.Duration
 	benchWithin time.Duration
 }
 
@@ -156,6 +157,7 @@ func New(root string, host procs.Host) *Manager {
 		settlePoll: identityPoll,
 
 		warmWithin:  warmBudget,
+		warmPoll:    warmPoll,
 		benchWithin: benchBudget,
 	}
 }

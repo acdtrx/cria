@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"strconv"
@@ -227,6 +228,11 @@ func (m model) started(msg startedMsg) (model, tea.Cmd) {
 // background — the whole frame keeps redrawing while a load that can take
 // minutes runs.
 //
+// It is fired straight off the start, before the server holds its port: waiting
+// for the port to answer is part of the warm (serve.Manager.Warm), so the frame
+// has no readiness of its own to track and no second observer of a phase the
+// ticker already watches.
+//
 // A backend that loads at startup has nothing to warm and gets no command at
 // all; which those are is serve's rule, not the frame's.
 func (m model) warmStarted(record serve.Record) tea.Cmd {
@@ -244,8 +250,12 @@ func (m model) warmStarted(record serve.Record) tea.Cmd {
 // be one more true thing to read (tui.go). A load that did not come back is
 // exactly what the box cannot show — the server is still running there — so it
 // goes on the line under it.
+//
+// A server that died before it answered says nothing either, for the same
+// reason the other way round: the box is already showing it exited, with its log
+// one keypress away (docs/specs/TUI.md).
 func (m model) warmed(msg warmedMsg) model {
-	if msg.err != nil {
+	if msg.err != nil && !errors.Is(msg.err, serve.ErrServerGone) {
 		m.alert = alert{text: msg.err.Error(), bad: true}
 	}
 	return m

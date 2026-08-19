@@ -233,7 +233,7 @@ func TestASizeWithoutUsageIsReportedRatherThanGuessed(t *testing.T) {
 	listener := newBenchListener(t, benchScript{tokens: 3, prompt: 100, noUsage: true})
 	manager, record := benchManager(t, listener, mlxEntry())
 
-	result := manager.Bench(record, oneSize(64, 1), nil)
+	result := manager.Bench(record, oneSize(128, 1), nil)
 	if !result.Failed() {
 		t.Fatalf("a stream with no usage was reported as a measurement: %+v", result.Sizes[0])
 	}
@@ -281,7 +281,7 @@ func TestBenchAsksForTheStreamAndItsUsage(t *testing.T) {
 	listener := newBenchListener(t, benchScript{tokens: 2, prompt: 20})
 	manager, record := benchManager(t, listener, llamaEntry())
 
-	manager.Bench(record, oneSize(64, 1), nil)
+	manager.Bench(record, oneSize(128, 1), nil)
 	if len(listener.sent) == 0 {
 		t.Fatal("the sweep sent nothing")
 	}
@@ -308,7 +308,7 @@ func TestTheWarmupIsSentButNotCounted(t *testing.T) {
 	listener := newBenchListener(t, benchScript{tokens: 2, prompt: 30})
 	manager, record := benchManager(t, listener, llamaEntry())
 
-	spec := BenchSpec{Sizes: []int{64, 128}, Runs: 2, GenTokens: 16}
+	spec := BenchSpec{Sizes: []int{128, 256}, Runs: 2, GenTokens: 16}
 	result := manager.Bench(record, spec, nil)
 
 	if want := 1 + len(spec.Sizes)*spec.Runs; len(listener.sent) != want {
@@ -334,7 +334,7 @@ func TestASweepReportsWhereItHasGot(t *testing.T) {
 	manager, record := benchManager(t, listener, llamaEntry())
 
 	var steps []BenchStep
-	manager.Bench(record, BenchSpec{Sizes: []int{64, 128}, Runs: 2, GenTokens: 16},
+	manager.Bench(record, BenchSpec{Sizes: []int{128, 256}, Runs: 2, GenTokens: 16},
 		func(step BenchStep) { steps = append(steps, step) })
 
 	if len(steps) != 5 {
@@ -344,10 +344,10 @@ func TestASweepReportsWhereItHasGot(t *testing.T) {
 		t.Errorf("the first step is %+v, want the warmup", steps[0])
 	}
 	for i, want := range []BenchStep{
-		{Size: 64, Nth: 1, Sizes: 2, Run: 1, Runs: 2},
-		{Size: 64, Nth: 1, Sizes: 2, Run: 2, Runs: 2},
-		{Size: 128, Nth: 2, Sizes: 2, Run: 1, Runs: 2},
-		{Size: 128, Nth: 2, Sizes: 2, Run: 2, Runs: 2},
+		{Size: 128, Nth: 1, Sizes: 2, Run: 1, Runs: 2},
+		{Size: 128, Nth: 1, Sizes: 2, Run: 2, Runs: 2},
+		{Size: 256, Nth: 2, Sizes: 2, Run: 1, Runs: 2},
+		{Size: 256, Nth: 2, Sizes: 2, Run: 2, Runs: 2},
 	} {
 		if steps[i+1] != want {
 			t.Errorf("step %d is %+v, want %+v", i+1, steps[i+1], want)
@@ -577,6 +577,87 @@ func TestARunTheModelEndedAtOnceIsNotAveragedAsZero(t *testing.T) {
 	}
 }
 
+// A size says its answers were cut short only when the shortfall is worth
+// reading: a story that stops a handful of tokens early was still measured over
+// almost all of what was asked for, while a size that lost a run's decode
+// window — or came back with a fraction of the answer — has a rate taken from
+// less than the row claims.
+func TestASizeSaysWhenItsAnswersWereMateriallyShort(t *testing.T) {
+	const asked = 256
+	whole := func(tokens int) BenchRun {
+		return BenchRun{GenTokens: tokens, Decode: 3 * time.Second, DecodeRate: 80}
+	}
+
+	tests := []struct {
+		name string
+		size BenchSize
+		want bool
+	}{
+		{
+			name: "every run wrote what it was asked for",
+			size: BenchSize{Runs: []BenchRun{whole(256), whole(256)}, Mean: BenchMean{GenTokens: 256}},
+		},
+		{
+			name: "a handful of tokens short is what writing prose looks like",
+			size: BenchSize{Runs: []BenchRun{whole(250), whole(244)}, Mean: BenchMean{GenTokens: 247}},
+		},
+		{
+			name: "under three quarters of the answer is a rate taken from a scrap",
+			size: BenchSize{Runs: []BenchRun{whole(180), whole(162)}, Mean: BenchMean{GenTokens: 171}},
+			want: true,
+		},
+		{
+			name: "a run with no decode window at all is missing from the mean",
+			size: BenchSize{Runs: []BenchRun{whole(256), {GenTokens: 1}}, Mean: BenchMean{GenTokens: 128}},
+			want: true,
+		},
+		{
+			name: "a size with no runs has nothing to say about what was written",
+			size: BenchSize{Err: fmt.Errorf("400 Bad Request")},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.size.EndedEarly(asked); got != test.want {
+				t.Errorf("the size reports EndedEarly=%v for %v of %d tokens, want %v",
+					got, test.size.Mean.GenTokens, asked, test.want)
+			}
+		})
+	}
+}
+
+// Every prompt carries the instruction that says what to write, whole: it is
+// the only part the model answers, so what is trimmed to land on a size is the
+// filler in front of it — and the smallest rung, where there is no filler left,
+// is still a prompt that asks for something.
+func TestEveryPromptKeepsItsInstruction(t *testing.T) {
+	for _, size := range []int{BenchMinSize, 512, 16384} {
+		prompt := benchPrompt(size, benchCharsPerToken)
+		if !strings.HasSuffix(prompt, benchInstruction) {
+			t.Errorf("the %d-token prompt ends %q, want the generation instruction", size, prompt[max(0, len(prompt)-80):])
+		}
+		if !strings.HasPrefix(prompt, "nonce ") {
+			t.Errorf("the %d-token prompt begins %q, want the nonce that defeats the prefix cache", size, prompt[:min(len(prompt), 40)])
+		}
+	}
+
+	// A prompt is still aimed at its size: the instruction is part of what the
+	// server reads, and the filler makes up the difference.
+	small, large := benchPrompt(BenchMinSize, benchCharsPerToken), benchPrompt(4096, benchCharsPerToken)
+	if len(small) >= len(large) {
+		t.Errorf("the smallest rung is %d chars and the 4096-token prompt %d; the sizes are not being aimed at", len(small), len(large))
+	}
+
+	// A size with no room for the instruction is the instruction anyway. What
+	// the budget cuts is filler; a prompt that asks for nothing measures
+	// nothing.
+	bare := benchPrompt(1, benchLeastChars)
+	if want := nonceChars + len(benchInstruction); len(bare) != want {
+		t.Errorf("a prompt too small to hold the instruction is %d chars, want the nonce and the whole instruction (%d)", len(bare), want)
+	}
+}
+
 // A sweep nobody specified is the default one, and a size nobody can measure is
 // raised to the smallest rung rather than sent as a degenerate prompt.
 func TestBenchSpecDefaultsAndClamps(t *testing.T) {
@@ -621,7 +702,7 @@ func TestAMeasurementThatIsNeverAnsweredEndsAtItsBudget(t *testing.T) {
 	manager.benchWithin = 50 * time.Millisecond
 	record := recordAt(t, llamaEntry(), server.URL)
 
-	result := manager.Bench(record, oneSize(64, 1), nil)
+	result := manager.Bench(record, oneSize(128, 1), nil)
 	if !result.Failed() {
 		t.Fatal("a measurement that never came back was reported as a rate")
 	}
@@ -637,7 +718,7 @@ func TestABenchResultNamesWhatItMeasured(t *testing.T) {
 	manager, record := benchManager(t, listener, llamaEntry())
 
 	began := time.Now()
-	result := manager.Bench(record, oneSize(64, 1), nil)
+	result := manager.Bench(record, oneSize(128, 1), nil)
 
 	if result.EntryID != record.EntryID || result.Repo != record.Repo || result.Quant != record.Quant {
 		t.Errorf("the result names %s %s:%s, want the record's %s %s:%s",
@@ -646,7 +727,7 @@ func TestABenchResultNamesWhatItMeasured(t *testing.T) {
 	if result.StartedAt.Before(began) {
 		t.Errorf("the result started at %s, before the sweep did (%s)", result.StartedAt, began)
 	}
-	if len(result.Spec.Sizes) != 1 || result.Spec.Sizes[0] != 64 {
+	if len(result.Spec.Sizes) != 1 || result.Spec.Sizes[0] != 128 {
 		t.Errorf("the result carries the spec %+v, want the one it actually ran", result.Spec)
 	}
 }

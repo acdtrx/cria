@@ -245,9 +245,11 @@ func benchLines(result serve.BenchResult, inner int) []string {
 				"the %d-token size was answered partly out of the server's prompt cache; its prefill rate is optimistic",
 				size.Tokens), inner, noticeStyle)...)
 		}
-		// A model that ends its answer early is not a slow model, but its decode
-		// rate was measured over fewer tokens than were asked for.
-		if len(size.Runs) > 0 && size.Mean.GenTokens < float64(result.Spec.GenTokens) {
+		// A model that ends its answer early is not a slow model, but a size
+		// whose answers were cut materially short had its decode rate measured
+		// over a fraction of them. Which shortfalls are material is serve's
+		// (serve.BenchSize.EndedEarly), so pane and CLI say it on the same rule.
+		if size.EndedEarly(result.Spec.GenTokens) {
 			lines = append(lines, wrapped(fmt.Sprintf(
 				"the model ended its answer early on the %d-token size (%.0f of %d tokens on average)",
 				size.Tokens, size.Mean.GenTokens, result.Spec.GenTokens), inner, noticeStyle)...)
