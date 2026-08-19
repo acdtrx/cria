@@ -162,6 +162,15 @@ documented interface, uniform across backends by construction:
   monotone-decreasing with prompt size on dense, MTP and mlx models under this
   prompt. The smallest size is 96 tokens — the nonce+instruction alone
   tokenizes to ~66, and no prompt is ever empty (it wedges mlx_lm.server).
+- **The decode number is a comparable floor, not a ceiling** (settled
+  2026-08-19, measured server-side on an MTP model: 77 t/s on the bench's
+  workload, 91 raw-and-free, 123 in chat mode — all the same server). Under
+  speculative decoding, speed depends on how predictable the output is, so
+  chat-mode use runs meaningfully faster than the bench's fixed raw workload;
+  models without speculation are content-blind and match their bench numbers
+  in use. The fixed workload is deliberate: comparison across models and
+  backends needs everyone measured on the same text, and letting each model
+  pick its happiest regime would make the numbers incomparable.
 - A size that fails carries its reason and the sweep continues; one bench runs
   at a time. The TUI's bench pane (`docs/specs/TUI.md`) always runs the default
   sweep; sizing flags are CLI-only.
