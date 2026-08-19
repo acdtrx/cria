@@ -43,6 +43,23 @@ Group entries under headings as themes emerge.
 
 ## Serve
 
+- **Silent re-downloads show as "starting", not "downloading".** When the Hub
+  copy of an already-cached quant changes (Unsloth requantized Qwen3.8 UD
+  quants between 2026-08-14 and 08-19), llama-server re-downloads the new blob
+  before loading — gigabytes with nothing in its log — while cria's phase
+  logic sees the *old* quant complete and says "starting"; the user reasonably
+  kills a "stuck" start. Fix sketch: a repo partial (`.downloadInProgress`)
+  while the port is silent counts as downloading, with progress = partial
+  bytes over hubapi's current-tree size for the quant. Revisit trigger: the
+  next upstream re-upload bites (they demonstrably happen).
+
+- **Stale-revision blobs after upstream re-uploads.** The same event leaves
+  the superseded blob behind (~10 GB of old Q2 under its old snapshot beside
+  the new one). The cache view shows the repo fat, but no deletion unit means
+  "the old revision of this quant" — deleting the quant takes both. Revisit
+  trigger: reclaiming a superseded revision is actually wanted (likely the
+  first time disk pressure meets a re-uploaded 20 GB quant).
+
 - **MLX downloads are nearly invisible as a phase.** `mlx_lm.server` binds its
   port and answers `/v1/models` *before* fetching the model, so the
   `downloading` phase (port-not-answering + model-not-cached) shows only for an
