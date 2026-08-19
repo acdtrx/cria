@@ -81,6 +81,16 @@ func (m model) planner(selected cacheRow) func([]hubcache.Served) (*hubcache.Pla
 		return func(served []hubcache.Served) (*hubcache.Plan, error) {
 			return m.host.surgery.partials(selected.repo, served)
 		}
+	case supersededRow:
+		// The row selects one item's old copies where it sits under an item, and
+		// the whole repository's where the repository is the unit.
+		label := ""
+		if selected.item != nil {
+			label = selected.item.Label
+		}
+		return func(served []hubcache.Served) (*hubcache.Plan, error) {
+			return m.host.surgery.superseded(selected.repo, label, served)
+		}
 	}
 	return func(served []hubcache.Served) (*hubcache.Plan, error) {
 		return m.host.surgery.repo(selected.repo, served)
@@ -205,7 +215,7 @@ func (m model) confirmPanel(width, rows int) string {
 		if i > 0 {
 			label = ""
 		}
-		detail.add(label, fmt.Sprintf("referenced by entry %s — the entry stays; its next start re-downloads", id), noticeStyle)
+		detail.add(label, fmt.Sprintf("referenced by entry %s — %s", id, entryFate(plan.Target)), noticeStyle)
 	}
 
 	lines := append(detail.lines, "", quietStyle.Render("y deletes it; esc leaves it alone."))
@@ -213,6 +223,17 @@ func (m model) confirmPanel(width, rows int) string {
 		lines = append(lines, noticeStyle.Render(m.confirm.note))
 	}
 	return pane(paneTitle(deleteScope), width, sizeLines(lines, rows-2))
+}
+
+// entryFate is what a delete leaves the config entries that name those bytes.
+// Taking a model costs the entry its next start a download; taking the copies a
+// re-upload replaced costs it nothing at all — what it serves is the copy that
+// stays (docs/specs/CACHE.md).
+func entryFate(target hubcache.Target) string {
+	if target.Kind == hubcache.TargetSuperseded {
+		return "the entry stays; the copy it serves stays with it"
+	}
+	return "the entry stays; its next start re-downloads"
 }
 
 // removalWords is what a plan takes off the disk, counted the way it removes

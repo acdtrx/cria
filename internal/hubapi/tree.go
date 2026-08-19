@@ -15,14 +15,31 @@ import (
 // cria's memory problem.
 const maxPageBytes = 4 << 20
 
-// treeFile is one entry of the models tree API. Only the path and the size are
-// read: the oids, the LFS block and the xet hash describe how the Hub stores a
-// file, which is none of cria's business. For an LFS file — every weight file
-// cria cares about — size is the real size, not the pointer's.
+// treeFile is one entry of the models tree API: what the file is called, what
+// it weighs, and the hash the hub cache will name its bytes after. For an LFS
+// file — every weight file cria cares about — size is the real size, not the
+// pointer's. The xet block describes how the Hub stores a file, which is none
+// of cria's business.
 type treeFile struct {
 	Type string `json:"type"` // "file" or "directory"
 	Path string `json:"path"` // the path inside the repo, the name the cache gives it too
 	Size int64  `json:"size"`
+	Oid  string `json:"oid"` // the git object the Hub holds; the blob name for a file stored in git itself
+	LFS  struct {
+		Oid string `json:"oid"` // the content hash; the blob name for a file stored in LFS
+	} `json:"lfs"`
+}
+
+// blob is the name the hub cache gives this file's bytes. huggingface_hub and
+// llama-server both name a blob after the entity tag the Hub serves the file
+// with: the LFS content hash where there is one, the git object id otherwise —
+// which is exactly what this host's cache holds, 64-hex blobs for the weights
+// and 40-hex ones for the small files beside them.
+func (f treeFile) blob() string {
+	if f.LFS.Oid != "" {
+		return f.LFS.Oid
+	}
+	return f.Oid
 }
 
 // tree lists every file of a repo's main revision with its size. Pagination is

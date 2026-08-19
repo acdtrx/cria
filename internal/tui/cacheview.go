@@ -52,21 +52,28 @@ const partialMark = "⚠"
 type cacheRowKind int
 
 const (
-	repoRow     cacheRowKind = iota // a repository: a GGUF repo's header, or an MLX/other repo whole
-	itemRow                         // one quantization of a GGUF repo, its shards folded in
-	partialsRow                     // one repository's unfinished downloads
+	repoRow       cacheRowKind = iota // a repository: a GGUF repo's header, or an MLX/other repo whole
+	itemRow                           // one quantization of a GGUF repo, its shards folded in
+	partialsRow                       // one repository's unfinished downloads
+	supersededRow                     // the copies a re-upload replaced, under the item or the repo they belong to
 )
 
 // cacheRow is one line of the list, pointing into the walk it was built from.
 type cacheRow struct {
 	kind cacheRowKind
 	repo *hubcache.Repo
-	item *hubcache.Item // the quantization, on an itemRow
+	item *hubcache.Item // the quantization, on an itemRow and on the superseded row under one
 }
 
 // cacheRows is the list the cache view draws: every repository the walk found,
-// in its order, with a GGUF repo's quants under it and a partials row wherever
-// there are bytes to reclaim.
+// in its order, with a GGUF repo's quants under it, the copies a re-upload
+// superseded under whatever they belong to, and a partials row wherever there
+// are bytes to reclaim.
+//
+// A superseded row is what keeps the item above it honest: the item shows the
+// copy the repo holds under that tag today, and the bytes the old one is still
+// occupying are a row of their own rather than a silent addition to it
+// (docs/specs/CACHE.md).
 func (m model) cacheRows() []cacheRow {
 	if m.cache == nil {
 		return nil
@@ -76,14 +83,31 @@ func (m model) cacheRows() []cacheRow {
 	for i := range m.cache.Repos {
 		repo := &m.cache.Repos[i]
 		rows = append(rows, cacheRow{kind: repoRow, repo: repo})
+		// A GGUF repo's superseded copies sit under the quant they are copies
+		// of; every other repo is one unit, so they sit under the repo itself.
+		if repo.Kind != hubcache.KindGGUF && len(repo.Superseded) > 0 {
+			rows = append(rows, cacheRow{kind: supersededRow, repo: repo})
+		}
 		for j := range repo.Items {
 			rows = append(rows, cacheRow{kind: itemRow, repo: repo, item: &repo.Items[j]})
+			if len(repo.Items[j].Superseded) > 0 {
+				rows = append(rows, cacheRow{kind: supersededRow, repo: repo, item: &repo.Items[j]})
+			}
 		}
 		if len(repo.Partials) > 0 {
 			rows = append(rows, cacheRow{kind: partialsRow, repo: repo})
 		}
 	}
 	return rows
+}
+
+// supersededFiles is what a superseded row holds: one item's old copies, or a
+// whole repository's where the repository is the unit.
+func supersededFiles(listed cacheRow) []hubcache.File {
+	if listed.item != nil {
+		return listed.item.Superseded
+	}
+	return listed.repo.Superseded
 }
 
 // selectedCacheRow is what the cache cursor is on, if the list has anything on
@@ -182,6 +206,14 @@ func rowFacts(listed cacheRow, paint rowPaint) string {
 		return paint.join(facts...)
 	case partialsRow:
 		return paint.pad(itemIndent) + paint.notice().Render(partialMark+" "+unfinishedWords(len(listed.repo.Partials)))
+	case supersededRow:
+		// Under the item it belongs to, one level deeper than the item is under
+		// its repo — the row is about that row above it.
+		indent := itemIndent
+		if listed.item != nil {
+			indent += itemIndent
+		}
+		return paint.pad(indent) + paint.quiet().Render(supersededWords(supersededFiles(listed)))
 	}
 
 	facts := []string{paint.name().Render(listed.repo.ID), paint.quiet().Render(listed.repo.Kind.String())}
@@ -203,15 +235,45 @@ func unfinishedWords(count int) string {
 	return fmt.Sprintf("%d unfinished downloads", count)
 }
 
+// supersededWords is what a superseded row says about itself: that the copies
+// it holds are not what the repo names any more, and when they landed — the date
+// is what tells a re-upload from last week apart from the one that happened
+// during this morning's start.
+func supersededWords(files []hubcache.File) string {
+	words := "superseded" + detailSeparator + day(newest(files))
+	if len(files) > 1 {
+		words += fmt.Sprintf("%s%d files", detailSeparator, len(files))
+	}
+	return words
+}
+
+// newest is when the newest of a set of files landed.
+func newest(files []hubcache.File) time.Time {
+	var at time.Time
+	for _, file := range files {
+		if file.Modified.After(at) {
+			at = file.Modified
+		}
+	}
+	return at
+}
+
 // rowBytes is what one row occupies on disk. A repo's own number is the whole
-// directory, its quants' are their blobs counted once each, so items need not
-// sum to their repo — true bytes win over tidy arithmetic (docs/specs/CACHE.md).
+// directory — the superseded copies under it included, because they are still
+// on disk — while its quants' and their superseded rows' are their blobs counted
+// once each, so the rows need not sum to their repo: true bytes win over tidy
+// arithmetic (docs/specs/CACHE.md).
 func rowBytes(listed cacheRow) int64 {
 	switch listed.kind {
 	case itemRow:
 		return listed.item.Bytes
 	case partialsRow:
 		return listed.repo.PartialBytes
+	case supersededRow:
+		if listed.item != nil {
+			return listed.item.SupersededBytes
+		}
+		return listed.repo.SupersededBytes
 	}
 	return listed.repo.Bytes
 }
@@ -247,6 +309,8 @@ func (m model) cacheDetailLines(inner, capacity int) []string {
 		return sizeLines(m.itemDetail(selected.repo, selected.item, inner), capacity)
 	case partialsRow:
 		return sizeLines(partialsDetail(selected.repo, inner), capacity)
+	case supersededRow:
+		return sizeLines(m.supersededDetail(selected, inner), capacity)
 	}
 	return sizeLines(m.repoDetail(selected.repo, inner), capacity)
 }
@@ -286,6 +350,76 @@ func (m model) repoDetail(repo *hubcache.Repo, inner int) []string {
 	// one this row's delete would take with it.
 	m.crossReference(detail, repo.ID, "")
 	return detail.lines
+}
+
+// supersededDetail is what an upstream re-upload left behind: the copies the
+// repo's names no longer resolve to, what they cost, and — the fact that makes
+// the row safe to act on — the copy that stays.
+func (m model) supersededDetail(listed cacheRow, inner int) []string {
+	files := supersededFiles(listed)
+
+	detail := &details{inner: inner}
+	detail.add("repo", listed.repo.ID, factStyle)
+	if listed.item != nil {
+		detail.add("quant", listed.item.Label, factStyle)
+	}
+	detail.add("state", "superseded — the repo names other bytes under "+theseNames(files), noticeStyle)
+	detail.add("reclaims", format.Bytes(rowBytes(listed)), sizeStyle)
+	for i, file := range files {
+		label := "old"
+		if i > 0 {
+			label = ""
+		}
+		detail.add(label, strings.Join([]string{file.Name, format.Bytes(file.Bytes), stamp(file.Modified)}, detailSeparator), factStyle)
+	}
+
+	// What survives this delete, named file by file: the current copy is what a
+	// server has open and what the next start uses, and it is not in the plan.
+	for i, file := range m.currentCopies(listed) {
+		label := "keeps"
+		if i > 0 {
+			label = ""
+		}
+		detail.add(label, file.Name+detailSeparator+format.Bytes(file.Bytes)+detailSeparator+stamp(file.Modified), quietStyle)
+	}
+	detail.add("revision", orUnknown(listed.repo.Revision), factStyle)
+	return detail.lines
+}
+
+// currentCopies is what the repo holds today under the names a superseded row's
+// files carry — the copies that delete leaves in place.
+func (m model) currentCopies(listed cacheRow) []hubcache.File {
+	held := listed.repo.Files
+	if listed.item != nil {
+		held = listed.item.Files
+	}
+	wanted := map[string]bool{}
+	for _, file := range supersededFiles(listed) {
+		wanted[file.Name] = true
+	}
+
+	var current []hubcache.File
+	for _, file := range held {
+		if wanted[file.Name] {
+			current = append(current, file)
+		}
+	}
+	return current
+}
+
+// theseNames is the file names a superseded set carries, for the line that says
+// what the repo resolves elsewhere now.
+func theseNames(files []hubcache.File) string {
+	seen := map[string]bool{}
+	var names []string
+	for _, file := range files {
+		if seen[file.Name] {
+			continue
+		}
+		seen[file.Name] = true
+		names = append(names, file.Name)
+	}
+	return strings.Join(names, ", ")
 }
 
 // partialsDetail is what a repository is holding back: the unfinished downloads
@@ -437,6 +571,14 @@ func stamp(at time.Time) string {
 		return "(unknown)"
 	}
 	return at.Format(time.DateTime)
+}
+
+// day is the same fact at the resolution a list row has room for.
+func day(at time.Time) string {
+	if at.IsZero() {
+		return "(unknown)"
+	}
+	return at.Format(time.DateOnly)
 }
 
 // age is how long ago it landed, at the resolution the answer is read at: an

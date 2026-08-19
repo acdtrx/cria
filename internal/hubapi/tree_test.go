@@ -20,8 +20,8 @@ func TestEveryPageOfTheListingIsRead(t *testing.T) {
 
 	total := totalOf(t, hub, "", config.Entry{Backend: config.BackendMLX, Repo: hub.repo})
 
-	if want := (Total{Bytes: 10100, Known: true}); total != want {
-		t.Fatalf("total is %+v, want %+v — the whole listing, not one page", total, want)
+	if total.Bytes != 10100 || !total.Known || len(total.Blobs) != 5 {
+		t.Fatalf("total is %+v, want 10100 bytes over 5 blobs — the whole listing, not one page", total)
 	}
 	asked := hub.requests()
 	if len(asked) != 3 {

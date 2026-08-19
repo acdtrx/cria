@@ -132,22 +132,49 @@ func (m *Manager) observe(server Server, cache cacheReader) (Status, error) {
 	}
 
 	// The cache is read only when the probe has settled nothing. Green and
-	// was-green both outrank presence in derivePhase, so a walk skipped here
+	// was-green both outrank the disk in derivePhase, so a walk skipped here
 	// could not have changed the phase — and the walk sizes every blob in the
 	// cache, far too much work to do on a refresh tick that does not need it.
+	//
+	// The Hub is asked before the phase rather than after it, because which
+	// blobs the model is made of today is one of the phase's own inputs. It is
+	// asked only where its answer can matter: something unfinished is sitting in
+	// the entry's repo, or the model is not all there. A start whose model is
+	// whole and whose repo is quiet asks nothing — the ordinary case, and the
+	// one that must not put a network round trip in front of the display.
 	var presence hubcache.Presence
+	var total hubapi.Total
+	var landed int64
 	if !seen.green && !seen.wasGreen {
-		presence, err = m.presence(server.Record, cache)
+		read, err := m.walk(server.Record, cache)
 		if err != nil {
 			return Status{}, err
 		}
+		presence = read.Presence(server.entry())
 		seen.cached = presence.Cached
+
+		repo, held := read.Repo(server.Repo)
+		unfinished := held && len(repo.Partials) > 0
+		if unfinished || !seen.cached {
+			total = m.modelTotal(server.Record)
+		}
+		if unfinished {
+			landed, seen.fetching = fetching(repo, total)
+		}
 	}
 
 	status.Phase = derivePhase(seen)
 	if status.Phase == PhaseDownloading {
-		total := m.modelTotal(server.Record)
-		status.Progress = Progress{Bytes: presence.Bytes, Total: total.Bytes, Known: total.Known, Reason: total.Reason}
+		// The numerator is whatever this phase was derived from. A model the
+		// cache holds nothing of is measured by what has arrived for it; a model
+		// that reads complete and is being fetched again is measured by the
+		// copy that is landing, because the bytes already on disk are the old
+		// copy's and counting them would show a download that starts finished.
+		bytes := presence.Bytes
+		if seen.fetching {
+			bytes = landed
+		}
+		status.Progress = Progress{Bytes: bytes, Total: total.Bytes, Known: total.Known, Reason: total.Reason}
 	}
 	return status, nil
 }
@@ -161,6 +188,7 @@ type observation struct {
 	green    bool // the documented health endpoint answered 2xx just now
 	wasGreen bool // this server has answered green at least once during this cria invocation
 	cached   bool // the entry's model is fully present in the cache
+	fetching bool // the cache is receiving the entry's model right now, whatever it already holds of it
 }
 
 // derivePhase is the whole phase rule (docs/specs/SERVE.md), and its order is
@@ -171,8 +199,12 @@ type observation struct {
 // stopped is unhealthy, while one that has never answered is still on its way
 // up — llama-server replies 503 at /health for as long as it is loading a
 // model, and calling that unhealthy would make every normal start look like a
-// failure. Only then does the cache matter: a start that is not answering yet
-// is downloading when its model is not all there, and starting when it is.
+// failure. Only then does the cache matter, and it answers in two ways: a
+// server whose model is still arriving is downloading, and so is one whose
+// model reads complete while the copy the Hub publishes today is arriving
+// anyway — a provider who republishes a quant makes the server fetch gigabytes
+// before it loads a thing, with nothing in its log to say so. Cached and quiet
+// is what starting means.
 func derivePhase(seen observation) Phase {
 	switch {
 	case !seen.live:
@@ -181,6 +213,8 @@ func derivePhase(seen observation) Phase {
 		return PhaseRunning
 	case seen.wasGreen:
 		return PhaseUnhealthy
+	case seen.fetching:
+		return PhaseDownloading
 	case !seen.cached:
 		return PhaseDownloading
 	default:
@@ -212,19 +246,40 @@ func (m *Manager) rememberGreen(entryID string, pid int, green bool) bool {
 	return m.greenPID[entryID] == pid
 }
 
-// presence asks the cache how much of one record's model is on disk.
+// walk reads the cache one record's phase is derived against.
 //
 // A walk that fails is not degraded into "nothing left to download": that
 // answer is plausible and wrong, and it would show a downloading server as
 // starting forever. The failure travels instead, naming the cache that could
 // not be read — the same reason List refuses to report servers as exited when
 // the process table cannot be read (CODING-RULES §4).
-func (m *Manager) presence(record Record, cache cacheReader) (hubcache.Presence, error) {
+func (m *Manager) walk(record Record, cache cacheReader) (*hubcache.Cache, error) {
 	read, err := cache()
 	if err != nil {
-		return hubcache.Presence{}, fmt.Errorf("cannot tell whether %s still has its model to download: %w", record.EntryID, err)
+		return nil, fmt.Errorf("cannot tell whether %s still has its model to download: %w", record.EntryID, err)
 	}
-	return read.Presence(record.entry()), nil
+	return read, nil
+}
+
+// fetching reports whether the unfinished downloads in a repo are this model's,
+// and how many of the model's bytes have landed.
+//
+// The precise question is which blobs the Hub publishes for this model today:
+// the cache names an unfinished download after the file it is becoming, so a
+// partial carrying one of those names is this model arriving and a partial
+// carrying any other name is another file of the same repo arriving.
+//
+// Without a total there are no names to match, and the repository is the whole
+// answer that is left: anything unfinished in it is taken as this model's,
+// because cria launched the server that is fetching into it. That is the same
+// judgement llamaPresence already makes for a quant with nothing on disk yet,
+// and it keeps the re-download visible on a host that cannot reach the Hub —
+// coarser, never louder: the phase it produces is the one the bytes justify.
+func fetching(repo *hubcache.Repo, total hubapi.Total) (int64, bool) {
+	if !total.Known {
+		return repo.PartialBytes, true
+	}
+	return repo.Fetching(total.Blobs)
 }
 
 // cacheOnce is a cache read taken at most once, however many records ask for

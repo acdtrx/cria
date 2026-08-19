@@ -28,6 +28,20 @@ and the deletion contract. v1 is visibility and cleaning only; growth ideas wait
   no other, so a tag written differently is honestly absent rather than quietly
   resolved to something near it. Case is the single exception, because llama.cpp's
   own `-hf repo:TAG` resolution is case-insensitive.
+- **Superseded copies are visible and deletable** (settled 2026-08-19, from a
+  live Unsloth re-upload): when the same file name resolves to different blobs
+  in different snapshots, the copies not reachable from the current revision —
+  `refs/main` when it resolves (llama-server maintains it), else the newest
+  snapshot holding that name — are superseded, rendered as their own sub-rows
+  under their item, and deletable as a unit. An item's bytes are its current
+  copy; superseded bytes ride their own rows; the repo total still counts
+  everything (du-honesty). Blobs shared with the current revision are never
+  superseded, and a name only old snapshots hold is not superseded — cria
+  never offers to delete the only copy of a quant. The serving guard exempts
+  superseded copies: a running server maps the current inode, so unlinking the
+  old blob returns the space at once (a server started before the re-upload
+  still holds the old inode until it stops — the delete then frees nothing and
+  breaks nothing).
 - A details panel for the selected item shows what the filesystem already knows:
   snapshot revision, file list with sizes (shards summed), on-disk dates, which
   config entries reference it, and whether it is being served right now. Richer

@@ -26,7 +26,13 @@ type fakeSurgery struct {
 }
 
 func (f *fakeSurgery) surgery() surgery {
-	return surgery{quant: f.planQuant, repo: f.planRepo, partials: f.planPartials, execute: f.execute}
+	return surgery{
+		quant:      f.planQuant,
+		repo:       f.planRepo,
+		partials:   f.planPartials,
+		superseded: f.planSuperseded,
+		execute:    f.execute,
+	}
 }
 
 func (f *fakeSurgery) planQuant(repo *hubcache.Repo, quant string, served []hubcache.Served) (*hubcache.Plan, error) {
@@ -43,6 +49,12 @@ func (f *fakeSurgery) planRepo(repo *hubcache.Repo, served []hubcache.Served) (*
 
 func (f *fakeSurgery) planPartials(repo *hubcache.Repo, served []hubcache.Served) (*hubcache.Plan, error) {
 	f.asked = append(f.asked, "partials "+repo.ID)
+	f.planned = append(f.planned, served)
+	return f.plan, f.planErr
+}
+
+func (f *fakeSurgery) planSuperseded(repo *hubcache.Repo, quant string, served []hubcache.Served) (*hubcache.Plan, error) {
+	f.asked = append(f.asked, "superseded "+repo.ID+":"+quant)
 	f.planned = append(f.planned, served)
 	return f.plan, f.planErr
 }
@@ -150,6 +162,10 @@ func TestDeletePlansTheSelectedUnit(t *testing.T) {
 		"unsloth/Qwen3-30B-A3B-GGUF":       "repo unsloth/Qwen3-30B-A3B-GGUF",
 		"mlx-community/Qwen3-30B-A3B-4bit": "repo mlx-community/Qwen3-30B-A3B-4bit",
 		"unfinished downloads":             "partials unsloth/gemma-3-27b-it-GGUF",
+		// The superseded row under a quant takes that quant's old copies; the
+		// one under a repo with no quants takes the repository's.
+		"superseded · 2026-08-05 · 2 files": "superseded unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL",
+		"superseded · 2026-08-05":           "superseded mlx-community/Qwen3-30B-A3B-4bit:",
 	}
 
 	for row, want := range cases {
@@ -165,6 +181,49 @@ func TestDeletePlansTheSelectedUnit(t *testing.T) {
 				t.Errorf("x asked for %q, want %q", world.surgery.asked, want)
 			}
 		})
+	}
+}
+
+// The confirmation for the copies a re-upload replaced reads like any other —
+// and says what is different about it: the entry that names those bytes loses
+// nothing, because what it serves is the copy that stays (docs/specs/CACHE.md).
+func TestDeleteConfirmOfSupersededCopies(t *testing.T) {
+	frame, world := cacheFrame(t)
+	world.surgery.plan = &hubcache.Plan{
+		Target: hubcache.Target{
+			Kind: hubcache.TargetSuperseded, Repo: "unsloth/Qwen3-30B-A3B-GGUF", Quant: "UD-Q4_K_XL",
+		},
+		Removes: []hubcache.Removal{
+			{Path: "/hub/models--unsloth--Qwen3-30B-A3B-GGUF/blobs/3333", Bytes: 4 << 30},
+			{Path: "/hub/models--unsloth--Qwen3-30B-A3B-GGUF/blobs/4444", Bytes: 4 << 30},
+			{Path: "/hub/models--unsloth--Qwen3-30B-A3B-GGUF/snapshots/old/Qwen3-UD-Q4_K_XL-00001-of-00002.gguf"},
+			{Path: "/hub/models--unsloth--Qwen3-30B-A3B-GGUF/snapshots/old/Qwen3-UD-Q4_K_XL-00002-of-00002.gguf"},
+		},
+		Dirs:  []string{"/hub/models--unsloth--Qwen3-30B-A3B-GGUF/snapshots/old"},
+		Bytes: 8 << 30,
+	}
+	frame = onRow(t, frame, "superseded · 2026-08-05 · 2 files")
+
+	frame, cmd := press(t, frame, typed('x'))
+	frame = answer(t, frame, cmd)
+
+	if frame.confirm == nil {
+		t.Fatal("the plan raised no confirmation")
+	}
+	drawn := plain(frame.View().Content)
+	for _, fact := range []string{
+		"delete the superseded copies of unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL?",
+		"8.0 GiB",
+		"4 paths, and 1 emptied directories",
+		"referenced by entry qwen — the entry stays; the copy it serves stays with it",
+		"y deletes it; esc leaves it alone.",
+	} {
+		if !strings.Contains(drawn, fact) {
+			t.Errorf("the confirmation does not carry %q:\n%s", fact, drawn)
+		}
+	}
+	if strings.Contains(drawn, "its next start re-downloads") {
+		t.Errorf("the confirmation threatens a re-download the delete does not cause:\n%s", drawn)
 	}
 }
 

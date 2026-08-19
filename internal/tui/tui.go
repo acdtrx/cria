@@ -76,10 +76,11 @@ type host struct {
 // them (CODING-RULES §1); naming them here is what lets the whole delete flow —
 // the refusal, the confirmation, the drift — be exercised with no cache on disk.
 type surgery struct {
-	quant    func(repo *hubcache.Repo, quant string, served []hubcache.Served) (*hubcache.Plan, error)
-	repo     func(repo *hubcache.Repo, served []hubcache.Served) (*hubcache.Plan, error)
-	partials func(repo *hubcache.Repo, served []hubcache.Served) (*hubcache.Plan, error)
-	execute  func(plan *hubcache.Plan, served []hubcache.Served) (int64, error)
+	quant      func(repo *hubcache.Repo, quant string, served []hubcache.Served) (*hubcache.Plan, error)
+	repo       func(repo *hubcache.Repo, served []hubcache.Served) (*hubcache.Plan, error)
+	partials   func(repo *hubcache.Repo, served []hubcache.Served) (*hubcache.Plan, error)
+	superseded func(repo *hubcache.Repo, quant string, served []hubcache.Served) (*hubcache.Plan, error)
+	execute    func(plan *hubcache.Plan, served []hubcache.Served) (int64, error)
 }
 
 // view names the screen the frame is routed to. Two of them in v1
@@ -213,10 +214,11 @@ func machine(root string) host {
 		tools:   tools.Check,
 		cache:   readCache,
 		surgery: surgery{
-			quant:    hubcache.PlanQuant,
-			repo:     hubcache.PlanRepo,
-			partials: hubcache.PlanPartials,
-			execute:  hubcache.Execute,
+			quant:      hubcache.PlanQuant,
+			repo:       hubcache.PlanRepo,
+			partials:   hubcache.PlanPartials,
+			superseded: hubcache.PlanSuperseded,
+			execute:    hubcache.Execute,
 		},
 	}
 }

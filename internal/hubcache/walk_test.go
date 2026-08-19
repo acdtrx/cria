@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // mlxConfig is what mlx-lm writes into a quantized repo's config.json: the
@@ -253,6 +254,156 @@ func TestReadCountsABlobSharedBySnapshotsOnce(t *testing.T) {
 	}
 }
 
+// A provider who requantizes a repo leaves two copies of one file name on disk,
+// under different blobs and different snapshots. The item is what the repo holds
+// under that tag today; the copy the current revision no longer names is
+// superseded — its own bytes, reclaimable on their own — and a file both
+// revisions share is not superseded at all (docs/specs/CACHE.md).
+func TestReadHoldsSupersededCopiesApartFromCurrentOnes(t *testing.T) {
+	projector := cachedFile{name: "mmproj-BF16.gguf", size: 400}
+	tree := newCacheTree(t)
+	tree.repo("models--unsloth--Qwen3.8-27B-GGUF").
+		snapshot("revision-old",
+			cachedFile{name: "Qwen3.8-27B-UD-Q2_K_XL.gguf", size: 3000},
+			cachedFile{name: "Qwen3.8-27B-UD-Q4_K_XL.gguf", size: 5000},
+			projector).
+		snapshot("revision-new",
+			cachedFile{name: "Qwen3.8-27B-UD-Q2_K_XL.gguf", size: 2800},
+			projector).
+		main("revision-new")
+
+	repo := repoOf(t, read(t, tree.Root), "unsloth/Qwen3.8-27B-GGUF")
+
+	// The requantized tag: one item, holding the copy the repo names now, with
+	// the old one hanging off it.
+	quant, ok := repo.Item("UD-Q2_K_XL")
+	if !ok {
+		t.Fatalf("the repo lists %v, want the requantized tag among them", itemLabels(repo))
+	}
+	if quant.Bytes != 2800 || len(quant.Files) != 1 {
+		t.Errorf("UD-Q2_K_XL holds %d files worth %d bytes, want the current copy alone: 1 worth 2800",
+			len(quant.Files), quant.Bytes)
+	}
+	if len(quant.Superseded) != 1 || quant.SupersededBytes != 3000 {
+		t.Fatalf("UD-Q2_K_XL carries %d superseded copies worth %d bytes, want 1 worth 3000",
+			len(quant.Superseded), quant.SupersededBytes)
+	}
+	if got := quant.Superseded[0].Name; got != "Qwen3.8-27B-UD-Q2_K_XL.gguf" {
+		t.Errorf("the superseded copy is named %q, want the file name it still carries", got)
+	}
+	if quant.Superseded[0].Blob == quant.Files[0].Blob {
+		t.Error("the superseded copy and the current one are the same blob")
+	}
+
+	// A tag only the older revision ever named is not superseded: it is the only
+	// copy of that file on disk, and the repo still holds it.
+	untouched, ok := repo.Item("UD-Q4_K_XL")
+	if !ok {
+		t.Fatalf("the repo lists %v, want the quant only the old revision names", itemLabels(repo))
+	}
+	if untouched.Bytes != 5000 || len(untouched.Superseded) != 0 {
+		t.Errorf("UD-Q4_K_XL holds %d bytes with %d superseded copies, want 5000 and none",
+			untouched.Bytes, len(untouched.Superseded))
+	}
+
+	// The file both revisions share is one blob two names reach, not a copy that
+	// was replaced.
+	shared, ok := repo.Item("mmproj-BF16.gguf")
+	if !ok {
+		t.Fatalf("the repo lists %v, want the projector among them", itemLabels(repo))
+	}
+	if shared.Bytes != 400 || len(shared.Superseded) != 0 {
+		t.Errorf("the projector holds %d bytes with %d superseded copies, want 400 and none",
+			shared.Bytes, len(shared.Superseded))
+	}
+
+	if repo.SupersededBytes != 3000 || len(repo.Superseded) != 1 {
+		t.Errorf("the repo reports %d superseded files worth %d bytes, want 1 worth 3000",
+			len(repo.Superseded), repo.SupersededBytes)
+	}
+	// The old copy is on disk, so the repo total still counts it: the header
+	// number is the one du reports (docs/specs/CACHE.md).
+	if want := diskUsage(t, repo.Dir); repo.Bytes != want {
+		t.Errorf("the repo reports %d bytes, want the %d its directory occupies", repo.Bytes, want)
+	}
+}
+
+// Which copy is current is the ref's answer first. Without one — a repo whose
+// refs/main was never written, or names a revision the cache no longer holds —
+// it is the newest snapshot naming that file (docs/specs/CACHE.md).
+func TestTheCurrentCopyIsTheRefsAndThenTheNewestSnapshots(t *testing.T) {
+	old := cachedFile{name: "Qwen3.8-27B-UD-Q2_K_XL.gguf", size: 3000}
+	recent := cachedFile{name: "Qwen3.8-27B-UD-Q2_K_XL.gguf", size: 2800}
+
+	tests := []struct {
+		name    string
+		ref     string
+		current int64
+	}{
+		{name: "refs/main names the older revision", ref: "revision-old", current: 3000},
+		{name: "refs/main names the newer one", ref: "revision-new", current: 2800},
+		{name: "no ref at all", current: 2800},
+		{name: "the ref names a revision the cache does not hold", ref: "revision-gone", current: 2800},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tree := newCacheTree(t)
+			repo := tree.repo("models--unsloth--Qwen3.8-27B-GGUF").
+				snapshot("revision-old", old).
+				snapshot("revision-new", recent).
+				aged("revision-old", time.Date(2026, 8, 14, 18, 22, 0, 0, time.UTC)).
+				aged("revision-new", time.Date(2026, 8, 19, 16, 52, 0, 0, time.UTC))
+			if test.ref != "" {
+				repo.main(test.ref)
+			}
+
+			quant, ok := repoOf(t, read(t, tree.Root), "unsloth/Qwen3.8-27B-GGUF").Item("UD-Q2_K_XL")
+			if !ok {
+				t.Fatal("the repo has no UD-Q2_K_XL item")
+			}
+			if quant.Bytes != test.current {
+				t.Errorf("the current copy holds %d bytes, want %d", quant.Bytes, test.current)
+			}
+			if len(quant.Superseded) != 1 || quant.Superseded[0].Bytes == test.current {
+				t.Errorf("the superseded set is %v, want the one copy that is not current", quant.Superseded)
+			}
+		})
+	}
+}
+
+// A whole repository can be republished, and an MLX model is one unit: its
+// superseded copies belong to the repo rather than to any quant of it.
+func TestASupersededCopyInARepoWithNoItems(t *testing.T) {
+	tree := newCacheTree(t)
+	tree.repo("models--mlx-community--Qwen3.8-27B-4bit").
+		snapshot("revision-old",
+			cachedFile{name: "config.json", text: mlxConfig},
+			cachedFile{name: "model-00001-of-00001.safetensors", size: 4000}).
+		snapshot("revision-new",
+			cachedFile{name: "config.json", text: mlxConfig},
+			cachedFile{name: "model-00001-of-00001.safetensors", size: 4200}).
+		main("revision-new")
+
+	repo := repoOf(t, read(t, tree.Root), "mlx-community/Qwen3.8-27B-4bit")
+
+	if repo.Kind != KindMLX {
+		t.Errorf("the repo is %s, want mlx", repo.Kind)
+	}
+	if len(repo.Superseded) != 1 || repo.SupersededBytes != 4000 {
+		t.Fatalf("the repo reports %d superseded files worth %d bytes, want 1 worth 4000",
+			len(repo.Superseded), repo.SupersededBytes)
+	}
+	// config.json did not change between the two revisions: one blob, two links,
+	// nothing superseded.
+	if got := repo.Superseded[0].Name; got != "model-00001-of-00001.safetensors" {
+		t.Errorf("the superseded copy is %q, want the weights that changed", got)
+	}
+	if len(repo.Files) != 2 {
+		t.Errorf("the repo holds %v, want the current config and the current weights", names(repo.Files))
+	}
+}
+
 // The MLX marker is mlx-lm's quantization block in config.json — verified against
 // the real cache, where mlx-community and unsloth MLX repos both carry it and the
 // unquantized upstream does not.
@@ -325,6 +476,11 @@ func TestReadReportsPartialDownloads(t *testing.T) {
 		t.Errorf("the interrupted GGUF repo reports %d partials worth %d bytes, want 1 worth 1500",
 			len(llama.Partials), llama.PartialBytes)
 	}
+	// A partial is named after the blob it is becoming, whichever downloader
+	// left it: that hash is what says which file of which revision is landing.
+	if want := "707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450"; llama.Partials[0].Blob != want {
+		t.Errorf("the partial is becoming blob %q, want %q", llama.Partials[0].Blob, want)
+	}
 	if len(llama.Files) != 0 {
 		t.Errorf("the interrupted GGUF repo lists files %v; nothing has reached a snapshot yet", names(llama.Files))
 	}
@@ -336,6 +492,9 @@ func TestReadReportsPartialDownloads(t *testing.T) {
 	if len(mlx.Partials) != 1 || mlx.PartialBytes != 800 {
 		t.Errorf("the interrupted MLX repo reports %d partials worth %d bytes, want 1 worth 800",
 			len(mlx.Partials), mlx.PartialBytes)
+	}
+	if want := "31b8c91ef899f79efaaa69e3d2c096f6e2ebeb2ff20e29222abbd9ebc79e560a"; mlx.Partials[0].Blob != want {
+		t.Errorf("the partial is becoming blob %q, want %q", mlx.Partials[0].Blob, want)
 	}
 	if mlx.Complete {
 		t.Error("the interrupted MLX repo is reported complete, but a download is still in flight")

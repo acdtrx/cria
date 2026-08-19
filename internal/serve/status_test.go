@@ -86,9 +86,29 @@ func downloadingRepo(id string, bytes int64) hubcache.Repo {
 		ID:           id,
 		Type:         hubcache.RepoModel,
 		Kind:         hubcache.KindGGUF,
+		Partials:     []hubcache.Partial{{Path: "/tmp/hub/blobs/" + landingBlob + ".downloadInProgress", Blob: landingBlob, Bytes: bytes}},
 		Bytes:        bytes,
 		PartialBytes: bytes,
 	}
+}
+
+// landingBlob is the hash the Hub publishes for the file a fixture is fetching,
+// and otherBlob one of another file in the same repo. A partial is named after
+// the blob it is becoming, so these are what an observation matches against.
+const (
+	landingBlob = "fd4730dd8aad070517978752b63d530aeb1740d2283cab9fa24f1e404032ddb0"
+	otherBlob   = "3f227079003add2511437e5b1e94812e363385225bf6a9b47b0054a72bc8b01e"
+)
+
+// requantizedRepo is what a repo looks like after its provider republished a
+// quant: the copy on disk is whole — the entry reads cached — and the copy the
+// Hub publishes now is landing beside it under its own hash.
+func requantizedRepo(id, quant string, bytes, landing int64, blob string) hubcache.Repo {
+	repo := cachedRepo(id, quant, bytes)
+	repo.Partials = []hubcache.Partial{{Path: "/tmp/hub/blobs/" + blob + ".downloadInProgress", Blob: blob, Bytes: landing}}
+	repo.PartialBytes = landing
+	repo.Bytes += landing
+	return repo
 }
 
 // observed is a manager whose three observation seams are fakes: the health
@@ -181,6 +201,28 @@ func TestPhaseMatrix(t *testing.T) {
 			name: "alive, not answering, model cached: starting",
 			seen: observation{live: true, cached: true},
 			want: PhaseStarting,
+		},
+		{
+			// The re-download the log never mentions: the quant on disk is
+			// whole, and the copy the Hub publishes now is landing anyway.
+			name: "alive, not answering, model cached and being fetched again: downloading",
+			seen: observation{live: true, cached: true, fetching: true},
+			want: PhaseDownloading,
+		},
+		{
+			name: "alive, not answering, first download in flight: downloading",
+			seen: observation{live: true, fetching: true},
+			want: PhaseDownloading,
+		},
+		{
+			name: "green outranks a download still landing",
+			seen: observation{live: true, green: true, cached: true, fetching: true},
+			want: PhaseRunning,
+		},
+		{
+			name: "having been green outranks it too",
+			seen: observation{live: true, wasGreen: true, cached: true, fetching: true},
+			want: PhaseUnhealthy,
 		},
 		{
 			name: "the health endpoint answers green: running",
@@ -340,6 +382,118 @@ func TestDownloadProgress(t *testing.T) {
 				t.Errorf("the Hub was asked %v, want %v", o.hub.asked, want)
 			}
 		})
+	}
+}
+
+// The bug this rule exists for: a provider republishes a quant, llama-server
+// fetches the new copy before loading anything and says nothing about it, and
+// the quant already on disk reads complete. The phase is the download that is
+// really happening, and the progress is the copy that is landing — not the old
+// one's bytes, which would show a download starting finished.
+func TestASilentRedownloadIsTheDownloadingPhase(t *testing.T) {
+	entry := llamaEntry()
+
+	tests := []struct {
+		name  string
+		total hubapi.Total
+		want  Progress
+	}{
+		{
+			// The Hub names the file it publishes now, and the unfinished
+			// download carries that name: this model is what is landing.
+			name:  "the Hub named the file that is landing",
+			total: hubapi.Total{Bytes: 9_800_000_000, Known: true, Blobs: []string{landingBlob}},
+			want:  Progress{Bytes: 2_500_000_000, Total: 9_800_000_000, Known: true},
+		},
+		{
+			// No total, so no name to match: an unfinished download in the
+			// repository cria launched the server against is taken as this
+			// model's, coarser and no louder.
+			name:  "the Hub could not be reached",
+			total: hubapi.Total{Reason: "the Hub is unreachable"},
+			want:  Progress{Bytes: 2_500_000_000, Reason: "the Hub is unreachable"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			o := newObserved(t)
+			o.cache.cache = cacheOf(requantizedRepo(entry.Repo, entry.Quant, 10_600_000_000, 2_500_000_000, landingBlob))
+			o.hub.total = test.total
+			record := o.start(t, entry, 4242)
+
+			status := o.snapshot(t, record)
+
+			if status.Phase != PhaseDownloading {
+				t.Fatalf("phase is %q, want %q — the quant on disk is whole, and another copy is landing", status.Phase, PhaseDownloading)
+			}
+			if status.Progress != test.want {
+				t.Errorf("progress is %+v, want %+v", status.Progress, test.want)
+			}
+		})
+	}
+}
+
+// An ordinary start asks the Hub nothing. Its model is whole and its repo holds
+// nothing unfinished, so there is no download to name and no total to render —
+// and a question with no answer to give must not sit between the display and
+// every start.
+func TestAnOrdinaryStartAsksTheHubNothing(t *testing.T) {
+	o := newObserved(t)
+	record := o.start(t, llamaEntry(), 4242)
+
+	status := o.snapshot(t, record)
+
+	if status.Phase != PhaseStarting {
+		t.Fatalf("phase is %q, want %q", status.Phase, PhaseStarting)
+	}
+	if len(o.hub.asked) != 0 {
+		t.Errorf("the Hub was asked %v for a model that is whole and quiet", o.hub.asked)
+	}
+}
+
+// The name is the whole precision: an unfinished download for another file of
+// the same repository is somebody else's, and a server whose own quant is on
+// disk is starting — which is what it is doing.
+func TestAnotherFilesDownloadIsNotThisServersPhase(t *testing.T) {
+	entry := llamaEntry()
+	o := newObserved(t)
+	o.cache.cache = cacheOf(requantizedRepo(entry.Repo, entry.Quant, 10_600_000_000, 2_500_000_000, otherBlob))
+	o.hub.total = hubapi.Total{Bytes: 9_800_000_000, Known: true, Blobs: []string{landingBlob}}
+	record := o.start(t, entry, 4242)
+
+	status := o.snapshot(t, record)
+
+	if status.Phase != PhaseStarting {
+		t.Fatalf("phase is %q, want %q — nothing of this model is landing", status.Phase, PhaseStarting)
+	}
+	if (status.Progress != Progress{}) {
+		t.Errorf("a starting server shows progress %+v", status.Progress)
+	}
+}
+
+// The re-download ends the way it started, in the filesystem: the unfinished
+// blob is renamed into place and there is nothing landing any more, so the
+// server is starting — loading the model it just fetched.
+func TestAFinishedRedownloadIsStartingAgain(t *testing.T) {
+	entry := llamaEntry()
+	o := newObserved(t)
+	o.cache.cache = cacheOf(requantizedRepo(entry.Repo, entry.Quant, 10_600_000_000, 2_500_000_000, landingBlob))
+	o.hub.total = hubapi.Total{Bytes: 9_800_000_000, Known: true, Blobs: []string{landingBlob}}
+	record := o.start(t, entry, 4242)
+
+	if status := o.snapshot(t, record); status.Phase != PhaseDownloading {
+		t.Fatalf("phase is %q, want %q while the copy is landing", status.Phase, PhaseDownloading)
+	}
+
+	o.cache.cache = cacheOf(cachedRepo(entry.Repo, entry.Quant, 9_800_000_000))
+
+	status := o.snapshot(t, record)
+	if status.Phase != PhaseStarting {
+		t.Errorf("phase is %q, want %q once nothing is landing", status.Phase, PhaseStarting)
+	}
+	if (status.Progress != Progress{}) {
+		t.Errorf("a server with nothing left to fetch shows progress %+v", status.Progress)
 	}
 }
 

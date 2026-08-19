@@ -66,15 +66,23 @@ type Cache struct {
 // Repo is one repository directory — models--org--name and its dataset and space
 // siblings.
 type Repo struct {
-	ID           string    // org/name, the way the Hub spells it
-	Type         RepoType  // which Hub namespace it came from
-	Kind         Kind      // what cria can do with it
-	Dir          string    // the repository directory
-	Revision     string    // the snapshot refs/main names; empty when the repo has no main ref
-	Items        []Item    // the quants of a KindGGUF repo, ordered by label; empty otherwise, where the repo itself is the unit (docs/specs/CACHE.md)
-	Files        []File    // every distinct blob the snapshots reach, ordered by name
+	ID       string   // org/name, the way the Hub spells it
+	Type     RepoType // which Hub namespace it came from
+	Kind     Kind     // what cria can do with it
+	Dir      string   // the repository directory
+	Revision string   // the snapshot refs/main names; empty when the repo has no main ref
+	Items    []Item   // the quants of a KindGGUF repo, ordered by label; empty otherwise, where the repo itself is the unit (docs/specs/CACHE.md)
+	Files    []File   // the blobs the repo's file names resolve to today, ordered by name
+
+	// Superseded is what an upstream re-upload left behind: copies of files
+	// whose names now resolve to other bytes. They are on disk, they are
+	// reclaimable as a unit of their own, and they are not part of what the repo
+	// holds under those names any more (docs/specs/CACHE.md).
+	Superseded      []File // ordered by name
+	SupersededBytes int64
+
 	Partials     []Partial // unfinished downloads, ordered by path
-	Bytes        int64     // what the repository directory occupies on disk, partials included
+	Bytes        int64     // what the repository directory occupies on disk, partials and superseded copies included
 	PartialBytes int64     // the reclaimable subset
 	Complete     bool      // the repo holds files, every shard series they declare is whole, and nothing is still downloading
 	Modified     time.Time // the newest blob in the repo — when its bytes landed
@@ -83,9 +91,15 @@ type Repo struct {
 // Item is a selectable unit inside a GGUF repo: one quantization, its shards
 // folded into a single thing (docs/specs/CACHE.md).
 type Item struct {
-	Label    string    // the quantization as the file names spell it (Q4_K_M), or the file name when no quant token is recognizable
-	Files    []File    // ordered by name; more than one only for a sharded quant
-	Bytes    int64     // its blobs, each counted once
+	Label string // the quantization as the file names spell it (Q4_K_M), or the file name when no quant token is recognizable
+	Files []File // the current copies, ordered by name; more than one only for a sharded quant
+	Bytes int64  // its blobs, each counted once
+
+	// The copies of this quantization an upstream re-upload superseded: the same
+	// tag, other bytes, still on disk and deletable on their own.
+	Superseded      []File
+	SupersededBytes int64
+
 	Complete bool      // every shard the file names declare is present
 	Modified time.Time // the newest of its blobs
 }
@@ -106,6 +120,7 @@ type File struct {
 // is reported apart from the files rather than mixed into them.
 type Partial struct {
 	Path     string
+	Blob     string // the blob these bytes are becoming: the file name without its suffix, which is the hash the Hub publishes for that file
 	Bytes    int64
 	Modified time.Time
 }

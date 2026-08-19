@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // The fixtures build a real hub cache on disk — blobs holding real bytes,
@@ -119,6 +120,18 @@ func (r *repoTree) main(revision string) *repoTree {
 	mkdir(r.t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "main"), []byte(revision), 0o644); err != nil {
 		r.t.Fatalf("cannot write the main ref of %s: %v", r.dir, err)
+	}
+	return r
+}
+
+// aged sets when a snapshot was last written, so a test can say which revision
+// is the newest rather than depend on how fast the fixture was built. It is the
+// fact the walk falls back to when no ref names a current revision.
+func (r *repoTree) aged(revision string, when time.Time) *repoTree {
+	r.t.Helper()
+	dir := filepath.Join(r.dir, "snapshots", revision)
+	if err := os.Chtimes(dir, when, when); err != nil {
+		r.t.Fatalf("cannot age %s: %v", dir, err)
 	}
 	return r
 }

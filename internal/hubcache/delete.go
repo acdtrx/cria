@@ -23,10 +23,11 @@ import (
 type TargetKind int
 
 const (
-	TargetQuant    TargetKind = iota // one quantization of a GGUF repo, its shards folded in
-	TargetRepo                       // a whole repository directory
-	TargetPartial                    // one unfinished download
-	TargetPartials                   // every unfinished download of one repository
+	TargetQuant      TargetKind = iota // one quantization of a GGUF repo, its shards folded in
+	TargetRepo                         // a whole repository directory
+	TargetPartial                      // one unfinished download
+	TargetPartials                     // every unfinished download of one repository
+	TargetSuperseded                   // the copies a re-upload replaced: one item's, or a whole repository's
 )
 
 // String names the kind the way a confirmation spells it.
@@ -40,6 +41,8 @@ func (k TargetKind) String() string {
 		return "partial"
 	case TargetPartials:
 		return "partials"
+	case TargetSuperseded:
+		return "superseded"
 	default:
 		return fmt.Sprintf("TargetKind(%d)", int(k))
 	}
@@ -64,6 +67,11 @@ func (t Target) String() string {
 		return t.Path
 	case TargetPartials:
 		return "the unfinished downloads of " + t.Repo
+	case TargetSuperseded:
+		if t.Quant != "" {
+			return "the superseded copies of " + t.Repo + ":" + t.Quant
+		}
+		return "the superseded copies of " + t.Repo
 	default:
 		return t.Repo
 	}
@@ -155,7 +163,7 @@ func PlanQuant(repo *Repo, quant string, served []Served) (*Plan, error) {
 		return nil, err
 	}
 
-	entries, err := repoLinks(repo)
+	entries, _, err := repoLinks(repo)
 	if err != nil {
 		return nil, err
 	}
@@ -235,6 +243,72 @@ func PlanPartials(repo *Repo, served []Served) (*Plan, error) {
 	return newPlan(repo, target, removes, nil, nil), nil
 }
 
+// PlanSuperseded describes reclaiming the copies an upstream re-upload left
+// behind: the snapshot entries naming bytes the repo's file names no longer
+// resolve to, and every blob behind them that nothing else still reaches. A
+// label narrows it to one item's old copies — the unit the cache view offers
+// under that item — and an empty one takes every superseded copy the repository
+// holds, which is how an MLX model and everything else the cache holds are
+// reclaimed, each being one unit (docs/specs/CACHE.md).
+//
+// A blob the current revision still reaches is never superseded, so the file a
+// re-upload did not change — a projector both revisions share — is not in this
+// delete to begin with. Where an old copy's blob is reached under some other
+// current name, quantRemovals leaves it and says who keeps it, exactly as it
+// does for a quant.
+//
+// A server serving this very quant does not refuse the delete — the one unit
+// that does not, for the reason guard states.
+func PlanSuperseded(repo *Repo, label string, served []Served) (*Plan, error) {
+	target := Target{Kind: TargetSuperseded, Repo: repo.ID, Quant: label}
+	if err := guard(target, served); err != nil {
+		return nil, err
+	}
+
+	entries, current, err := repoLinks(repo)
+	if err != nil {
+		return nil, err
+	}
+	ours, others := splitBySuperseded(entries, current, label)
+	if len(ours) == 0 {
+		return nil, fmt.Errorf("%s holds no superseded copies of %s", repo.ID, orAnything(label))
+	}
+
+	removes, shared := quantRemovals(ours, others)
+	dirs, err := emptiedDirs(filepath.Join(repo.Dir, "snapshots"), pathsOf(removes))
+	if err != nil {
+		return nil, err
+	}
+	return newPlan(repo, target, removes, dirs, shared), nil
+}
+
+// splitBySuperseded sorts a repository's snapshot entries into the superseded
+// copies a plan takes and everything the cache keeps. An entry is superseded
+// when the blob it points at is not one the repo's names resolve to today; a
+// label narrows the take to one item, by the rule the walk groups items with, so
+// a plan removes exactly the copies the view shows under that row.
+func splitBySuperseded(entries []snapshotEntry, current map[string]bool, label string) (ours, others []snapshotEntry) {
+	for _, entry := range entries {
+		item, isGGUF := GGUFItem(entry.name)
+		ourItem := label == "" || (isGGUF && item == label)
+		if !current[entry.blob] && ourItem {
+			ours = append(ours, entry)
+			continue
+		}
+		others = append(others, entry)
+	}
+	return ours, others
+}
+
+// orAnything names what a superseded plan was looking for, for the refusal that
+// found none of it.
+func orAnything(label string) string {
+	if label == "" {
+		return "anything"
+	}
+	return label
+}
+
 // Execute carries out a plan and reports the bytes that actually came back.
 //
 // The plan is re-derived against the cache first and the two must describe the
@@ -294,7 +368,19 @@ func Execute(plan *Plan, served []Served) (int64, error) {
 //
 // The target is the whole question, which is what lets Execute ask it again
 // against fresher serving state than the plan was made with.
+//
+// Superseded copies are the one unit no server holds. A running server maps the
+// file the current revision names; a superseded copy is other bytes under
+// another inode, so unlinking it takes nothing out from under the server and
+// returns the space at once. The exception is a server started before the
+// re-upload, still holding the old inode open: that delete frees nothing until
+// it stops, and nothing breaks — its mapping stays valid until it does.
+// Refusing on that possibility would block the reclaim this unit exists for, in
+// exactly the case it exists for.
 func guard(target Target, served []Served) error {
+	if target.Kind == TargetSuperseded {
+		return nil
+	}
 	for _, server := range served {
 		if !strings.EqualFold(server.Repo, target.Repo) {
 			continue
@@ -457,25 +543,13 @@ func emptiedDirs(root string, removed map[string]bool) ([]string, error) {
 	return dirs, nil
 }
 
-// repoLinks lists every snapshot entry of a repository, across every revision:
-// what a delete unlinks, and what it has to count references over. Entries whose
-// blob is gone resolve to nothing and are left out — they reference no bytes,
-// so they neither hold a blob back nor return any.
-func repoLinks(repo *Repo) ([]snapshotEntry, error) {
-	snapshots := filepath.Join(repo.Dir, "snapshots")
-	revisions, err := snapshotRevisions(snapshots, repo.Revision)
-	if err != nil {
-		return nil, err
-	}
-	var entries []snapshotEntry
-	for _, revision := range revisions {
-		found, err := readSnapshot(filepath.Join(snapshots, revision))
-		if err != nil {
-			return nil, err
-		}
-		entries = append(entries, found...)
-	}
-	return entries, nil
+// repoLinks lists every snapshot entry of a repository, across every revision,
+// with the blobs its names resolve to today: what a delete unlinks, what it has
+// to count references over, and which of it a re-upload superseded. Entries
+// whose blob is gone resolve to nothing and are left out — they reference no
+// bytes, so they neither hold a blob back nor return any.
+func repoLinks(repo *Repo) ([]snapshotEntry, map[string]bool, error) {
+	return repoEntries(filepath.Join(repo.Dir, "snapshots"), repo.Revision)
 }
 
 // splitByItem sorts a repository's snapshot entries into the ones that make up
@@ -513,6 +587,8 @@ func replan(plan *Plan) (*Plan, error) {
 		current, err = PlanPartial(&repo, plan.Target.Path, nil)
 	case TargetPartials:
 		current, err = PlanPartials(&repo, nil)
+	case TargetSuperseded:
+		current, err = PlanSuperseded(&repo, plan.Target.Quant, nil)
 	default:
 		return nil, fmt.Errorf("cannot re-derive a %s plan", plan.Target.Kind)
 	}

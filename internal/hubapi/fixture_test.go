@@ -12,11 +12,28 @@ import (
 )
 
 // hubEntry is one row of a fake repo's file listing, in the shape the models
-// tree API returns it.
+// tree API returns it. A weight file is stored in LFS and the Hub publishes a
+// content hash for it; the small files beside it are stored in git itself and
+// have only a git object id — the two are the blob names the cache uses, so the
+// distinction is part of the fixture rather than a detail of it.
 type hubEntry struct {
 	path string
 	size int64
 	dir  bool
+	lfs  bool
+}
+
+// gitOid and lfsOid are the hashes the fake Hub publishes for a file: derived
+// from the path so a test can name the blob it expects to see.
+func gitOid(path string) string { return "gitoid-" + path }
+func lfsOid(path string) string { return "lfsoid-" + path }
+
+// blob is the name the hub cache would give this entry's bytes.
+func (e hubEntry) blob() string {
+	if e.lfs {
+		return lfsOid(e.path)
+	}
+	return gitOid(e.path)
 }
 
 // fakeHub serves the models tree API the way huggingface.co serves it: one
@@ -92,7 +109,11 @@ func (h *fakeHub) serve(w http.ResponseWriter, r *http.Request) {
 		if entry.dir {
 			kind = "directory"
 		}
-		rows = append(rows, map[string]any{"type": kind, "path": entry.path, "size": entry.size, "oid": "0"})
+		row := map[string]any{"type": kind, "path": entry.path, "size": entry.size, "oid": gitOid(entry.path)}
+		if entry.lfs {
+			row["lfs"] = map[string]any{"oid": lfsOid(entry.path), "size": entry.size}
+		}
+		rows = append(rows, row)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rows)

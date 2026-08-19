@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -85,19 +86,25 @@ func readRepo(dir string, repoType RepoType, id string) (Repo, error) {
 
 	repo.Revision = readRef(filepath.Join(dir, "refs", "main"))
 
-	repo.Files, err = readFiles(filepath.Join(dir, "snapshots"), repo.Revision)
+	repo.Files, repo.Superseded, err = readFiles(filepath.Join(dir, "snapshots"), repo.Revision)
 	if err != nil {
 		return Repo{}, err
 	}
-	for _, file := range repo.Files {
+	// A superseded copy is on disk like any other file: it dates the repo and it
+	// says what kind of repo this is, exactly as the copy that replaced it does.
+	held := slices.Concat(repo.Files, repo.Superseded)
+	for _, file := range held {
 		if file.Modified.After(repo.Modified) {
 			repo.Modified = file.Modified
 		}
 	}
+	for _, file := range repo.Superseded {
+		repo.SupersededBytes += file.Bytes
+	}
 
-	repo.Kind = repoKind(repo.Files)
+	repo.Kind = repoKind(held)
 	if repo.Kind == KindGGUF {
-		repo.Items = ggufItems(repo.Files)
+		repo.Items = ggufItems(repo.Files, repo.Superseded)
 	}
 	repo.Complete = len(repo.Files) > 0 && len(repo.Partials) == 0 && seriesComplete(names(repo.Files))
 	return repo, nil
@@ -142,7 +149,8 @@ func readPartials(dir string) ([]Partial, error) {
 
 	var partials []Partial
 	for _, entry := range entries {
-		if entry.IsDir() || !isPartial(entry.Name()) {
+		blob, unfinished := partialBlob(entry.Name())
+		if entry.IsDir() || !unfinished {
 			continue
 		}
 		info, err := entry.Info()
@@ -151,6 +159,7 @@ func readPartials(dir string) ([]Partial, error) {
 		}
 		partials = append(partials, Partial{
 			Path:     filepath.Join(dir, entry.Name()),
+			Blob:     blob,
 			Bytes:    info.Size(),
 			Modified: info.ModTime(),
 		})
@@ -159,14 +168,18 @@ func readPartials(dir string) ([]Partial, error) {
 	return partials, nil
 }
 
-// isPartial reports whether a blob name marks a download still in flight.
-func isPartial(name string) bool {
+// partialBlob reports whether a blob name marks a download still in flight, and
+// names the blob those bytes are becoming: the name with the suffix taken off.
+// Both downloaders write the blob's final name plus a suffix, so what is left is
+// the hash the Hub publishes for that file — the one thing that says which file
+// of which revision is landing (docs/specs/CACHE.md).
+func partialBlob(name string) (string, bool) {
 	for _, suffix := range partialSuffixes {
-		if strings.HasSuffix(name, suffix) {
-			return true
+		if blob, unfinished := strings.CutSuffix(name, suffix); unfinished {
+			return blob, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // readRef reads the revision a ref names. A missing or unreadable ref is no
@@ -180,46 +193,112 @@ func readRef(path string) string {
 	return strings.TrimSpace(string(content))
 }
 
-// readFiles collects the distinct blobs a repo's snapshots reach. Every revision
-// is read, not just the current one: a quant that only an older snapshot names is
-// still on disk, and the cache view exists to show exactly that.
-func readFiles(snapshots, current string) ([]File, error) {
-	revisions, err := snapshotRevisions(snapshots, current)
+// readFiles collects the distinct blobs a repo's snapshots reach, split into the
+// copies the repo's file names resolve to today and the ones they no longer do.
+// Every revision is read, not just the current one: a quant that only an older
+// snapshot names is still on disk, and the cache view exists to show exactly
+// that (docs/specs/CACHE.md).
+func readFiles(snapshots, ref string) (files, superseded []File, err error) {
+	entries, current, err := repoEntries(snapshots, ref)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	byBlob := map[string]*File{}
 	var order []string
-	for _, revision := range revisions {
-		dir := filepath.Join(snapshots, revision)
-		entries, err := readSnapshot(dir)
-		if err != nil {
-			return nil, err
+	for _, entry := range entries {
+		file := byBlob[entry.blob]
+		if file == nil {
+			file = &File{Name: entry.name, Blob: entry.blob, Bytes: entry.bytes, Modified: entry.modified}
+			byBlob[entry.blob] = file
+			order = append(order, entry.blob)
 		}
-		for _, entry := range entries {
-			file := byBlob[entry.blob]
-			if file == nil {
-				file = &File{Name: entry.name, Blob: entry.blob, Bytes: entry.bytes, Modified: entry.modified}
-				byBlob[entry.blob] = file
-				order = append(order, entry.blob)
-			}
-			file.Links = append(file.Links, entry.link)
-		}
+		file.Links = append(file.Links, entry.link)
 	}
 
-	files := make([]File, 0, len(order))
 	for _, blob := range order {
-		files = append(files, *byBlob[blob])
+		file := *byBlob[blob]
+		if current[blob] {
+			files = append(files, file)
+			continue
+		}
+		superseded = append(superseded, file)
 	}
-	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
-	return files, nil
+	byName(files)
+	byName(superseded)
+	return files, superseded, nil
 }
 
-// snapshotRevisions lists the snapshots a repo holds, the one refs/main names
-// first: a blob two revisions know by different names is reported under the
-// current one's, which is the name the repo goes by today.
-func snapshotRevisions(dir, current string) ([]string, error) {
+// byName orders a file set the way the view reads it. Two copies of one name are
+// held apart by their blob, so a walk of the same tree always lists them the
+// same way round.
+func byName(files []File) {
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].Name != files[j].Name {
+			return files[i].Name < files[j].Name
+		}
+		return files[i].Blob < files[j].Blob
+	})
+}
+
+// repoEntries reads every snapshot a repository holds: the entries each revision
+// names, and the set of blobs its file names resolve to today.
+//
+// The current copy of a name is the one the repo's current revision names, and —
+// for a name that revision does not hold, which is most of them, since a
+// snapshot holds only the files that download landed — the one the newest
+// snapshot holding that name names. Both rules are the same rule here: the
+// revisions come in authority order and the first of them to name a file owns
+// it (docs/specs/CACHE.md).
+//
+// A name that resolves to one blob is that blob, whatever the order; supersession
+// only exists where a name resolves to several, which is what an upstream
+// re-upload leaves behind.
+func repoEntries(snapshots, ref string) (entries []snapshotEntry, current map[string]bool, err error) {
+	revisions, err := snapshotRevisions(snapshots, ref)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	resolves := map[string]string{}
+	for _, revision := range revisions {
+		found, err := readSnapshot(filepath.Join(snapshots, revision.name))
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, entry := range found {
+			if _, named := resolves[entry.name]; !named {
+				resolves[entry.name] = entry.blob
+			}
+		}
+		entries = append(entries, found...)
+	}
+
+	current = map[string]bool{}
+	for _, blob := range resolves {
+		current[blob] = true
+	}
+	return entries, current, nil
+}
+
+// revision is one snapshot directory: what identifies it, and when it was last
+// written — which is how the walk picks the current copy of a file that the
+// repo's current revision does not name, or that has no current revision at all.
+type revision struct {
+	name     string
+	modified time.Time
+}
+
+// snapshotRevisions lists the snapshots a repo holds, in authority order: the
+// revision refs/main names first when the cache actually holds it, then the rest
+// newest first. A blob two revisions know by different names is reported under
+// the first one's, which is the name the repo goes by today.
+//
+// refs/main is the primary rule because it is written: both downloaders record
+// the revision they fetched, so the ref names the copy a start would use. The
+// mtime order is what answers when it does not — a repo whose ref was never
+// written, or names a revision the cache no longer holds.
+func snapshotRevisions(dir, current string) ([]revision, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -228,16 +307,30 @@ func snapshotRevisions(dir, current string) ([]string, error) {
 		return nil, fmt.Errorf("cannot read the cached snapshots at %s: %w", dir, err)
 	}
 
-	var revisions []string
+	var revisions []revision
 	for _, entry := range entries {
-		if entry.IsDir() {
-			revisions = append(revisions, entry.Name())
+		if !entry.IsDir() {
+			continue
 		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil, fmt.Errorf("cannot read the cached snapshot at %s: %w", filepath.Join(dir, entry.Name()), err)
+		}
+		revisions = append(revisions, revision{name: entry.Name(), modified: info.ModTime()})
 	}
-	sort.Strings(revisions)
+	sort.Slice(revisions, func(i, j int) bool {
+		if !revisions[i].modified.Equal(revisions[j].modified) {
+			return revisions[i].modified.After(revisions[j].modified)
+		}
+		return revisions[i].name < revisions[j].name
+	})
+
 	for i, revision := range revisions {
-		if revision == current {
-			revisions[0], revisions[i] = revisions[i], revisions[0]
+		if revision.name == current {
+			// Moved to the front, the rest keeping their order: what follows the
+			// current revision still has to read newest first.
+			copy(revisions[1:i+1], revisions[:i])
+			revisions[0] = revision
 			break
 		}
 	}
@@ -364,24 +457,47 @@ func mlxQuantized(path string) bool {
 
 // ggufItems groups a repo's GGUF files into the units the cache view selects and
 // deletes: one per quantization, shards folded in (docs/specs/CACHE.md).
-func ggufItems(files []File) []Item {
+//
+// An item is what the repo holds under that tag now — its label, its files and
+// its bytes are the current copies alone. The copies a re-upload superseded hang
+// off it as their own set: they are still on disk, they are still the same
+// quantization, and summing them into the item would report a quant at twice the
+// size the Hub publishes for it.
+func ggufItems(files, superseded []File) []Item {
 	byLabel := map[string]*Item{}
 	var order []string
+	item := func(label string) *Item {
+		found := byLabel[label]
+		if found == nil {
+			found = &Item{Label: label}
+			byLabel[label] = found
+			order = append(order, label)
+		}
+		return found
+	}
+
 	for _, file := range files {
 		label, isGGUF := GGUFItem(file.Name)
 		if !isGGUF {
 			continue
 		}
-		item := byLabel[label]
-		if item == nil {
-			item = &Item{Label: label}
-			byLabel[label] = item
-			order = append(order, label)
+		holds := item(label)
+		holds.Files = append(holds.Files, file)
+		holds.Bytes += file.Bytes
+		if file.Modified.After(holds.Modified) {
+			holds.Modified = file.Modified
 		}
-		item.Files = append(item.Files, file)
-		item.Bytes += file.Bytes
-		if file.Modified.After(item.Modified) {
-			item.Modified = file.Modified
+	}
+	for _, file := range superseded {
+		label, isGGUF := GGUFItem(file.Name)
+		if !isGGUF {
+			continue
+		}
+		holds := item(label)
+		holds.Superseded = append(holds.Superseded, file)
+		holds.SupersededBytes += file.Bytes
+		if file.Modified.After(holds.Modified) {
+			holds.Modified = file.Modified
 		}
 	}
 

@@ -12,17 +12,20 @@ import (
 	"cria/internal/serve"
 )
 
-// landed is when the fixture's bytes arrived, and stale how long an abandoned
+// landed is when the fixture's bytes arrived, replaced when the copies an
+// upstream re-upload superseded arrived, and stale how long an abandoned
 // download has been sitting there.
 var (
-	landed = time.Date(2026, 8, 12, 9, 30, 0, 0, time.UTC)
-	stale  = time.Now().Add(-49 * time.Hour)
+	landed   = time.Date(2026, 8, 12, 9, 30, 0, 0, time.UTC)
+	replaced = time.Date(2026, 8, 5, 14, 0, 0, 0, time.UTC)
+	stale    = time.Now().Add(-49 * time.Hour)
 )
 
 // fullCache is one walk of a hub cache holding every shape the view has to draw:
-// a GGUF repo with two quants, one of them sharded; a GGUF repo an interrupted
-// download left partials in; an MLX repo, which is one unit; and something cria
-// cannot serve at all. Repos come back in the order the walk sorts them.
+// a GGUF repo with two quants, one of them sharded and re-uploaded since it was
+// fetched; a GGUF repo an interrupted download left partials in; an MLX repo,
+// which is one unit, republished whole; and something cria cannot serve at all.
+// Repos come back in the order the walk sorts them.
 func fullCache() *hubcache.Cache {
 	gemma := hubcache.Repo{
 		ID: "unsloth/gemma-3-27b-it-GGUF", Type: hubcache.RepoModel, Kind: hubcache.KindGGUF,
@@ -38,6 +41,16 @@ func fullCache() *hubcache.Cache {
 		},
 		Bytes: (16 << 30) + (1000 << 20), PartialBytes: 1000 << 20, Modified: stale,
 	}
+	// The re-uploaded quant: the shards on disk under the tag today, and the pair
+	// the current revision no longer names, still occupying their bytes.
+	current := []hubcache.File{
+		{Name: "Qwen3-UD-Q4_K_XL-00001-of-00002.gguf", Blob: "/hub/blobs/1111", Bytes: 9 << 30, Modified: landed},
+		{Name: "Qwen3-UD-Q4_K_XL-00002-of-00002.gguf", Blob: "/hub/blobs/2222", Bytes: 9 << 30, Modified: landed},
+	}
+	replacedShards := []hubcache.File{
+		{Name: "Qwen3-UD-Q4_K_XL-00001-of-00002.gguf", Blob: "/hub/blobs/3333", Bytes: 4 << 30, Modified: replaced},
+		{Name: "Qwen3-UD-Q4_K_XL-00002-of-00002.gguf", Blob: "/hub/blobs/4444", Bytes: 4 << 30, Modified: replaced},
+	}
 	qwen := hubcache.Repo{
 		ID: "unsloth/Qwen3-30B-A3B-GGUF", Type: hubcache.RepoModel, Kind: hubcache.KindGGUF,
 		Dir: "/hub/models--unsloth--Qwen3-30B-A3B-GGUF", Revision: "a1a1a1a1",
@@ -48,18 +61,15 @@ func fullCache() *hubcache.Cache {
 			},
 			{
 				Label: "UD-Q4_K_XL", Bytes: 18 << 30, Complete: true, Modified: landed,
-				Files: []hubcache.File{
-					{Name: "Qwen3-UD-Q4_K_XL-00001-of-00002.gguf", Bytes: 9 << 30, Modified: landed},
-					{Name: "Qwen3-UD-Q4_K_XL-00002-of-00002.gguf", Bytes: 9 << 30, Modified: landed},
-				},
+				Files:      current,
+				Superseded: replacedShards, SupersededBytes: 8 << 30,
 			},
 		},
-		Files: []hubcache.File{
+		Files: append([]hubcache.File{
 			{Name: "Qwen3-30B-A3B-Q8_0.gguf", Bytes: 32 << 30, Modified: landed},
-			{Name: "Qwen3-UD-Q4_K_XL-00001-of-00002.gguf", Bytes: 9 << 30, Modified: landed},
-			{Name: "Qwen3-UD-Q4_K_XL-00002-of-00002.gguf", Bytes: 9 << 30, Modified: landed},
-		},
-		Bytes: 50 << 30, Complete: true, Modified: landed,
+		}, current...),
+		Superseded: replacedShards, SupersededBytes: 8 << 30,
+		Bytes: 58 << 30, Complete: true, Modified: landed,
 	}
 	mlx := hubcache.Repo{
 		ID: "mlx-community/Qwen3-30B-A3B-4bit", Type: hubcache.RepoModel, Kind: hubcache.KindMLX,
@@ -68,7 +78,11 @@ func fullCache() *hubcache.Cache {
 			{Name: "model-00001-of-00002.safetensors", Bytes: 8 << 30, Modified: landed},
 			{Name: "model-00002-of-00002.safetensors", Bytes: 8 << 30, Modified: landed},
 		},
-		Bytes: 16 << 30, Complete: true, Modified: landed,
+		Superseded: []hubcache.File{
+			{Name: "model-00002-of-00002.safetensors", Blob: "/hub/blobs/5555", Bytes: 7 << 30, Modified: replaced},
+		},
+		SupersededBytes: 7 << 30,
+		Bytes:           23 << 30, Complete: true, Modified: landed,
 	}
 	other := hubcache.Repo{
 		ID: "HuggingFaceTB/smoltalk", Type: hubcache.RepoDataset, Kind: hubcache.KindOther,
@@ -112,18 +126,23 @@ func TestCacheListDrawsEverythingTheCacheHolds(t *testing.T) {
 	if lines[0] != "/home/u/.cache/huggingface/hub" {
 		t.Errorf("the header reads %q, want the cache root", lines[0])
 	}
-	for _, fact := range []string{"85.0 GiB", "4 repos", "⚠ 1000.0 MiB unfinished"} {
+	for _, fact := range []string{"100.0 GiB", "4 repos", "⚠ 1000.0 MiB unfinished"} {
 		if !strings.Contains(lines[1], fact) {
 			t.Errorf("the totals read %q, want %q", lines[1], fact)
 		}
 	}
 
+	// The copies a re-upload replaced are rows of their own, under whatever they
+	// are copies of: an item where the repo has items, the repo itself where the
+	// repo is the unit (docs/specs/CACHE.md).
 	want := []string{
 		"HuggingFaceTB/smoltalk  other  dataset",
 		"mlx-community/Qwen3-30B-A3B-4bit  mlx",
+		"  superseded · 2026-08-05",
 		"unsloth/Qwen3-30B-A3B-GGUF  gguf",
 		"  Q8_0",
 		"  UD-Q4_K_XL",
+		"    superseded · 2026-08-05 · 2 files",
 		"unsloth/gemma-3-27b-it-GGUF  gguf",
 		"  Q4_K_M  ⚠ incomplete",
 		"  ⚠ 2 unfinished downloads",
@@ -145,7 +164,10 @@ func TestCacheListDrawsEverythingTheCacheHolds(t *testing.T) {
 			t.Errorf("row %q does not end in its size", row)
 		}
 	}
-	if !strings.HasSuffix(rows[2], "50.0 GiB") || !strings.HasSuffix(rows[4], "18.0 GiB") {
+	// A repo's number is its whole directory, superseded copies included; an
+	// item's is the copy it holds under that tag now, and the superseded row
+	// beside it carries the rest.
+	if !strings.HasSuffix(rows[3], "58.0 GiB") || !strings.HasSuffix(rows[5], "18.0 GiB") || !strings.HasSuffix(rows[6], "8.0 GiB") {
 		t.Errorf("the sizes are not the walk's own: %q", rows)
 	}
 }
@@ -189,7 +211,13 @@ func TestCacheListSpellsNamesTheWayTheHubDoes(t *testing.T) {
 func TestCacheSelectionWalksTheUnits(t *testing.T) {
 	frame, _ := cacheFrame(t)
 
-	kinds := []cacheRowKind{repoRow, repoRow, repoRow, itemRow, itemRow, repoRow, itemRow, partialsRow}
+	kinds := []cacheRowKind{
+		repoRow, repoRow, supersededRow, repoRow, itemRow, itemRow, supersededRow, repoRow, itemRow, partialsRow,
+	}
+	// A row carries the item it acts on: the quant on an item row, and the quant
+	// whose old copies it holds on the superseded row under one. The superseded
+	// row of a repo that has no items carries none, and takes the repo's.
+	items := map[int]bool{2: false, 4: true, 5: true, 6: true, 8: true}
 	for i, want := range kinds {
 		frame = frame.reselect(i)
 		selected, ok := frame.selectedCacheRow()
@@ -199,8 +227,8 @@ func TestCacheSelectionWalksTheUnits(t *testing.T) {
 		if selected.kind != want {
 			t.Errorf("row %d is a %v, want %v", i, selected.kind, want)
 		}
-		if (selected.item != nil) != (want == itemRow) {
-			t.Errorf("row %d carries item %v for a %v row", i, selected.item, want)
+		if (selected.item != nil) != items[i] {
+			t.Errorf("row %d carries item %v, want carries-an-item %v", i, selected.item, items[i])
 		}
 	}
 
@@ -298,7 +326,7 @@ func TestRepoDetailsOfAnMLXModel(t *testing.T) {
 	for _, fact := range []string{
 		"mlx-community/Qwen3-30B-A3B-4bit",
 		"mlx",
-		"16.0 GiB",
+		"23.0 GiB",
 		"c3c3c3c3",
 		"model-00001-of-00002.safetensors · 8.0 GiB",
 		"entry mlx-qwen",
@@ -320,6 +348,57 @@ func TestRepoDetailsOfSomethingCriaCannotServe(t *testing.T) {
 		if !strings.Contains(detail, fact) {
 			t.Errorf("the details pane does not carry %q:\n%s", fact, detail)
 		}
+	}
+}
+
+// A superseded row is the copies a re-upload replaced: what they are, what they
+// cost, and — the fact that makes the row safe to act on — the copy that stays.
+func TestSupersededDetailsCarryTheOldCopiesAndTheCurrentOne(t *testing.T) {
+	frame, _ := cacheFrame(t)
+	frame = onRow(t, frame, "superseded · 2026-08-05 · 2 files")
+
+	detail := cacheDetail(frame)
+	for _, fact := range []string{
+		"unsloth/Qwen3-30B-A3B-GGUF",
+		"UD-Q4_K_XL",
+		"superseded — the repo names other bytes under",
+		"8.0 GiB", // what reclaiming them returns
+		"Qwen3-UD-Q4_K_XL-00001-of-00002.gguf · 4.0 GiB · 2026-08-05 14:00:00",
+		"Qwen3-UD-Q4_K_XL-00002-of-00002.gguf · 4.0 GiB · 2026-08-05 14:00:00",
+		"Qwen3-UD-Q4_K_XL-00001-of-00002.gguf · 9.0 GiB · 2026-08-12 09:30:00", // the copy that stays
+		"a1a1a1a1",
+	} {
+		if !strings.Contains(detail, fact) {
+			t.Errorf("the superseded pane does not carry %q:\n%s", fact, detail)
+		}
+	}
+
+	// The row is about bytes nothing serves, so it does not ask for a server to
+	// be stopped the way a quant row does.
+	if strings.Contains(detail, "stop it before deleting") {
+		t.Errorf("the superseded pane asks for a stop:\n%s", detail)
+	}
+}
+
+// The same row under a repo that has no quants — an MLX model is one unit — is
+// the repository's own superseded copies.
+func TestSupersededDetailsOfARepositoryWithNoItems(t *testing.T) {
+	frame, _ := cacheFrame(t)
+	frame = onRow(t, frame, "superseded · 2026-08-05")
+
+	detail := cacheDetail(frame)
+	for _, fact := range []string{
+		"mlx-community/Qwen3-30B-A3B-4bit",
+		"7.0 GiB",
+		"model-00002-of-00002.safetensors · 7.0 GiB · 2026-08-05 14:00:00",
+		"model-00002-of-00002.safetensors · 8.0 GiB · 2026-08-12 09:30:00",
+	} {
+		if !strings.Contains(detail, fact) {
+			t.Errorf("the superseded pane does not carry %q:\n%s", fact, detail)
+		}
+	}
+	if strings.Contains(detail, "quant") {
+		t.Errorf("the pane names a quant for a repo that has none:\n%s", detail)
 	}
 }
 
@@ -398,7 +477,9 @@ func TestCacheViewStacksOnANarrowTerminal(t *testing.T) {
 	if strings.Contains(strings.Split(narrow, "\n")[0], cacheDetailTitle) {
 		t.Errorf("a 70-cell terminal kept the details pane beside the list:\n%s", narrow)
 	}
-	if !strings.Contains(narrow, cacheDetailTitle) || !strings.Contains(narrow, "unsloth/Qwen3-30B-A3B-GGUF") {
+	// Both panes survive the stack: the list, windowed around the row the cursor
+	// is on, and the details of that row under it.
+	if !strings.Contains(narrow, cacheDetailTitle) || !strings.Contains(narrow, "HuggingFaceTB/smoltalk") {
 		t.Errorf("a 70-cell terminal lost half the cache view:\n%s", narrow)
 	}
 	for _, line := range strings.Split(narrow, "\n") {

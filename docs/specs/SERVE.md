@@ -54,9 +54,16 @@ failure states.
 
 - `starting` — spawned, port not answering yet.
 - `downloading` — port not answering *and* the entry's model is not fully present
-  in the cache. Progress renders as on-disk cache bytes versus Hub-API sizes
-  (filesystem observation; when the Hub API is unreachable, bytes show without a
-  total). The server does the fetching; cria only watches the cache.
+  in the cache, **or a copy of it is landing** (amended 2026-08-19: an upstream
+  re-upload makes the server silently re-fetch a changed blob while the old
+  copy still reads complete — that start showed as "starting" and got killed as
+  stuck). A partial whose blob name matches the entry's current Hub oid is this
+  entry's download, and progress then counts the landing copy's bytes; when the
+  Hub cannot say, any unfinished download in the entry's repo counts — coarser,
+  never louder. An ordinary start of a cached, unchanged model asks the Hub
+  nothing. Otherwise progress renders as on-disk cache bytes versus Hub-API
+  sizes (filesystem observation; when the Hub API is unreachable, bytes show
+  without a total). The server does the fetching; cria only watches the cache.
 - `running` — the backend's documented health signal is green: llama-server's
   `/health`; for a backend without a health endpoint, a successful response from
   a documented endpoint (`/v1/models`).

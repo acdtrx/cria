@@ -1,6 +1,8 @@
 package hubcache
 
 import (
+	"path/filepath"
+
 	"cria/internal/config"
 )
 
@@ -44,6 +46,49 @@ func llamaPresence(repo *Repo, quant string) Presence {
 		return Presence{Bytes: repo.PartialBytes}
 	}
 	return Presence{Cached: item.Complete, Bytes: item.Bytes + repo.PartialBytes}
+}
+
+// Fetching answers whether this repository is receiving one particular set of
+// blobs right now, and how many of their bytes are already on disk. The blobs
+// are a model's files as the Hub names them for the revision it publishes today
+// (internal/hubapi), so the answer is about that model rather than about the
+// repository: an unfinished download of another quant in the same repo is
+// somebody else's.
+//
+// It is what tells a silent re-download from a slow start (docs/specs/SERVE.md).
+// When a provider republishes a quant, the copy on disk is still whole and the
+// entry still reads cached — the only sign that a server is fetching gigabytes
+// before it loads anything is an unfinished download named after the file the
+// Hub publishes now.
+//
+// The bytes are the model's progress rather than one file's: a file still
+// landing counts what it holds so far, and one that already landed under its
+// current hash counts whole — so a re-fetched shard series climbs instead of
+// falling back to zero at every shard.
+func (r *Repo) Fetching(blobs []string) (int64, bool) {
+	landing := map[string]int64{}
+	for _, partial := range r.Partials {
+		landing[partial.Blob] = partial.Bytes
+	}
+	landed := map[string]int64{}
+	for _, file := range r.Files {
+		landed[filepath.Base(file.Blob)] = file.Bytes
+	}
+
+	var bytes int64
+	fetching := false
+	for _, blob := range blobs {
+		if unfinished, still := landing[blob]; still {
+			bytes += unfinished
+			fetching = true
+			continue
+		}
+		bytes += landed[blob]
+	}
+	if !fetching {
+		return 0, false
+	}
+	return bytes, true
 }
 
 // anyComplete reports whether a repo holds at least one quantization that is

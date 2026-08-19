@@ -140,6 +140,68 @@ func TestPresenceOfAnMLXEntry(t *testing.T) {
 	}
 }
 
+// A provider who republishes a quant leaves the copy on disk whole while the new
+// one lands beside it, so nothing about presence says a download is running. What
+// says it is the unfinished blob's own name: the hash the Hub publishes for that
+// file today (docs/specs/SERVE.md).
+func TestFetchingTellsThisModelsDownloadFromAnothers(t *testing.T) {
+	// The two hashes are the shape the cache holds: the file's content hash,
+	// which names the blob and the unfinished download becoming it.
+	republished := "fd4730dd8aad070517978752b63d530aeb1740d2283cab9fa24f1e404032ddb0"
+	anotherQuant := "3f227079003add2511437e5b1e94812e363385225bf6a9b47b0054a72bc8b01e"
+
+	tree := newCacheTree(t)
+	tree.repo("models--unsloth--Qwen3.8-27B-GGUF").
+		snapshot("revision-old", cachedFile{name: "Qwen3.8-27B-UD-Q2_K_XL.gguf", size: 3000}).
+		partial(republished+".downloadInProgress", 900).
+		main("revision-old")
+
+	repo := repoOf(t, read(t, tree.Root), "unsloth/Qwen3.8-27B-GGUF")
+
+	t.Run("the file the Hub publishes now is landing", func(t *testing.T) {
+		bytes, fetching := repo.Fetching([]string{republished})
+		if !fetching || bytes != 900 {
+			t.Errorf("the repo reports %d bytes landing (fetching=%v), want the partial's 900", bytes, fetching)
+		}
+	})
+
+	t.Run("the download belongs to another file of the same repo", func(t *testing.T) {
+		bytes, fetching := repo.Fetching([]string{anotherQuant})
+		if fetching || bytes != 0 {
+			t.Errorf("the repo reports %d bytes landing (fetching=%v) for a file nothing is fetching", bytes, fetching)
+		}
+	})
+
+	t.Run("nothing is landing for a model already on disk", func(t *testing.T) {
+		on := blobName(cachedFile{name: "Qwen3.8-27B-UD-Q2_K_XL.gguf", size: 3000}.content())
+		if bytes, fetching := repo.Fetching([]string{on}); fetching || bytes != 0 {
+			t.Errorf("the repo reports %d bytes landing (fetching=%v) for a whole file", bytes, fetching)
+		}
+	})
+}
+
+// A re-fetched shard series is one download: the shards already landed under
+// their current hashes count whole, so the progress climbs across the series
+// instead of falling back to zero at every shard.
+func TestFetchingCountsTheShardsThatHaveLanded(t *testing.T) {
+	landed := cachedFile{name: "Qwen3-235B-UD-Q4_K_XL-00001-of-00002.gguf", size: 1000}
+	landing := "7897d2c5a5cee46aef50895141b2c8a0803c1185f3d03c4fda4cd137a7ad77fe"
+
+	tree := newCacheTree(t)
+	tree.repo("models--unsloth--Qwen3-235B-GGUF").
+		snapshot("revision-new", landed).
+		partial(landing+".incomplete", 250).
+		main("revision-new")
+
+	repo := repoOf(t, read(t, tree.Root), "unsloth/Qwen3-235B-GGUF")
+
+	bytes, fetching := repo.Fetching([]string{blobName(landed.content()), landing})
+	if !fetching || bytes != 1250 {
+		t.Errorf("the repo reports %d bytes landing (fetching=%v), want the finished shard and the one in flight: 1250",
+			bytes, fetching)
+	}
+}
+
 // An entry naming a repo nothing ever downloaded has nothing on disk.
 func TestPresenceOfAnUncachedMLXEntry(t *testing.T) {
 	cache := read(t, newCacheTree(t).Root)

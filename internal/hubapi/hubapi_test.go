@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,12 +18,12 @@ import (
 var ggufRepo = []hubEntry{
 	{path: "BF16", dir: true},
 	{path: ".gitattributes", size: 3313},
-	{path: "BF16/Qwen3-30B-A3B-BF16-00001-of-00002.gguf", size: 4000},
-	{path: "BF16/Qwen3-30B-A3B-BF16-00002-of-00002.gguf", size: 1000},
-	{path: "Qwen3-30B-A3B-UD-Q4_K_XL.gguf", size: 2000},
-	{path: "Qwen3-30B-A3B-UD-Q2_K_XL.gguf", size: 1500},
-	{path: "Qwen3-30B-A3B-Q8_0.gguf", size: 3000},
-	{path: "mmproj-BF16.gguf", size: 400},
+	{path: "BF16/Qwen3-30B-A3B-BF16-00001-of-00002.gguf", size: 4000, lfs: true},
+	{path: "BF16/Qwen3-30B-A3B-BF16-00002-of-00002.gguf", size: 1000, lfs: true},
+	{path: "Qwen3-30B-A3B-UD-Q4_K_XL.gguf", size: 2000, lfs: true},
+	{path: "Qwen3-30B-A3B-UD-Q2_K_XL.gguf", size: 1500, lfs: true},
+	{path: "Qwen3-30B-A3B-Q8_0.gguf", size: 3000, lfs: true},
+	{path: "mmproj-BF16.gguf", size: 400, lfs: true},
 	{path: "README.md", size: 500},
 	{path: "config.json", size: 100},
 }
@@ -31,9 +32,9 @@ var ggufRepo = []hubEntry{
 // part of the download.
 var mlxRepo = []hubEntry{
 	{path: "config.json", size: 100},
-	{path: "model-00001-of-00002.safetensors", size: 5000},
-	{path: "model-00002-of-00002.safetensors", size: 4000},
-	{path: "tokenizer.json", size: 700},
+	{path: "model-00001-of-00002.safetensors", size: 5000, lfs: true},
+	{path: "model-00002-of-00002.safetensors", size: 4000, lfs: true},
+	{path: "tokenizer.json", size: 700, lfs: true},
 	{path: "README.md", size: 300},
 	// The Hub reports zero bytes for a directory. This one carries bytes so the
 	// sum proves directories are skipped rather than merely adding nothing.
@@ -53,43 +54,68 @@ func TestTotalOfALlamaEntry(t *testing.T) {
 		{
 			name:  "one file",
 			quant: "Q8_0",
-			want:  Total{Bytes: 3000, Known: true},
+			want:  Total{Bytes: 3000, Known: true, Blobs: []string{lfsOid("Qwen3-30B-A3B-Q8_0.gguf")}},
 		},
 		{
 			// The tag as unsloth documents it and as the repo spells it — the
 			// value a cria entry carries for the quants this host serves.
 			name:  "the documented UD- spelling",
 			quant: "UD-Q2_K_XL",
-			want:  Total{Bytes: 1500, Known: true},
+			want:  Total{Bytes: 1500, Known: true, Blobs: []string{lfsOid("Qwen3-30B-A3B-UD-Q2_K_XL.gguf")}},
 		},
 		{
 			// llama.cpp's -hf repo:TAG resolution ignores case, so the answer
 			// must too — the one difference in spelling that still resolves.
 			name:  "spelled in another case",
 			quant: "ud-q4_k_xl",
-			want:  Total{Bytes: 2000, Known: true},
+			want:  Total{Bytes: 2000, Known: true, Blobs: []string{lfsOid("Qwen3-30B-A3B-UD-Q4_K_XL.gguf")}},
 		},
 		{
 			// The projector's name carries BF16 too and it is not part of the
 			// quant, on disk or here.
 			name:  "shards in a directory of their own",
 			quant: "BF16",
-			want:  Total{Bytes: 5000, Known: true},
+			want: Total{Bytes: 5000, Known: true, Blobs: []string{
+				lfsOid("BF16/Qwen3-30B-A3B-BF16-00001-of-00002.gguf"),
+				lfsOid("BF16/Qwen3-30B-A3B-BF16-00002-of-00002.gguf"),
+			}},
 		},
 		{
 			name:  "the projector is its own item",
 			quant: "mmproj-BF16.gguf",
-			want:  Total{Bytes: 400, Known: true},
+			want:  Total{Bytes: 400, Known: true, Blobs: []string{lfsOid("mmproj-BF16.gguf")}},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			entry := config.Entry{Backend: config.BackendLlama, Repo: hub.repo, Quant: test.quant}
-			if got := totalOf(t, hub, "", entry); got != test.want {
+			if got := totalOf(t, hub, "", entry); !sameTotal(got, test.want) {
 				t.Errorf("total is %+v, want %+v", got, test.want)
 			}
 		})
+	}
+}
+
+// The blobs a total names are the ones the cache stores those files under: the
+// LFS content hash where the Hub has one, the git object id where it does not.
+// An observation matches an unfinished download against these strings, so a
+// wrong one would read as "this model is not the one landing"
+// (docs/specs/SERVE.md).
+func TestATotalNamesTheBlobsItsFilesLandIn(t *testing.T) {
+	hub := newHub(t, "mlx-community/Qwen3-30B-A3B-4bit", mlxRepo...)
+
+	total := totalOf(t, hub, "", config.Entry{Backend: config.BackendMLX, Repo: hub.repo})
+
+	want := []string{
+		gitOid("config.json"),
+		lfsOid("model-00001-of-00002.safetensors"),
+		lfsOid("model-00002-of-00002.safetensors"),
+		lfsOid("tokenizer.json"),
+		gitOid("README.md"),
+	}
+	if !slices.Equal(total.Blobs, want) {
+		t.Errorf("the total names blobs %v, want %v", total.Blobs, want)
 	}
 }
 
@@ -131,8 +157,8 @@ func TestTotalOfAnMLXEntry(t *testing.T) {
 
 	total := totalOf(t, hub, "", config.Entry{Backend: config.BackendMLX, Repo: hub.repo})
 
-	if want := (Total{Bytes: 10100, Known: true}); total != want {
-		t.Errorf("total is %+v, want %+v", total, want)
+	if total.Bytes != 10100 || !total.Known {
+		t.Errorf("total is %+v, want 10100 bytes, known", total)
 	}
 }
 
@@ -275,4 +301,11 @@ func refusingHub(status int, body string) func(t *testing.T) (string, time.Durat
 func totalOf(t *testing.T, hub *fakeHub, token string, entry config.Entry) Total {
 	t.Helper()
 	return newClient(hub.URL, token, time.Second).Total(t.Context(), entry)
+}
+
+// sameTotal reports whether two totals are the same answer, blobs included: a
+// Total carries a slice, so the tests compare it field by field.
+func sameTotal(got, want Total) bool {
+	return got.Bytes == want.Bytes && got.Known == want.Known &&
+		got.Reason == want.Reason && slices.Equal(got.Blobs, want.Blobs)
 }

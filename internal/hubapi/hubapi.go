@@ -42,6 +42,14 @@ type Total struct {
 	Bytes  int64  // the entry's model when complete; meaningful only when Known
 	Known  bool   // the Hub answered and the answer covers this entry
 	Reason string // why there is no total; empty exactly when Known
+
+	// Blobs names the files this total summed, as the cache stores them: one
+	// hash per file of the entry's model at the revision the Hub serves now.
+	// The cache names every blob — and every unfinished download — after
+	// exactly these strings, which is what lets an observation tell a file of
+	// this model landing right now from some other file of the same repo
+	// landing (docs/specs/SERVE.md). Empty exactly when there is no total.
+	Blobs []string
 }
 
 // Client talks to one Hub API root with one credential.
@@ -96,42 +104,44 @@ func (c *Client) Total(ctx context.Context, entry config.Entry) Total {
 // set of files or the progress they form is nonsense.
 func quantTotal(files []treeFile, repo, quant string) Total {
 	// The listing, reduced to the question being asked: which item each GGUF
-	// file belongs to, and what it weighs.
+	// file belongs to, what it weighs, and the blob it lands in.
 	labels := make([]string, 0, len(files))
-	sizes := make([]int64, 0, len(files))
+	quantFiles := make([]treeFile, 0, len(files))
 	for _, file := range files {
 		label, isGGUF := hubcache.GGUFItem(file.Path)
 		if !isGGUF {
 			continue
 		}
 		labels = append(labels, label)
-		sizes = append(sizes, file.Size)
+		quantFiles = append(quantFiles, file)
 	}
 
 	match, found := hubcache.MatchQuant(labels, quant)
 	if !found {
 		return unknown(fmt.Sprintf("the Hub lists no %s file in %s", quant, repo))
 	}
-	var total int64
+	total := Total{Known: true}
 	for i, label := range labels {
 		if label == labels[match] {
-			total += sizes[i]
+			total.Bytes += quantFiles[i].Size
+			total.Blobs = append(total.Blobs, quantFiles[i].blob())
 		}
 	}
-	return Total{Bytes: total, Known: true}
+	return total
 }
 
 // repoTotal sums a whole repo — every file, weights and tokenizer alike, since
 // an MLX server fetches the repo entire.
 func repoTotal(files []treeFile, repo string) Total {
-	var total int64
+	total := Total{Known: true}
 	for _, file := range files {
-		total += file.Size
+		total.Bytes += file.Size
+		total.Blobs = append(total.Blobs, file.blob())
 	}
-	if total == 0 {
+	if total.Bytes == 0 {
 		return unknown(fmt.Sprintf("the Hub lists no files in %s", repo))
 	}
-	return Total{Bytes: total, Known: true}
+	return total
 }
 
 // unknown builds the answer that carries no bytes: the reason, for display next

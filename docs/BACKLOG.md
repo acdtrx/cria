@@ -43,22 +43,20 @@ Group entries under headings as themes emerge.
 
 ## Serve
 
-- **Silent re-downloads show as "starting", not "downloading".** When the Hub
-  copy of an already-cached quant changes (Unsloth requantized Qwen3.8 UD
-  quants between 2026-08-14 and 08-19), llama-server re-downloads the new blob
-  before loading — gigabytes with nothing in its log — while cria's phase
-  logic sees the *old* quant complete and says "starting"; the user reasonably
-  kills a "stuck" start. Fix sketch: a repo partial (`.downloadInProgress`)
-  while the port is silent counts as downloading, with progress = partial
-  bytes over hubapi's current-tree size for the quant. Revisit trigger: the
-  next upstream re-upload bites (they demonstrably happen).
+- **A multimodal repo's first mmproj download is not oid-matched.** hubapi's
+  Total sums only the quant's own files, so an mmproj landing first reads as
+  "another file's partial" and the phase stays `starting` until the quant
+  itself starts landing. (noted 2026-08-19 while fixing re-download
+  detection.) Revisit trigger: a vision model's first start visibly sits in
+  `starting` while gigabytes of projector download.
 
-- **Stale-revision blobs after upstream re-uploads.** The same event leaves
-  the superseded blob behind (~10 GB of old Q2 under its old snapshot beside
-  the new one). The cache view shows the repo fat, but no deletion unit means
-  "the old revision of this quant" — deleting the quant takes both. Revisit
-  trigger: reclaiming a superseded revision is actually wanted (likely the
-  first time disk pressure meets a re-uploaded 20 GB quant).
+## Cache view (orphans)
+
+- **Orphan blobs have no unit.** The real Qwen3.8 repo holds a complete 1.37 GB
+  blob (`MTP/mtp-…-Q4_0.gguf`) that no snapshot links — counted in the repo
+  total, shown in no row, reclaimable by nothing short of deleting the repo.
+  (noted 2026-08-19.) Revisit trigger: orphans show up more than once, or the
+  unaccounted gap between a repo's rows and its total confuses in practice.
 
 - **MLX downloads are nearly invisible as a phase.** `mlx_lm.server` binds its
   port and answers `/v1/models` *before* fetching the model, so the

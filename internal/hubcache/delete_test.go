@@ -401,6 +401,218 @@ func TestPlanPartialsReclaimUnfinishedDownloads(t *testing.T) {
 	})
 }
 
+// requantized is the tree an upstream re-upload leaves, shaped like the one on
+// the machine this was found on: the quant is on disk twice under two blobs, the
+// stale copy is named from two older snapshots, one of which holds nothing else,
+// and the projector and the other quant are blobs every revision shares.
+func requantized(t *testing.T) *cacheTree {
+	t.Helper()
+	projector := cachedFile{name: "mmproj-BF16.gguf", size: 400}
+	other := cachedFile{name: "Qwen3.8-27B-UD-Q4_K_XL.gguf", size: 5000}
+	stale := cachedFile{name: "Qwen3.8-27B-UD-Q2_K_XL.gguf", size: 3000}
+
+	tree := newCacheTree(t)
+	tree.repo("models--unsloth--Qwen3.8-27B-GGUF").
+		snapshot("revision-old", stale).
+		snapshot("revision-mid", stale, other, projector).
+		snapshot("revision-new",
+			cachedFile{name: "Qwen3.8-27B-UD-Q2_K_XL.gguf", size: 2800},
+			other, projector).
+		main("revision-new")
+	return tree
+}
+
+// Reclaiming a superseded copy takes the old blob and every stale link to it,
+// leaves the copy the repo names now exactly where it is, and takes the snapshot
+// the old copy was the last thing in (docs/specs/CACHE.md).
+func TestPlanSupersededTakesTheOldCopyAndKeepsTheCurrentOne(t *testing.T) {
+	tree := requantized(t)
+	repo := repoOf(t, read(t, tree.Root), "unsloth/Qwen3.8-27B-GGUF")
+	current, _ := repo.Item("UD-Q2_K_XL")
+	standing := current.Files[0].Blob
+
+	plan, err := PlanSuperseded(repo, "UD-Q2_K_XL", nil)
+	if err != nil {
+		t.Fatalf("planning the superseded copies of UD-Q2_K_XL: %v", err)
+	}
+
+	if plan.Bytes != 3000 {
+		t.Errorf("the plan reclaims %d bytes, want the 3000 the old copy holds", plan.Bytes)
+	}
+	if len(plan.Removes) != 3 {
+		t.Errorf("the plan removes %v, want the old blob and both stale links naming it", removalPaths(plan))
+	}
+	for _, removal := range plan.Removes {
+		if removal.Path == standing {
+			t.Fatalf("the plan removes the copy the repo names now: %s", standing)
+		}
+	}
+	if want := "the superseded copies of unsloth/Qwen3.8-27B-GGUF:UD-Q2_K_XL"; plan.Target.String() != want {
+		t.Errorf("the plan is named %q, want %q", plan.Target, want)
+	}
+	if len(plan.Dirs) != 1 || filepath.Base(plan.Dirs[0]) != "revision-old" {
+		t.Errorf("the plan empties %v, want the snapshot the old copy was the last thing in", plan.Dirs)
+	}
+
+	before := diskUsage(t, filepath.Join(repo.Dir, "blobs", filepath.Base(standing)))
+	applyPlan(t, tree.Root, plan)
+
+	after := repoOf(t, read(t, tree.Root), "unsloth/Qwen3.8-27B-GGUF")
+	kept, ok := after.Item("UD-Q2_K_XL")
+	if !ok {
+		t.Fatalf("the repo now lists %v, want the quant to still be there", itemLabels(after))
+	}
+	if kept.Bytes != 2800 || len(kept.Superseded) != 0 {
+		t.Errorf("the quant now holds %d bytes with %d superseded copies, want 2800 and none",
+			kept.Bytes, len(kept.Superseded))
+	}
+	if kept.Files[0].Blob != standing || diskUsage(t, standing) != before {
+		t.Errorf("the current copy is now %s at %d bytes, want the untouched %s at %d",
+			kept.Files[0].Blob, diskUsage(t, standing), standing, before)
+	}
+	// The projector both revisions named is shared, not superseded: the delete
+	// never went near it.
+	if projector, ok := after.Item("mmproj-BF16.gguf"); !ok || projector.Bytes != 400 {
+		t.Errorf("the projector is %+v, want the 400 bytes both revisions named", projector)
+	}
+	if after.SupersededBytes != 0 {
+		t.Errorf("the repo still reports %d superseded bytes", after.SupersededBytes)
+	}
+}
+
+// Repo-wide is the other granularity: every superseded copy the repository
+// holds, which is how an MLX model — one unit, no quants — is reclaimed.
+func TestPlanSupersededTakesAWholeRepositorysOldCopies(t *testing.T) {
+	config := cachedFile{name: "config.json", text: mlxConfig}
+	tree := newCacheTree(t)
+	tree.repo("models--mlx-community--Qwen3.8-27B-4bit").
+		snapshot("revision-old", config, cachedFile{name: "model-00001-of-00001.safetensors", size: 4000}).
+		snapshot("revision-new", config, cachedFile{name: "model-00001-of-00001.safetensors", size: 4200}).
+		main("revision-new")
+
+	repo := repoOf(t, read(t, tree.Root), "mlx-community/Qwen3.8-27B-4bit")
+	plan, err := PlanSuperseded(repo, "", nil)
+	if err != nil {
+		t.Fatalf("planning the superseded copies of the repo: %v", err)
+	}
+
+	if plan.Bytes != 4000 {
+		t.Errorf("the plan reclaims %d bytes, want the 4000 the old weights hold", plan.Bytes)
+	}
+	if want := "the superseded copies of mlx-community/Qwen3.8-27B-4bit"; plan.Target.String() != want {
+		t.Errorf("the plan is named %q, want %q", plan.Target, want)
+	}
+
+	applyPlan(t, tree.Root, plan)
+
+	after := repoOf(t, read(t, tree.Root), "mlx-community/Qwen3.8-27B-4bit")
+	if len(after.Superseded) != 0 || after.SupersededBytes != 0 {
+		t.Errorf("the repo still holds %v", names(after.Superseded))
+	}
+	if !after.Complete || len(after.Files) != 2 {
+		t.Errorf("the repo now holds %v (complete=%v), want the current config and weights", names(after.Files), after.Complete)
+	}
+	// config.json never changed: one blob, two revisions naming it, and the
+	// delete kept the revision that still names it.
+	if want := diskUsage(t, after.Dir); after.Bytes != want {
+		t.Errorf("the repo reports %d bytes, want the %d its directory occupies", after.Bytes, want)
+	}
+}
+
+// Bytes another name still resolves to are not superseded, whatever else points
+// at them: the old copy of one file and the current copy of another can be the
+// same blob, and that blob is the cache's to keep.
+func TestBytesACurrentNameStillResolvesToAreNotSuperseded(t *testing.T) {
+	shared := cachedFile{name: "Qwen3.8-27B-UD-Q2_K_XL.gguf", size: 3000}
+	tree := newCacheTree(t)
+	tree.repo("models--unsloth--Qwen3.8-27B-GGUF").
+		snapshot("revision-old", shared).
+		alias("revision-old", "Qwen3.8-27B-UD-Q8_0.gguf", shared).
+		snapshot("revision-new", cachedFile{name: "Qwen3.8-27B-UD-Q2_K_XL.gguf", size: 2800}).
+		main("revision-new")
+
+	repo := repoOf(t, read(t, tree.Root), "unsloth/Qwen3.8-27B-GGUF")
+
+	if len(repo.Superseded) != 0 {
+		t.Errorf("the walk calls %v superseded, but Q8_0 still resolves to those bytes", names(repo.Superseded))
+	}
+	if _, err := PlanSuperseded(repo, "", nil); err == nil {
+		t.Error("planning a superseded delete succeeded, want a refusal — nothing here was replaced")
+	}
+}
+
+// A repository nothing has been republished in has no superseded copies, and the
+// refusal says so rather than describing an empty delete.
+func TestPlanSupersededWhenNothingWasReplaced(t *testing.T) {
+	tree := newCacheTree(t)
+	tree.repo("models--unsloth--Qwen3.8-27B-GGUF").
+		snapshot("revision-one",
+			cachedFile{name: "Qwen3.8-27B-UD-Q4_K_XL.gguf", size: 3000},
+			cachedFile{name: "Qwen3.8-27B-UD-Q2_K_XL.gguf", size: 1200}).
+		main("revision-one")
+
+	repo := repoOf(t, read(t, tree.Root), "unsloth/Qwen3.8-27B-GGUF")
+
+	for _, label := range []string{"", "UD-Q4_K_XL"} {
+		if _, err := PlanSuperseded(repo, label, nil); err == nil {
+			t.Errorf("planning the superseded copies of %q succeeded, want a refusal", label)
+		}
+	}
+}
+
+// The superseded copies of a quant a server is serving right now are still
+// deletable — the one unit that is. The server maps the copy the repo names
+// today; the old blob is other bytes nothing has open (docs/specs/CACHE.md).
+func TestPlanSupersededIsNotRefusedByTheServerOnThatQuant(t *testing.T) {
+	tree := requantized(t)
+	repo := repoOf(t, read(t, tree.Root), "unsloth/Qwen3.8-27B-GGUF")
+	served := []Served{{Entry: "chat", Repo: "unsloth/Qwen3.8-27B-GGUF", Quant: "UD-Q2_K_XL"}}
+
+	plan, err := PlanSuperseded(repo, "UD-Q2_K_XL", served)
+	if err != nil {
+		t.Fatalf("planning the superseded copies of a served quant: %v", err)
+	}
+
+	// And the guard at execute time agrees with the guard at plan time, so a
+	// confirmation cannot be answered into a refusal.
+	before := diskUsage(t, tree.Root)
+	reclaimed, err := Execute(plan, served)
+	if err != nil {
+		t.Fatalf("reclaiming the superseded copies of a served quant: %v", err)
+	}
+	if lost := before - diskUsage(t, tree.Root); lost != reclaimed || reclaimed != 3000 {
+		t.Errorf("the delete reports %d bytes reclaimed and the tree lost %d, want 3000", reclaimed, lost)
+	}
+}
+
+// A superseded plan is a promise about exact paths like any other: a snapshot
+// that appears and starts naming the old blob makes those bytes the cache's
+// again, and the plan the user was shown no longer describes what is there.
+func TestExecuteRefusesASupersededPlanASnapshotHasClaimed(t *testing.T) {
+	tree := requantized(t)
+	repo := repoOf(t, read(t, tree.Root), "unsloth/Qwen3.8-27B-GGUF")
+	plan, err := PlanSuperseded(repo, "UD-Q2_K_XL", nil)
+	if err != nil {
+		t.Fatalf("planning the superseded copies of UD-Q2_K_XL: %v", err)
+	}
+
+	old := repo.Superseded[0]
+	dir := filepath.Join(repo.Dir, "snapshots", "revision-third")
+	mkdir(t, dir)
+	target, err := filepath.Rel(dir, old.Blob)
+	if err != nil {
+		t.Fatalf("cannot point at the blob: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, "Qwen3.8-27B-UD-Q8_0.gguf")); err != nil {
+		t.Fatalf("cannot link: %v", err)
+	}
+
+	var drift *DriftError
+	if err := refuseExecute(t, tree.Root, plan, nil); !errors.As(err, &drift) {
+		t.Fatalf("the refusal is %v, want a *DriftError", err)
+	}
+}
+
 // The model a server has open cannot be deleted; the refusal names the server to
 // stop (docs/specs/CACHE.md). Matching is the same everywhere: exact, case
 // aside — llama.cpp's own -hf resolution ignores case and nothing else about a
