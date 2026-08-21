@@ -76,13 +76,17 @@ keybinds get detailed as they are built.
   grows test variations faster than it sheds them. Contracts:
   - Membership and group order are UI preferences (`ui.json`), never the config
     tree and never the entry files. An entry belongs to at most one group. Ids
-    that no longer exist are skipped on render and pruned on the next prefs
-    write. With no groups defined the list renders exactly as before.
+    whose entry file is gone are skipped on render and pruned on the next prefs
+    write; an id whose file is merely refused (broken) keeps its membership —
+    a typo must not unfile the entry — and shows in the broken tail until the
+    file reads again (amended 2026-08-21, caught in build). With no groups
+    defined the list renders exactly as before.
   - Groups span backends: each backend's list shows only its own members under
     a heading; a heading with no members in the active backend is hidden,
     unless the group is entirely empty (so a just-emptied group stays findable).
     Ungrouped entries trail under a muted `ungrouped` heading (shown only when
-    groups exist); broken entry files stay last, ungroupable.
+    groups exist and the tail has rows to show — a heading over nothing is
+    noise); broken entry files stay last, ungroupable.
   - The cursor never stops on headings — the entry list stays the picker, and
     within a group entries keep the tree's alphabetical order; only groups are
     manually ordered.
