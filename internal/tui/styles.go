@@ -41,9 +41,9 @@ const (
 	// terminal's own background. Body text and the accents clear AA on it as they
 	// stand; the dim tone and the heading tone do not, so the band carries its
 	// own of each — the same colour lit, never a different one. A heading is on
-	// the band while a move is picking between the headings themselves
-	// (grouppick.go); the list's own cursor never stops on one
-	// (docs/specs/TUI.md).
+	// the band while a mode is standing on the headings themselves — filing an
+	// entry under one, or rearranging them (grouppick.go, managegroups.go); the
+	// list's own cursor never stops on one (docs/specs/TUI.md).
 	bandHex        = "#2d2720"
 	bandDimHex     = "#939ca6"
 	bandHeadingHex = "#9b93bb"
@@ -205,7 +205,7 @@ func (p rowPaint) notice() lipgloss.Style {
 }
 
 // heading is a section's name over the rows filed under it, and its band reading
-// while a move's cursor stands on that heading (grouppick.go).
+// while a mode's cursor stands on that heading (grouppick.go, managegroups.go).
 func (p rowPaint) heading() lipgloss.Style {
 	if p.cursor {
 		return bandHeadingStyle

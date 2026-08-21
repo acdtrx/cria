@@ -163,6 +163,7 @@ type model struct {
 	confirm   *deletion // the delete waiting for its answer; nil when none is
 	pick      *pick     // the server key waiting for the server it means; nil when none is
 	move      *move     // the entry waiting for the group it is filed into; nil when none is
+	manage    *manage   // the groups being reordered, renamed and disbanded; nil when none are
 	naming    *naming   // the name being typed on the notice line; nil when none is
 	toolsOpen bool      // the tools report is up, over whichever view is behind it
 	log       logScreen
@@ -359,11 +360,12 @@ func (m model) loaded(msg entriesMsg) model {
 	return m.reselect(m.cursor())
 }
 
-// press routes one keystroke. A modal, the tools report, the log screen and a
-// key waiting for its target — a server for a server key, a group for an entry —
-// each take the keyboard while they are up: what they offer is what the bar
-// draws, and every other key would act on something the user is no longer
-// looking at — or answer a question they are in the middle of.
+// press routes one keystroke. A modal, the tools report, the log screen, a key
+// waiting for its target — a server for a server key, a group for an entry — and
+// the mode the groups are rearranged in each take the keyboard while they are
+// up: what they offer is what the bar draws, and every other key would act on
+// something the user is no longer looking at — or answer a question they are in
+// the middle of.
 //
 // A name being typed takes the keyboard before any of them (naming.go). Every
 // printable key is a character there, and a keybind firing on one would act on
@@ -387,6 +389,11 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// asked on, the way an armed server key holds it over the box
 		// (grouppick.go).
 		return m.pressInMove(pressed)
+	case m.manage != nil:
+		// The groups being rearranged hold it for the same reason, over the same
+		// list: the headings are what the keys mean while it is up
+		// (managegroups.go).
+		return m.pressInManage(pressed)
 	case m.pick != nil:
 		// The pick comes before the bench pane rather than after it: ⏎ in that
 		// pane is what arms the pick, and the question is answered in the status
@@ -403,6 +410,8 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.switchBackend(), nil
 	case key.Matches(pressed, m.keys.cache):
 		return m.show(viewCache), nil
+	case key.Matches(pressed, m.keys.manageGroups):
+		return m.openGroups(), nil
 	case key.Matches(pressed, m.keys.clearAlert):
 		// esc answers the alert before it leads anywhere: the line is the
 		// newest thing on screen, and dismissing it is §5's user-dismiss. The
@@ -526,6 +535,11 @@ func (m model) rebindContext() model {
 	// key that could not be read (groups.go).
 	m.keys.moveEntry.SetEnabled(onEntryList && entry.broken == nil)
 	m.keys.remove.SetEnabled(onCacheList)
+	// Managing groups needs a group to manage — they come into being through the
+	// move and only through it — and a drawn list to manage them on: the mode
+	// stands on the headings, and a list with no rows draws none
+	// (managegroups.go).
+	m.keys.manageGroups.SetEnabled(onEntryList && len(m.prefs.Groups) > 0)
 
 	// One of the two navigation keys is live at a time: c goes to the cache, esc
 	// comes back. esc closes whatever has the keyboard first — a screen over the
@@ -536,16 +550,18 @@ func (m model) rebindContext() model {
 }
 
 // syncEscScope points esc at what it answers right now, in its settled order: a
-// name being typed and an entry waiting for its group each own the key outright,
-// an overlay is press's to close, a visible alert is dismissed next, and only
-// then does esc lead back out of the cache view. The bar draws whichever of the
-// two is live, so the key's next meaning is always the one on screen.
+// name being typed, an entry waiting for its group and the groups being
+// rearranged each own the key outright, an overlay is press's to close, a
+// visible alert is dismissed next, and only then does esc lead back out of the
+// cache view. The bar draws whichever of the two is live, so the key's next
+// meaning is always the one on screen.
 func (m model) syncEscScope() model {
-	// Both of those stand in front of the alert line rather than replacing what
-	// it says — the name input over it, the move's question written on it — so
-	// esc there answers the mode: neither the line underneath nor the way out of
-	// a view is what the key means while one of them is up.
-	asking := m.naming != nil || m.move != nil
+	// Each of those stands in front of the alert line rather than replacing what
+	// it says — the name input over it, the move's question written on it, the
+	// manage mode leaving it to whatever a disband reported — so esc there
+	// belongs to the mode: neither the line underneath nor the way out of a view
+	// is what the key means while one of them is up.
+	asking := m.naming != nil || m.move != nil || m.manage != nil
 	m.keys.clearAlert.SetEnabled(!asking && m.alert.text != "")
 	m.keys.back.SetEnabled(!asking && m.view == viewCache && m.alert.text == "")
 	return m
@@ -747,6 +763,9 @@ func (m model) groups() []keyGroup {
 		return []keyGroup{{label: logScope, bindings: []key.Binding{m.keys.leaveLog}}, global}
 	case m.move != nil:
 		return []keyGroup{{label: moveScope, bindings: []key.Binding{m.keys.runMove, m.keys.cancelMove}}, global}
+	case m.manage != nil:
+		return []keyGroup{{label: manageScope, bindings: []key.Binding{
+			m.keys.raiseGroup, m.keys.lowerGroup, m.keys.renameGroup, m.keys.disbandGroup, m.keys.leaveGroups}}, global}
 	case m.pick != nil:
 		return []keyGroup{{label: m.pick.action.scope(), bindings: []key.Binding{m.keys.runPick, m.keys.cancelPick}}, global}
 	case m.benchOpen:
@@ -756,7 +775,7 @@ func (m model) groups() []keyGroup {
 	return []keyGroup{
 		{label: selectionScope, bindings: []key.Binding{m.keys.start, m.keys.moveEntry, m.keys.remove}},
 		{label: serverScope, bindings: []key.Binding{m.keys.stop, m.keys.forceKill, m.keys.log, m.keys.restart, m.keys.dismiss}},
-		{label: globalScope, bindings: []key.Binding{m.keys.backend, m.keys.cache, m.keys.clearAlert, m.keys.back, m.keys.tools, m.keys.bench, m.keys.quit}},
+		{label: globalScope, bindings: []key.Binding{m.keys.backend, m.keys.cache, m.keys.manageGroups, m.keys.clearAlert, m.keys.back, m.keys.tools, m.keys.bench, m.keys.quit}},
 	}
 }
 
@@ -787,13 +806,14 @@ type keymap struct {
 	restart   key.Binding
 	dismiss   key.Binding
 
-	backend    key.Binding
-	cache      key.Binding
-	back       key.Binding
-	clearAlert key.Binding
-	tools      key.Binding
-	bench      key.Binding
-	quit       key.Binding
+	backend      key.Binding
+	cache        key.Binding
+	manageGroups key.Binding
+	back         key.Binding
+	clearAlert   key.Binding
+	tools        key.Binding
+	bench        key.Binding
+	quit         key.Binding
 
 	killHolder    key.Binding
 	leaveModal    key.Binding
@@ -811,6 +831,12 @@ type keymap struct {
 
 	runMove    key.Binding
 	cancelMove key.Binding
+
+	raiseGroup   key.Binding
+	lowerGroup   key.Binding
+	renameGroup  key.Binding
+	disbandGroup key.Binding
+	leaveGroups  key.Binding
 
 	confirmName key.Binding
 	cancelName  key.Binding
@@ -830,6 +856,12 @@ type keymap struct {
 // What ⏎ answers while a key is armed is that key's own word, so the binding is
 // spelled when the action is armed rather than here.
 //
+// The keys that carry a group through the order are the cursor pair shifted:
+// moving what the cursor is on is the same gesture as moving the cursor, held
+// down. esc there says "done" rather than "cancel" — every change is already
+// written by the time it is pressed, so there is nothing for it to undo
+// (managegroups.go).
+//
 // Backspace is bound and never drawn for the same reason the cursor keys are.
 // Quit has a second binding beside it: while a name is being typed q is a
 // letter, so ctrl+c is the only key that still leaves and the bar says so
@@ -848,6 +880,7 @@ func newKeymap() keymap {
 		dismiss:       key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "dismiss")),
 		backend:       key.NewBinding(key.WithKeys("tab"), key.WithHelp("⇥", "backend")),
 		cache:         key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "cache")),
+		manageGroups:  key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "groups")),
 		back:          key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 		clearAlert:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "dismiss")),
 		tools:         key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "tools")),
@@ -867,6 +900,11 @@ func newKeymap() keymap {
 		cancelPick:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 		runMove:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "move")),
 		cancelMove:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+		raiseGroup:    key.NewBinding(key.WithKeys("K"), key.WithHelp("K", "up")),
+		lowerGroup:    key.NewBinding(key.WithKeys("J"), key.WithHelp("J", "down")),
+		renameGroup:   key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "rename")),
+		disbandGroup:  key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "disband")),
+		leaveGroups:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "done")),
 		confirmName:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "confirm")),
 		cancelName:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 		eraseName:     key.NewBinding(key.WithKeys("backspace")),

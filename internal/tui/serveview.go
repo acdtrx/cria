@@ -148,43 +148,45 @@ func (m model) serveTitle() string {
 // drawn lines, around the line the selected entry landed on, which is what keeps
 // the cursor on screen while the headings above it take capacity of their own.
 //
-// An armed move is the one thing that changes any of this: it makes the headings
-// the answer to a question, so every group gets one, the tail's own line joins
-// them when it can answer, `new group…` closes the list, and the window follows
-// that cursor instead — the entry cursor stays where it was, drawn as it was
-// (grouppick.go).
+// A mode standing on the headings is the one thing that changes any of this: it
+// makes them what the cursor is on, so every group gets one whether this backend
+// has anything under it or not, and the window follows that cursor instead — the
+// entry cursor stays where it was, drawn as it was. The move adds the two
+// headings that are answers rather than groups: the tail's own line when it can
+// take the entry, and `new group…` closing the list (grouppick.go,
+// managegroups.go).
 func (m model) listLines(inner, capacity int) []string {
 	rows := m.rows()
 	if len(rows) == 0 {
 		return sizeLines(m.emptyList(), capacity)
 	}
 
-	filing := m.headingCursor()
+	heading := m.headingCursor()
 	sections := entrySections(m.tree, m.prefs.Groups, m.prefs.Backend)
 	column := idColumn(rows)
 	lines := make([]string, 0, len(rows))
 	cursor, at := 0, 0
 	for i, listed := range sections {
 		target := sectionTarget(i, len(sections))
-		if listed.heading || filing.draws(target) {
-			if filing.on(target) {
+		if listed.heading || heading.draws(target) {
+			if heading.on(target) {
 				cursor = len(lines)
 			}
-			lines = append(lines, headingLine(listed.name, filing.on(target), inner))
+			lines = append(lines, headingLine(listed.name, heading.on(target), inner))
 		}
 		for _, drawn := range listed.rows {
-			if at == m.selected && !filing.filing {
+			if at == m.selected && !heading.up {
 				cursor = len(lines)
 			}
 			lines = append(lines, m.rowLine(drawn, at == m.selected, inner, column))
 			at++
 		}
 	}
-	if filing.filing {
-		if filing.on(moveToNewGroup) {
+	if heading.newGroup {
+		if heading.on(moveToNewGroup) {
 			cursor = len(lines)
 		}
-		lines = append(lines, headingLine(newGroupLabel, filing.on(moveToNewGroup), inner))
+		lines = append(lines, headingLine(newGroupLabel, heading.on(moveToNewGroup), inner))
 	}
 	return sizeLines(window(lines, cursor, capacity), capacity)
 }
@@ -201,9 +203,9 @@ const ungroupedHeading = "ungrouped"
 // every row is indented past the column the cursor's marker keeps, which is what
 // makes the two read apart without spending a glyph on it.
 //
-// The heading an armed move is standing on is drawn on the cursor's own band,
-// spanning the pane the way a picked row does — and without the marker, because
-// a heading picked is still not a row the list stops on (grouppick.go).
+// The heading a mode is standing on is drawn on the cursor's own band, spanning
+// the pane the way a picked row does — and without the marker, because a heading
+// pointed at is still not a row the list stops on (grouppick.go).
 func headingLine(name string, picked bool, inner int) string {
 	if name == "" {
 		name = ungroupedHeading

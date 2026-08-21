@@ -38,12 +38,12 @@ func savedFiling(t *testing.T, frame model) []string {
 }
 
 // assertNothingWritten says the preferences file was never written: the state
-// root of a test starts empty, so a question that was cancelled leaves it that
-// way.
+// root of a test starts empty, so a question that was cancelled — or a key that
+// changed nothing — leaves it that way.
 func assertNothingWritten(t *testing.T, frame model) {
 	t.Helper()
 	if _, err := os.Stat(prefsPath(frame.root)); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("the preferences file exists after a cancelled move (%v)", err)
+		t.Errorf("the preferences file exists after a change that never happened (%v)", err)
 	}
 }
 

@@ -181,36 +181,51 @@ func (m model) pickedTarget() (moveTarget, bool) {
 	return targets[clamped(m.move.cursor, len(targets))], true
 }
 
-// headingCursor is how the entry list draws an armed move: which heading is on
-// the band, and which headings the question makes visible that the list would
-// otherwise hide. Nothing armed is the list as it is drawn the rest of the time.
+// headingCursor is how the entry list draws a mode standing on the headings:
+// which heading is on the band, and which headings the mode makes visible that
+// the list would otherwise hide. Nothing up is the list as it is drawn the rest
+// of the time.
+//
+// Two modes can be standing there — a move asking which group takes an entry,
+// and the manage mode rearranging the groups themselves (managegroups.go) — and
+// the pane asks the frame for exactly one of these, so what differs between
+// them is said in these fields rather than in a second way of drawing the list.
 type headingCursor struct {
-	filing    bool
+	up        bool
 	picked    moveTarget
 	ungrouped bool // the tail is one of the answers, so its heading is drawn
+	newGroup  bool // the group that does not exist yet closes the list
 }
 
 // headingCursor reads that off the frame.
 func (m model) headingCursor() headingCursor {
+	if at, managing := m.managedGroup(); managing {
+		// Managing stands on the groups and only the groups: the tail is not
+		// one of them, and a group is created by filing an entry into it rather
+		// than from here (managegroups.go).
+		return headingCursor{up: true, picked: moveTarget(at)}
+	}
+
 	picked, filing := m.pickedTarget()
 	if !filing {
 		return headingCursor{}
 	}
 	return headingCursor{
-		filing:    true,
+		up:        true,
 		picked:    picked,
 		ungrouped: slices.Contains(m.moveTargets(m.move.entry), moveToUngrouped),
+		newGroup:  true,
 	}
 }
 
-// draws reports whether the question puts a heading on screen the list would
-// have left off. Every group's heading is drawn while a move is armed, this
-// backend's members or not: the question is which group, and a group the user
-// cannot see is a group they cannot answer with. The tail's heading is drawn
+// draws reports whether the mode puts a heading on screen the list would have
+// left off. Every group's heading is drawn while one is up, this backend's
+// members or not: the headings are what is being pointed at, and a group the
+// user cannot see is a group they cannot point at. The tail's heading is drawn
 // when the tail is one of the answers.
 func (h headingCursor) draws(target moveTarget) bool {
 	switch {
-	case !h.filing:
+	case !h.up:
 		return false
 	case target == moveToUngrouped:
 		return h.ungrouped
@@ -219,7 +234,7 @@ func (h headingCursor) draws(target moveTarget) bool {
 }
 
 // on reports whether the cursor is standing on this heading.
-func (h headingCursor) on(target moveTarget) bool { return h.filing && h.picked == target }
+func (h headingCursor) on(target moveTarget) bool { return h.up && h.picked == target }
 
 // sectionTarget is which answer a drawn section stands for: the groups come in
 // the preferences' own order and the tail is the last section, exactly as
@@ -234,7 +249,7 @@ func sectionTarget(section, sections int) moveTarget {
 // fileEntry is the answer landed: the entry leaves whatever group held it and
 // joins the one the cursor was on — or the tail, which is no group at all.
 func (m model) fileEntry(id string, target moveTarget) model {
-	return m.recordGroups(id, filedInto(m.prefs.Groups, id, target))
+	return m.recordGroups(filedInto(m.prefs.Groups, id, target)).followEntry(id)
 }
 
 // fileNewGroup is the answer that had no heading: the group is created at the
@@ -243,7 +258,7 @@ func (m model) fileEntry(id string, target moveTarget) model {
 // write.
 func (m model) fileNewGroup(id, name string) model {
 	filed := filedInto(m.prefs.Groups, id, moveToNewGroup)
-	return m.recordGroups(id, append(filed, entryGroup{Name: name, Entries: []string{id}}))
+	return m.recordGroups(append(filed, entryGroup{Name: name, Entries: []string{id}})).followEntry(id)
 }
 
 // filedInto is the group list with one entry in one group and nowhere else — an
@@ -272,20 +287,22 @@ func filedInto(groups []entryGroup, id string, target moveTarget) []entryGroup {
 }
 
 // recordGroups writes one change to the grouping and says nothing about it: the
-// heading the entry now sits under is the report, and a line repeating it would
-// still be there three keypresses later (tui.go).
+// headings are the report, and a line repeating what they show would still be
+// there three keypresses later (tui.go). Every key that changes a group goes
+// through here, filing or managing (managegroups.go), so no change to the
+// grouping is ever held only on screen.
 //
 // The write is where memberships are tidied: ids the tree no longer holds a file
-// for go out with it (groups.go). A write that fails is not the move failing —
+// for go out with it (groups.go). A write that fails is not the change failing —
 // the session has the grouping the user asked for, and what was lost is cria's
 // memory of it — so that one still speaks, exactly as the backend toggle does.
-func (m model) recordGroups(id string, groups []entryGroup) model {
+func (m model) recordGroups(groups []entryGroup) model {
 	m.prefs.Groups = pruneGroups(groups, m.tree)
 	m.alert = alert{}
 	if err := savePrefs(m.root, m.prefs); err != nil {
 		m.alert = alert{text: err.Error(), bad: true}
 	}
-	return m.followEntry(id)
+	return m
 }
 
 // followEntry keeps the cursor on the entry that was just filed: the list has

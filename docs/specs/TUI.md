@@ -98,10 +98,17 @@ keybinds get detailed as they are built.
     answer, so the key opens the name input directly rather than arming a pick
     of one; esc from that input steps back to the headings, the question it was
     reached from still being up.
-  - **Group management is its own small mode** over the headings: reorder,
-    rename, disband (members return to ungrouped; the notice line reports the
-    outcome). Rejected: cursor landing on headings with selection keys changing
-    meaning there — it slows the main picking gesture for a rare operation.
+  - **Group management is its own small mode** over the headings — every group
+    shown while it is up, the ungrouped tail never a stop: reorder (clamped at
+    both ends), rename (the name input opens on the current name), disband
+    (members return to ungrouped; the notice line reports the outcome, counting
+    the entries that actually come back — an id whose entry file is gone is
+    dropped by the same write, not ungrouped). Nothing is destroyed by a
+    disband, so nothing confirms it. Every change is written as it lands, so
+    leaving the mode is a way out and never a discard; the mode ends when its
+    last group is disbanded, leaving the notice behind it. Rejected: cursor
+    landing on headings with selection keys changing meaning there — it slows
+    the main picking gesture for a rare operation.
   - **Names are typed on the notice line** (`new group: qwen-tests▌`) — the
     reserved row keeps the list visible and costs no layout shift; ⏎ confirms,
     esc cancels; empty, duplicate and `ungrouped` names are refused there, in

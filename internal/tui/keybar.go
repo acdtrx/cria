@@ -25,6 +25,7 @@ const (
 	benchScope     = "bench"
 	namingScope    = "name"
 	moveScope      = "move where"
+	manageScope    = "groups"
 )
 
 // How the bar reads: keys within a scope are separated by a thin dot, scopes by
