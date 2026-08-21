@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -22,8 +23,53 @@ func TestPrefsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the preferences: %v", err)
 	}
-	if loaded != saved {
+	if !reflect.DeepEqual(loaded, saved) {
 		t.Errorf("the preferences came back as %+v, want %+v", loaded, saved)
+	}
+}
+
+// Groups are remembered like the rest of the preferences, in the order the user
+// put them in — that order is what the list renders — and a group standing empty
+// comes back empty rather than disappearing.
+func TestPrefsGroupsRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	saved := prefs{
+		Backend:     config.BackendMLX,
+		LastStarted: "qwen",
+		Groups: []entryGroup{
+			{Name: "daily", Entries: []string{"qwen", "gemma"}},
+			{Name: "macmini candidates", Entries: []string{}},
+		},
+	}
+
+	if err := savePrefs(root, saved); err != nil {
+		t.Fatalf("saving the preferences: %v", err)
+	}
+	loaded, err := loadPrefs(root)
+	if err != nil {
+		t.Fatalf("loading the preferences: %v", err)
+	}
+	if !reflect.DeepEqual(loaded, saved) {
+		t.Errorf("the preferences came back as %+v, want %+v", loaded, saved)
+	}
+}
+
+// A preferences value with no groups writes the file it wrote before groups
+// existed: the key is absent, not an empty array, so nothing about an unused
+// feature shows up in the file.
+func TestPrefsWithoutGroupsOmitTheKey(t *testing.T) {
+	root := t.TempDir()
+	if err := savePrefs(root, prefs{Backend: config.BackendMLX, LastStarted: "qwen"}); err != nil {
+		t.Fatalf("saving the preferences: %v", err)
+	}
+
+	data, err := os.ReadFile(prefsPath(root))
+	if err != nil {
+		t.Fatalf("reading the preferences file: %v", err)
+	}
+	want := "{\n  \"backend\": \"mlx\",\n  \"last_started\": \"qwen\"\n}\n"
+	if string(data) != want {
+		t.Errorf("the file reads %q, want %q", data, want)
 	}
 }
 
@@ -57,7 +103,7 @@ func TestMissingPrefsAreDefaults(t *testing.T) {
 	if err != nil {
 		t.Errorf("a missing preferences file reported %v, want no error", err)
 	}
-	if loaded != defaultPrefs() {
+	if !reflect.DeepEqual(loaded, defaultPrefs()) {
 		t.Errorf("a missing preferences file gave %+v, want %+v", loaded, defaultPrefs())
 	}
 }
@@ -76,6 +122,10 @@ func TestBrokenPrefsResetLoudly(t *testing.T) {
 		{name: "a field of the wrong type", file: `{"backend":42}`, contains: "unreadable"},
 		{name: "a backend cria cannot launch", file: `{"backend":"vllm"}`, contains: `backend is "vllm"`},
 		{name: "two documents in one file", file: `{"backend":"llama"}{"backend":"mlx"}`, contains: "more than one JSON document"},
+		{name: "a group with no name", file: `{"backend":"llama","groups":[{"name":"","entries":[]}]}`, contains: "no name"},
+		{name: "two groups of the same name", file: `{"backend":"llama","groups":[{"name":"daily","entries":[]},{"name":"daily","entries":[]}]}`, contains: `two groups are named "daily"`},
+		{name: "an entry filed in two groups", file: `{"backend":"llama","groups":[{"name":"daily","entries":["qwen"]},{"name":"tests","entries":["qwen"]}]}`, contains: `entry "qwen" is in both`},
+		{name: "an entry filed twice in one group", file: `{"backend":"llama","groups":[{"name":"daily","entries":["qwen","qwen"]}]}`, contains: `holds entry "qwen" twice`},
 	}
 
 	for _, test := range cases {
@@ -92,7 +142,7 @@ func TestBrokenPrefsResetLoudly(t *testing.T) {
 			if !strings.Contains(err.Error(), test.contains) {
 				t.Errorf("the failure reads %q, want it to name %q", err, test.contains)
 			}
-			if loaded != defaultPrefs() {
+			if !reflect.DeepEqual(loaded, defaultPrefs()) {
 				t.Errorf("a broken preferences file gave %+v, want the defaults %+v", loaded, defaultPrefs())
 			}
 		})

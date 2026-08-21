@@ -1,6 +1,6 @@
 # Step 1 — `groups` in prefs
 
-Status: pending
+Status: done
 
 ## Intent
 
@@ -51,4 +51,15 @@ contract: strict decode, loud reset on a broken file, atomic write.
 
 ## Result
 
-(recorded on completion)
+- `entryGroup` and `prefs.Groups` added as planned, with `validateGroups` called
+  from `decodePrefs` beside the backend check: unnamed group, repeated name, id
+  in two groups, id twice in one group — each its own message, each invalidating
+  the file. Ids are not checked against the config tree.
+- Tests: groups round-trip (two groups, one empty, order preserved), four new
+  rows in `TestBrokenPrefsResetLoudly`, and a byte-exact assertion that a
+  groups-less prefs value still writes `{"backend","last_started"}` only.
+- Suite green: `ok cria/internal/tui 6.838s` (full `go test ./...` green,
+  `gofmt -l .` and `go vet ./...` clean).
+- One forced adjustment: a slice field makes `prefs` non-comparable, so the three
+  existing `prefs != prefs` checks in `prefs_test.go` became
+  `reflect.DeepEqual` — the package's usual way to compare values with slices.

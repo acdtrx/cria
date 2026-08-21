@@ -13,19 +13,31 @@ import (
 )
 
 // prefsFile holds the UI's own memory, next to the state records rather than in
-// the config tree: which backend the lists are showing and which entry was
-// started last. Both are machine-owned — cria writes them without being asked —
-// and the config tree is human-owned, so neither may ever be recorded there
-// (docs/specs/TUI.md).
+// the config tree: which backend the lists are showing, which entry was started
+// last, and how the entry list is grouped. All of it is machine-owned — cria
+// writes it without being asked — and the config tree is human-owned, so none of
+// it may ever be recorded there (docs/specs/TUI.md).
 const prefsFile = "ui.json"
 
 // prefs is what the TUI remembers between launches. Backend is a sticky choice:
 // running llama or mlx is a decision, not a per-session question. LastStarted is
 // what the status box falls back to when nothing is running, so the server keys
-// keep a target across sessions; the start action owns writing it.
+// keep a target across sessions; the start action owns writing it. Groups
+// partition the entry list; with none defined the list renders as one flat list.
 type prefs struct {
 	Backend     config.Backend `json:"backend"`
 	LastStarted string         `json:"last_started,omitempty"`
+	Groups      []entryGroup   `json:"groups,omitempty"`
+}
+
+// entryGroup is one named section of the entry list. The array order of the
+// groups is their display order — groups are the only thing ordered by hand; the
+// entries of a group carry membership only, since within a heading they render
+// in the tree's alphabetical order. A group holding no entries is legal: a
+// just-emptied group stays findable until it is filed into or disbanded.
+type entryGroup struct {
+	Name    string   `json:"name"`
+	Entries []string `json:"entries"`
 }
 
 // defaultPrefs is a first launch: llama, and nothing started yet. llama is the
@@ -86,7 +98,44 @@ func decodePrefs(data []byte) (prefs, error) {
 	if saved.Backend != config.BackendLlama && saved.Backend != config.BackendMLX {
 		return prefs{}, fmt.Errorf("backend is %q, want %q or %q", saved.Backend, config.BackendLlama, config.BackendMLX)
 	}
+	if err := validateGroups(saved.Groups); err != nil {
+		return prefs{}, err
+	}
 	return saved, nil
+}
+
+// validateGroups holds every rule the group list must satisfy. A name is how a
+// group is shown and picked, so an unnamed or repeated one leaves the list
+// ambiguous; an entry belongs to at most one group, so an id filed twice has no
+// answer to which heading it renders under (docs/specs/TUI.md).
+//
+// Ids are not checked against the config tree: preferences know nothing about
+// it, and an id whose entry is gone is skipped on render and pruned on the next
+// write rather than making the whole file invalid.
+func validateGroups(groups []entryGroup) error {
+	named := make(map[string]bool, len(groups))
+	filedIn := make(map[string]string)
+	for _, group := range groups {
+		if group.Name == "" {
+			return errors.New("a group has no name")
+		}
+		if named[group.Name] {
+			return fmt.Errorf("two groups are named %q", group.Name)
+		}
+		named[group.Name] = true
+
+		for _, id := range group.Entries {
+			owner, taken := filedIn[id]
+			if taken && owner == group.Name {
+				return fmt.Errorf("group %q holds entry %q twice", group.Name, id)
+			}
+			if taken {
+				return fmt.Errorf("entry %q is in both group %q and group %q", id, owner, group.Name)
+			}
+			filedIn[id] = group.Name
+		}
+	}
+	return nil
 }
 
 // savePrefs records a change. The write lands through a temporary file and a
