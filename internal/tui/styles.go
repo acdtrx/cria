@@ -59,7 +59,9 @@ const (
 	// nowhere else in cria and means exactly this; the carried heading is drawn
 	// in teal too — the one deliberate exception to the-same-colour-lit — so
 	// the whole line changes together (docs/specs/TUI.md).
-	carryHex        = "#1f3d38" // Teal over the terminal's ground
+	// The tint sits just above the selection band's: a held group is the most
+	// active thing on screen, and both answer to the hierarchy test's walls.
+	carryHex        = "#344f4b" // Teal over the terminal's ground
 	carryHeadingHex = "#94e2d5" // Teal
 )
 
