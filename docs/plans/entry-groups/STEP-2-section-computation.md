@@ -1,6 +1,6 @@
 # Step 2 — grouped-section computation
 
-Status: pending
+Status: done
 
 ## Intent
 
@@ -51,4 +51,18 @@ save time. No rendering changes yet.
 
 ## Result
 
-(recorded on completion)
+- `internal/tui/groups.go` adds the `section` type, `entrySections`, the flat
+  `entryRows` (what `rows()` returns in step 3) and `pruneGroups`; nothing is
+  wired — `rows()` is untouched. `internal/tui/groups_test.go` covers order,
+  backend filtering, every visibility case, dangling skip, broken-last, the
+  no-groups sequence against the model's own `rows()`, and pruning.
+- `go test ./...` green, `gofmt -l .` silent, `go vet ./...` clean: phase 1 ends
+  here. Both rules were mutation-checked — flipping the heading rule and pruning
+  in place each turn a test red.
+- Decided while implementing: `pruneGroups` against a nil tree prunes nothing —
+  a tree cria has not read yet knows no id, so pruning against it would empty
+  every group on the first write.
+- Open for step 5/6: "exists in the tree" is `tree.Entries` only, so an id whose
+  file is *currently refused* counts as dangling and is pruned — an entry loses
+  its group while its file has a typo. Widening it to `tree.Broken` too is a
+  one-line change if that is not wanted.
