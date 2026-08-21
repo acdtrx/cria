@@ -764,8 +764,11 @@ func (m model) groups() []keyGroup {
 	case m.move != nil:
 		return []keyGroup{{label: moveScope, bindings: []key.Binding{m.keys.runMove, m.keys.cancelMove}}, global}
 	case m.manage != nil:
+		if m.manage.carrying {
+			return []keyGroup{{label: manageScope, bindings: []key.Binding{m.keys.placeGroup, m.keys.dropGroup}}, global}
+		}
 		return []keyGroup{{label: manageScope, bindings: []key.Binding{
-			m.keys.raiseGroup, m.keys.lowerGroup, m.keys.renameGroup, m.keys.disbandGroup, m.keys.leaveGroups}}, global}
+			m.keys.grabGroup, m.keys.renameGroup, m.keys.disbandGroup, m.keys.leaveGroups}}, global}
 	case m.pick != nil:
 		return []keyGroup{{label: m.pick.action.scope(), bindings: []key.Binding{m.keys.runPick, m.keys.cancelPick}}, global}
 	case m.benchOpen:
@@ -832,8 +835,9 @@ type keymap struct {
 	runMove    key.Binding
 	cancelMove key.Binding
 
-	raiseGroup   key.Binding
-	lowerGroup   key.Binding
+	grabGroup    key.Binding
+	placeGroup   key.Binding
+	dropGroup    key.Binding
 	renameGroup  key.Binding
 	disbandGroup key.Binding
 	leaveGroups  key.Binding
@@ -856,10 +860,13 @@ type keymap struct {
 // What ⏎ answers while a key is armed is that key's own word, so the binding is
 // spelled when the action is armed rather than here.
 //
-// The keys that carry a group through the order are the cursor pair shifted:
-// moving what the cursor is on is the same gesture as moving the cursor, held
-// down. esc there says "done" rather than "cancel" — every change is already
-// written by the time it is pressed, so there is nothing for it to undo
+// A group is reordered by picking it up: ⏎ takes the group under the cursor,
+// the cursor pair carries it, and ⏎ sets it down — so moving the group is
+// literally moving the cursor with the group held, and grab and place are two
+// spellings of the one ⏎ because the bar's word is the state's. esc while
+// carrying places too, one level out at a time; in the mode's own state it
+// says "done" rather than "cancel" — every change is already written by the
+// time it is pressed, so there is nothing for either to undo
 // (managegroups.go).
 //
 // Backspace is bound and never drawn for the same reason the cursor keys are.
@@ -900,8 +907,9 @@ func newKeymap() keymap {
 		cancelPick:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 		runMove:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "move")),
 		cancelMove:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
-		raiseGroup:    key.NewBinding(key.WithKeys("K"), key.WithHelp("K", "up")),
-		lowerGroup:    key.NewBinding(key.WithKeys("J"), key.WithHelp("J", "down")),
+		grabGroup:     key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "move")),
+		placeGroup:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "place")),
+		dropGroup:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "place")),
 		renameGroup:   key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "rename")),
 		disbandGroup:  key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "disband")),
 		leaveGroups:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "done")),

@@ -99,8 +99,13 @@ keybinds get detailed as they are built.
     of one; esc from that input steps back to the headings, the question it was
     reached from still being up.
   - **Group management is its own small mode** over the headings — every group
-    shown while it is up, the ungrouped tail never a stop: reorder (clamped at
-    both ends), rename (the name input opens on the current name), disband
+    shown while it is up, the ungrouped tail never a stop: reorder by
+    pick-up-and-carry — ⏎ takes the group under the cursor, the cursor keys
+    carry it (clamped at both ends, every step written as it lands), ⏎ or esc
+    sets it down, and rename/disband wait until it is down (amended 2026-08-21
+    after live use, user-designed; replaced a shifted-key nudge — moving the
+    held group with the same keys that move the cursor is the more natural
+    gesture) — rename (the name input opens on the current name), disband
     (members return to ungrouped; the notice line reports the outcome, counting
     the entries that actually come back — an id whose entry file is gone is
     dropped by the same write, not ungrouped). Nothing is destroyed by a

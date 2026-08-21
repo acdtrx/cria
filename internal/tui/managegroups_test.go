@@ -57,7 +57,7 @@ func TestTheGroupsKeyStandsOnTheHeadings(t *testing.T) {
 	}
 
 	bar := plain(renderKeybar(200, frame.groups()...))
-	for _, hint := range []string{manageScope + " K up · J down · r rename · d disband · esc done", "q quit"} {
+	for _, hint := range []string{manageScope + " ⏎ move · r rename · d disband · esc done", "q quit"} {
 		if !strings.Contains(bar, hint) {
 			t.Errorf("the keybar reads %q, want it to offer %q", bar, hint)
 		}
@@ -178,13 +178,23 @@ func TestTheWindowFollowsTheManagedHeading(t *testing.T) {
 	}
 }
 
-// J and K carry the group through the order and the cursor goes with it — what
-// is being moved is the group. The order is written as it lands, so the list and
-// the file say the same thing before the next key arrives.
+// ⏎ picks the group under the cursor up, the cursor keys carry it, ⏎ sets it
+// down — and the cursor goes with it, since what is being moved is the group.
+// Each step of the carry is written as it lands, so the list and the file say
+// the same thing before the next key arrives.
 func TestCarryingAGroupWritesTheOrder(t *testing.T) {
 	frame := managingFrame(t)
 
-	frame, cmd := press(t, frame, typed('J'))
+	frame, cmd := press(t, frame, enter)
+	if cmd != nil {
+		t.Error("picking a group up fired a command")
+	}
+	if frame.manage == nil || !frame.manage.carrying {
+		t.Fatalf("⏎ left the mode as %+v, want the group under the cursor picked up", frame.manage)
+	}
+	assertNothingWritten(t, frame)
+
+	frame, cmd = press(t, frame, typed('j'))
 	if cmd != nil {
 		t.Error("carrying a group fired a command")
 	}
@@ -203,13 +213,23 @@ func TestCarryingAGroupWritesTheOrder(t *testing.T) {
 		t.Errorf("the frame says %q about an order the headings already show", frame.alert.text)
 	}
 
-	frame, _ = press(t, frame, typed('K'))
+	frame, _ = press(t, frame, typed('k'))
 	if picked := pickedHeading(t, frame); picked != "daily" {
 		t.Errorf("the cursor is on %q after carrying daily back up, want it still on daily", picked)
 	}
 	back := []string{"daily [dust air]", "mlx only [cliff]", "emptied []", "ghosts []", "refused [typo]"}
 	if got := savedFiling(t, frame); !reflect.DeepEqual(got, back) {
 		t.Errorf("the file holds\n%q\nwant\n%q", got, back)
+	}
+
+	// ⏎ sets the group down where it stands: the mode is back to walking the
+	// headings, and setting down writes nothing the carry has not written.
+	frame, _ = press(t, frame, enter)
+	if frame.manage == nil || frame.manage.carrying {
+		t.Fatalf("⏎ left the mode as %+v, want the group set down and the mode up", frame.manage)
+	}
+	if picked := pickedHeading(t, frame); picked != "daily" {
+		t.Errorf("the cursor is on %q after setting daily down, want it still on daily", picked)
 	}
 
 	// The entry cursor is not what was being moved, and it stayed where it was.
@@ -225,8 +245,8 @@ func TestCarryingStopsAtBothEnds(t *testing.T) {
 		name string
 		keys []tea.KeyPressMsg
 	}{
-		{name: "up from the first", keys: []tea.KeyPressMsg{typed('K')}},
-		{name: "down from the last", keys: append(jTimes(4), typed('J'))},
+		{name: "up from the first", keys: []tea.KeyPressMsg{enter, typed('k')}},
+		{name: "down from the last", keys: append(jTimes(4), enter, typed('j'))},
 	}
 
 	for _, test := range cases {
@@ -457,12 +477,19 @@ func TestDisbandingTheLastGroupEndsTheMode(t *testing.T) {
 	}
 }
 
-// esc is a way out and never a discard: every change was written as it was
-// made, so what the mode did is still there after it is gone.
+// esc backs out one level at a time and never discards: with a group in the
+// air it sets it down, with the cursor walking it leaves the mode — and every
+// change was written as it was made, so what the mode did is still there after
+// it is gone.
 func TestEscLeavesTheModeWithTheLastWriteKept(t *testing.T) {
 	frame := managingFrame(t)
-	frame, _ = pressAll(t, frame, typed('J'), escape)
+	frame, _ = pressAll(t, frame, enter, typed('j'), escape)
 
+	if frame.manage == nil || frame.manage.carrying {
+		t.Fatalf("esc under a carried group left the mode as %+v, want the group set down and the mode up", frame.manage)
+	}
+
+	frame, _ = press(t, frame, escape)
 	if frame.manage != nil {
 		t.Errorf("esc left the mode up: %+v", frame.manage)
 	}
@@ -471,9 +498,45 @@ func TestEscLeavesTheModeWithTheLastWriteKept(t *testing.T) {
 		t.Errorf("the file holds\n%q\nwant\n%q — the order the mode wrote", got, want)
 	}
 	bar := plain(renderKeybar(200, frame.groups()...))
-	if !strings.Contains(bar, "g groups") || strings.Contains(bar, "esc done") || strings.Contains(bar, "K up") {
+	if !strings.Contains(bar, "g groups") || strings.Contains(bar, "esc done") || strings.Contains(bar, "⏎ place") {
 		t.Errorf("the keybar reads %q, want the frame's own keys back", bar)
 	}
+}
+
+// A group in the air answers only to the carry: the bar says so, and the keys
+// that change what a group is — rename, disband — wait until it is set down.
+func TestACarriedGroupHoldsTheKeys(t *testing.T) {
+	frame, _ := press(t, managingFrame(t), enter)
+
+	bar := plain(renderKeybar(200, frame.groups()...))
+	for _, hint := range []string{manageScope + " ⏎ place · esc place", "q quit"} {
+		if !strings.Contains(bar, hint) {
+			t.Errorf("the keybar reads %q, want it to offer %q", bar, hint)
+		}
+	}
+	for _, gone := range []string{"r rename", "d disband", "esc done"} {
+		if strings.Contains(bar, gone) {
+			t.Errorf("the keybar reads %q, want it not to offer %q while a group is in the air", bar, gone)
+		}
+	}
+
+	for _, ignored := range []tea.KeyPressMsg{typed('r'), typed('d'), typed('g'), typed('c')} {
+		var cmd tea.Cmd
+		frame, cmd = press(t, frame, ignored)
+		if cmd != nil {
+			t.Errorf("%q fired a command from under the carry", ignored.String())
+		}
+	}
+	if frame.naming != nil {
+		t.Error("rename opened its input on a group in the air")
+	}
+	if frame.manage == nil || !frame.manage.carrying {
+		t.Fatalf("a key put the mode into %+v, want the group still in the air", frame.manage)
+	}
+	if got, want := filing(frame.prefs.Groups), filing(groupedPrefs()); !reflect.DeepEqual(got, want) {
+		t.Errorf("the groups are now %q, want %q untouched", got, want)
+	}
+	assertNothingWritten(t, frame)
 }
 
 // The mode holds the keyboard while it is up: the list underneath is being
@@ -481,7 +544,7 @@ func TestEscLeavesTheModeWithTheLastWriteKept(t *testing.T) {
 func TestManagingHoldsTheKeyboard(t *testing.T) {
 	frame := managingFrame(t)
 
-	for _, ignored := range []tea.KeyPressMsg{typed('c'), {Code: tea.KeyTab}, typed('x'), typed('t'), typed('b'), typed('m'), typed('g'), enter} {
+	for _, ignored := range []tea.KeyPressMsg{typed('c'), {Code: tea.KeyTab}, typed('x'), typed('t'), typed('b'), typed('m'), typed('g')} {
 		var cmd tea.Cmd
 		frame, cmd = press(t, frame, ignored)
 		if cmd != nil {

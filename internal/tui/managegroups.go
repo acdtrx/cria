@@ -29,10 +29,13 @@ import (
 const renamePrompt = "rename group"
 
 // manage is the group order being worked on: where the cursor stands among the
-// groups the preferences hold. There is nothing else to keep — by the time the
-// next key arrives, whatever the last one did is already on disk.
+// groups the preferences hold, and whether the group under it is picked up.
+// There is nothing else to keep — by the time the next key arrives, whatever
+// the last one did is already on disk; carrying is which gesture the cursor
+// keys make, not an unsaved order.
 type manage struct {
-	cursor int
+	cursor   int
+	carrying bool
 }
 
 // openGroups is g: the headings become what the cursor is on, every group drawn
@@ -57,10 +60,13 @@ func (m model) openGroups() model {
 }
 
 // pressInManage is the keyboard while the groups are being managed: the cursor
-// walks the headings, K and J carry the group under it through the order, r
-// renames it and d disbands it. Nothing underneath acts — the list is being
-// rearranged, and a key meant for a row would land on a list that is moving.
+// walks the headings, ⏎ picks the group under it up, r renames it and d
+// disbands it. Nothing underneath acts — the list is being rearranged, and a
+// key meant for a row would land on a list that is moving.
 func (m model) pressInManage(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.manage.carrying {
+		return m.pressCarrying(pressed)
+	}
 	switch {
 	case key.Matches(pressed, m.keys.quit):
 		return m, tea.Quit
@@ -70,16 +76,46 @@ func (m model) pressInManage(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.stepManaged(-1), nil
 	case key.Matches(pressed, m.keys.pickDown):
 		return m.stepManaged(1), nil
-	case key.Matches(pressed, m.keys.raiseGroup):
-		return m.carryGroup(-1), nil
-	case key.Matches(pressed, m.keys.lowerGroup):
-		return m.carryGroup(1), nil
+	case key.Matches(pressed, m.keys.grabGroup):
+		return m.holdGroup(true), nil
 	case key.Matches(pressed, m.keys.renameGroup):
 		return m.askGroupName(), nil
 	case key.Matches(pressed, m.keys.disbandGroup):
 		return m.disbandGroup(), nil
 	}
 	return m, nil
+}
+
+// pressCarrying is the keyboard while a group is picked up: the cursor keys
+// carry it through the order — moving the group is the same gesture as moving
+// the cursor, with the group held — and ⏎ or esc sets it down where it stands.
+// Rename and disband wait outside: a group in the air is being placed, and the
+// two keys that change what it *is* belong to the state where the cursor walks.
+func (m model) pressCarrying(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(pressed, m.keys.quit):
+		return m, tea.Quit
+	case key.Matches(pressed, m.keys.placeGroup), key.Matches(pressed, m.keys.dropGroup):
+		return m.holdGroup(false), nil
+	case key.Matches(pressed, m.keys.pickUp):
+		return m.carryGroup(-1), nil
+	case key.Matches(pressed, m.keys.pickDown):
+		return m.carryGroup(1), nil
+	}
+	return m, nil
+}
+
+// holdGroup picks the group under the cursor up or sets it down. Nothing is
+// written by either: every step of a carry lands on disk as it happens, so the
+// hold is only which gesture the cursor keys make next.
+//
+// The value is copied rather than edited in place, like the cursor is: the
+// frame travels by value.
+func (m model) holdGroup(carrying bool) model {
+	managed := *m.manage
+	managed.carrying = carrying
+	m.manage = &managed
+	return m
 }
 
 // stepManaged walks the cursor over the group headings, and over nothing else:
@@ -98,9 +134,9 @@ func (m model) stepManaged(by int) model {
 	return m
 }
 
-// carryGroup moves the group under the cursor through the order and takes the
-// cursor with it: what is being moved is the group, and the highlight follows
-// what it is on.
+// carryGroup moves the picked-up group one place through the order and takes
+// the cursor with it: what is being moved is the group, and the highlight
+// follows what it is on.
 //
 // Both ends are walls. A wrap would send the group the user is nudging to the
 // far end of a list they are reading, and the order is the one thing here that
@@ -207,15 +243,18 @@ func (m model) managedGroup() (int, bool) {
 
 // pointAt is where the mode stands once a change has landed: on the group the
 // change was about, with the frame's keys re-read against the order the write
-// left behind — the key that opens this mode goes with its last group.
+// left behind — the key that opens this mode goes with its last group. A group
+// in the air stays in the air: a carry lands here once per step, and the hold
+// spans the steps.
 //
 // A disband can take the last one, and a mode over the group headings with no
 // group heading left has nothing to stand on: it ends, and the notice line it
 // wrote is what the user is left reading.
 func (m model) pointAt(at int) model {
+	carrying := m.manage != nil && m.manage.carrying
 	m.manage = nil
 	if len(m.prefs.Groups) > 0 {
-		m.manage = &manage{cursor: clamped(at, len(m.prefs.Groups))}
+		m.manage = &manage{cursor: clamped(at, len(m.prefs.Groups)), carrying: carrying}
 	}
 	// The list's own cursor keeps the row it was on: what moved is the order of
 	// the headings, and the entry the user is standing on is not what they were
