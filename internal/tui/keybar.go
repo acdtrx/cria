@@ -23,6 +23,7 @@ const (
 	toolsScope     = "tools"
 	logScope       = "log"
 	benchScope     = "bench"
+	namingScope    = "name"
 )
 
 // How the bar reads: keys within a scope are separated by a thin dot, scopes by

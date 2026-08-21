@@ -162,6 +162,7 @@ type model struct {
 	modal     *modal    // the refusal a start came back with; nil when there is none
 	confirm   *deletion // the delete waiting for its answer; nil when none is
 	pick      *pick     // the server key waiting for the server it means; nil when none is
+	naming    *naming   // the name being typed on the notice line; nil when none is
 	toolsOpen bool      // the tools report is up, over whichever view is behind it
 	log       logScreen
 
@@ -362,10 +363,16 @@ func (m model) loaded(msg entriesMsg) model {
 // what they offer is what the bar draws, and every other key would act on
 // something the user is no longer looking at — or answer a question they are in
 // the middle of.
+//
+// A name being typed takes the keyboard before any of them (naming.go). Every
+// printable key is a character there, and a keybind firing on one would act on
+// the list behind the line the name is being typed on.
 func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// esc means what is on screen right now, whatever path set the alert.
 	m = m.syncEscScope()
 	switch {
+	case m.naming != nil:
+		return m.pressInNaming(pressed)
 	case m.modal != nil:
 		return m.pressInModal(pressed)
 	case m.confirm != nil:
@@ -516,13 +523,18 @@ func (m model) rebindContext() model {
 	return m.syncEscScope()
 }
 
-// syncEscScope points esc at what it answers right now, in its settled order:
-// an overlay is press's to close, a visible alert is dismissed next, and only
-// then does esc lead back out of the cache view. The bar draws whichever of the
-// two is live, so the key's next meaning is always the one on screen.
+// syncEscScope points esc at what it answers right now, in its settled order: a
+// name being typed owns the key outright, an overlay is press's to close, a
+// visible alert is dismissed next, and only then does esc lead back out of the
+// cache view. The bar draws whichever of the two is live, so the key's next
+// meaning is always the one on screen.
 func (m model) syncEscScope() model {
-	m.keys.clearAlert.SetEnabled(m.alert.text != "")
-	m.keys.back.SetEnabled(m.view == viewCache && m.alert.text == "")
+	// The input stands in front of the alert line rather than replacing what it
+	// says, so esc there cancels the name — neither the line underneath nor the
+	// way out of a view is what the key means while one is being typed.
+	typing := m.naming != nil
+	m.keys.clearAlert.SetEnabled(!typing && m.alert.text != "")
+	m.keys.back.SetEnabled(!typing && m.view == viewCache && m.alert.text == "")
 	return m
 }
 
@@ -631,8 +643,9 @@ func (m model) screenRows(top []string, bar string) int {
 }
 
 // notes are the lines between the box and the view: what could not be observed,
-// and what the last keypress did. Each is one line and none is a box — they are
-// commentary on the box above them.
+// what the last keypress did, and — while one is being typed — the name the
+// notice line is taking (naming.go). Each is one line and none is a box: they
+// are commentary on the box above them.
 func (m model) notes(width int) []string {
 	var notes []string
 	for _, failed := range []struct {
@@ -647,7 +660,13 @@ func (m model) notes(width int) []string {
 			notes = append(notes, fit(alarmStyle.Render(failed.what+failed.err.Error()), width))
 		}
 	}
-	if m.alert.text != "" {
+	switch {
+	case m.naming != nil:
+		// The name takes the line for as long as it is being typed: what the
+		// last keypress did is behind the question the user is answering, and
+		// comes back the moment the name is confirmed or cancelled.
+		notes = append(notes, fit(m.naming.line(), width))
+	case m.alert.text != "":
 		style := noticeStyle
 		if m.alert.bad {
 			style = alarmStyle
@@ -689,14 +708,22 @@ func (m model) screen(width, rows int) string {
 // — what the highlighted item does, what the running server does, where to go
 // (docs/specs/TUI.md).
 //
-// A modal, the log tail and an armed server key hold the keyboard, so the bar
-// reads what they offer: the bar is the map of what works right now, and it must
-// never draw a key the screen in front of the user does not answer to.
+// A modal, the log tail, an armed server key and a name being typed hold the
+// keyboard, so the bar reads what they offer: the bar is the map of what works
+// right now, and it must never draw a key the screen in front of the user does
+// not answer to.
 func (m model) groups() []keyGroup {
 	// The bar is drawn from this frame's truth, whatever path set the alert.
 	m = m.syncEscScope()
 	global := keyGroup{label: globalScope, bindings: []key.Binding{m.keys.quit}}
 	switch {
+	case m.naming != nil:
+		// Every printable key is a character while a name is being typed, q
+		// included, so the bar spells the one key that still leaves (naming.go).
+		return []keyGroup{
+			{label: namingScope, bindings: []key.Binding{m.keys.confirmName, m.keys.cancelName}},
+			{label: globalScope, bindings: []key.Binding{m.keys.quitTyping}},
+		}
 	case m.modal != nil:
 		return []keyGroup{{label: modalScope, bindings: []key.Binding{m.keys.killHolder, m.keys.leaveModal}}, global}
 	case m.confirm != nil:
@@ -765,6 +792,11 @@ type keymap struct {
 	pickDown   key.Binding
 	runPick    key.Binding
 	cancelPick key.Binding
+
+	confirmName key.Binding
+	cancelName  key.Binding
+	eraseName   key.Binding
+	quitTyping  key.Binding
 }
 
 // newKeymap is the frame's keys as they are bound and as the bar spells them.
@@ -776,6 +808,11 @@ type keymap struct {
 //
 // What ⏎ answers while a key is armed is that key's own word, so the binding is
 // spelled when the action is armed rather than here.
+//
+// Backspace is bound and never drawn for the same reason the cursor keys are.
+// Quit has a second binding beside it: while a name is being typed q is a
+// letter, so ctrl+c is the only key that still leaves and the bar says so
+// (naming.go).
 func newKeymap() keymap {
 	return keymap{
 		start:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "start")),
@@ -806,6 +843,10 @@ func newKeymap() keymap {
 		pickDown:      key.NewBinding(key.WithKeys("down", "j")),
 		runPick:       key.NewBinding(key.WithKeys("enter")),
 		cancelPick:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+		confirmName:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "confirm")),
+		cancelName:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+		eraseName:     key.NewBinding(key.WithKeys("backspace")),
+		quitTyping:    key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("^C", "quit")),
 	}
 }
 

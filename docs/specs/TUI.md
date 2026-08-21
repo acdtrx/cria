@@ -101,8 +101,9 @@ keybinds get detailed as they are built.
     meaning there — it slows the main picking gesture for a rare operation.
   - **Names are typed on the notice line** (`new group: qwen-tests▌`) — the
     reserved row keeps the list visible and costs no layout shift; ⏎ confirms,
-    esc cancels; empty and duplicate names are refused there. Rejected: a
-    confirm-style panel — heavier than a one-line name needs.
+    esc cancels; empty, duplicate and `ungrouped` names are refused there, in
+    place, with the typed name left to correct. Rejected: a confirm-style panel
+    — heavier than a one-line name needs.
 - **Every text color clears WCAG AA (≥4.5:1) against a dark terminal ground,
   enforced by a palette test** (settled 2026-08-18, after first real use found
   the dim tones illegible): muted tones are muted by hue and saturation, never
