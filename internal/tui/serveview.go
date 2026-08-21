@@ -147,26 +147,44 @@ func (m model) serveTitle() string {
 // over entries alone. What that costs is here: the window is taken over the
 // drawn lines, around the line the selected entry landed on, which is what keeps
 // the cursor on screen while the headings above it take capacity of their own.
+//
+// An armed move is the one thing that changes any of this: it makes the headings
+// the answer to a question, so every group gets one, the tail's own line joins
+// them when it can answer, `new group…` closes the list, and the window follows
+// that cursor instead — the entry cursor stays where it was, drawn as it was
+// (grouppick.go).
 func (m model) listLines(inner, capacity int) []string {
 	rows := m.rows()
 	if len(rows) == 0 {
 		return sizeLines(m.emptyList(), capacity)
 	}
 
+	filing := m.headingCursor()
+	sections := entrySections(m.tree, m.prefs.Groups, m.prefs.Backend)
 	column := idColumn(rows)
 	lines := make([]string, 0, len(rows))
 	cursor, at := 0, 0
-	for _, listed := range entrySections(m.tree, m.prefs.Groups, m.prefs.Backend) {
-		if listed.heading {
-			lines = append(lines, headingLine(listed.name))
+	for i, listed := range sections {
+		target := sectionTarget(i, len(sections))
+		if listed.heading || filing.draws(target) {
+			if filing.on(target) {
+				cursor = len(lines)
+			}
+			lines = append(lines, headingLine(listed.name, filing.on(target), inner))
 		}
 		for _, drawn := range listed.rows {
-			if at == m.selected {
+			if at == m.selected && !filing.filing {
 				cursor = len(lines)
 			}
 			lines = append(lines, m.rowLine(drawn, at == m.selected, inner, column))
 			at++
 		}
+	}
+	if filing.filing {
+		if filing.on(moveToNewGroup) {
+			cursor = len(lines)
+		}
+		lines = append(lines, headingLine(newGroupLabel, filing.on(moveToNewGroup), inner))
 	}
 	return sizeLines(window(lines, cursor, capacity), capacity)
 }
@@ -182,11 +200,19 @@ const ungroupedHeading = "ungrouped"
 // under it are the count, and the heading sits at the pane's left edge while
 // every row is indented past the column the cursor's marker keeps, which is what
 // makes the two read apart without spending a glyph on it.
-func headingLine(name string) string {
+//
+// The heading an armed move is standing on is drawn on the cursor's own band,
+// spanning the pane the way a picked row does — and without the marker, because
+// a heading picked is still not a row the list stops on (grouppick.go).
+func headingLine(name string, picked bool, inner int) string {
 	if name == "" {
 		name = ungroupedHeading
 	}
-	return headingStyle.Render(name)
+	if !picked {
+		return headingStyle.Render(name)
+	}
+	paint := paintFor(true)
+	return paint.fill(paint.heading().Render(name), inner)
 }
 
 // idColumn is how wide the id column has to be for every id on the list to fit

@@ -34,15 +34,19 @@ const (
 	// The group headings the entry list is partitioned by: a hue of its own, so
 	// a heading is not read as a row that lost its dot, and muted well under
 	// body text, because the heading is furniture and the entries under it are
-	// what the eye is hunting for. It has no band reading — the cursor never
-	// stops on a heading (docs/specs/TUI.md).
+	// what the eye is hunting for.
 	headingHex = "#9088b0"
 
 	// The cursor's row sits on a band: the amber accent at a low alpha over the
 	// terminal's own background. Body text and the accents clear AA on it as they
-	// stand; the dim tone does not, so the band carries its own.
-	bandHex    = "#2d2720"
-	bandDimHex = "#939ca6"
+	// stand; the dim tone and the heading tone do not, so the band carries its
+	// own of each — the same colour lit, never a different one. A heading is on
+	// the band while a move is picking between the headings themselves
+	// (grouppick.go); the list's own cursor never stops on one
+	// (docs/specs/TUI.md).
+	bandHex        = "#2d2720"
+	bandDimHex     = "#939ca6"
+	bandHeadingHex = "#9b93bb"
 )
 
 // terminalBG is the background cria is read against: a dark terminal, taken at
@@ -89,22 +93,24 @@ var palette = []swatch{
 	{name: "band dim", hex: bandDimHex, on: bandHex, floor: textFloor},
 	{name: "band amber", hex: amberHex, on: bandHex, floor: textFloor},
 	{name: "band red", hex: redHex, on: bandHex, floor: textFloor},
+	{name: "band heading", hex: bandHeadingHex, on: bandHex, floor: textFloor},
 }
 
 // The palette as lipgloss reads it.
 var (
-	ink     = lipgloss.Color(inkHex)
-	dim     = lipgloss.Color(dimHex)
-	border  = lipgloss.Color(borderHex)
-	green   = lipgloss.Color(greenHex)
-	yellow  = lipgloss.Color(yellowHex)
-	amber   = lipgloss.Color(amberHex)
-	red     = lipgloss.Color(redHex)
-	blue    = lipgloss.Color(blueHex)
-	keyRed  = lipgloss.Color(keyHex)
-	heading = lipgloss.Color(headingHex)
-	band    = lipgloss.Color(bandHex)
-	bandDim = lipgloss.Color(bandDimHex)
+	ink         = lipgloss.Color(inkHex)
+	dim         = lipgloss.Color(dimHex)
+	border      = lipgloss.Color(borderHex)
+	green       = lipgloss.Color(greenHex)
+	yellow      = lipgloss.Color(yellowHex)
+	amber       = lipgloss.Color(amberHex)
+	red         = lipgloss.Color(redHex)
+	blue        = lipgloss.Color(blueHex)
+	keyRed      = lipgloss.Color(keyHex)
+	heading     = lipgloss.Color(headingHex)
+	band        = lipgloss.Color(bandHex)
+	bandDim     = lipgloss.Color(bandDimHex)
+	bandHeading = lipgloss.Color(bandHeadingHex)
 )
 
 // The styles every screen draws with. One file holds them so a change of palette
@@ -138,13 +144,14 @@ var (
 // — carries that background, and the dim tone is swapped for the one that stays
 // legible over it.
 var (
-	bandStyle       = lipgloss.NewStyle().Background(band)
-	bandNameStyle   = lipgloss.NewStyle().Foreground(amber).Background(band).Bold(true)
-	bandReadyStyle  = lipgloss.NewStyle().Foreground(green).Background(band)
-	bandFactStyle   = lipgloss.NewStyle().Foreground(ink).Background(band)
-	bandQuietStyle  = lipgloss.NewStyle().Foreground(bandDim).Background(band)
-	bandNoticeStyle = lipgloss.NewStyle().Foreground(amber).Background(band)
-	bandAlarmStyle  = lipgloss.NewStyle().Foreground(red).Background(band)
+	bandStyle        = lipgloss.NewStyle().Background(band)
+	bandNameStyle    = lipgloss.NewStyle().Foreground(amber).Background(band).Bold(true)
+	bandReadyStyle   = lipgloss.NewStyle().Foreground(green).Background(band)
+	bandFactStyle    = lipgloss.NewStyle().Foreground(ink).Background(band)
+	bandQuietStyle   = lipgloss.NewStyle().Foreground(bandDim).Background(band)
+	bandNoticeStyle  = lipgloss.NewStyle().Foreground(amber).Background(band)
+	bandAlarmStyle   = lipgloss.NewStyle().Foreground(red).Background(band)
+	bandHeadingStyle = lipgloss.NewStyle().Foreground(bandHeading).Background(band)
 )
 
 // rowPaint is how one row of a list is drawn: in the palette as it stands, or on
@@ -195,6 +202,15 @@ func (p rowPaint) notice() lipgloss.Style {
 		return bandNoticeStyle
 	}
 	return noticeStyle
+}
+
+// heading is a section's name over the rows filed under it, and its band reading
+// while a move's cursor stands on that heading (grouppick.go).
+func (p rowPaint) heading() lipgloss.Style {
+	if p.cursor {
+		return bandHeadingStyle
+	}
+	return headingStyle
 }
 
 // broken is a row cria cannot act on.

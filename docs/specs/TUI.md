@@ -94,7 +94,10 @@ keybinds get detailed as they are built.
     headings themselves (all groups shown while armed, plus `ungrouped` for a
     grouped entry and `new group…`); ⏎ files the entry, esc cancels. Groups are
     created only through `new group…` — a group exists because an entry needed
-    it, so there is no separate create key.
+    it, so there is no separate create key. With no groups yet that is the only
+    answer, so the key opens the name input directly rather than arming a pick
+    of one; esc from that input steps back to the headings, the question it was
+    reached from still being up.
   - **Group management is its own small mode** over the headings: reorder,
     rename, disband (members return to ungrouped; the notice line reports the
     outcome). Rejected: cursor landing on headings with selection keys changing
