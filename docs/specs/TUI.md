@@ -131,9 +131,11 @@ keybinds get detailed as they are built.
   draw from exclusively. The values are **Catppuccin Mocha** (settled
   2026-08-21, chosen from a side-by-side proposal; Macchiato rejected as
   near-identical in the accents, and cria paints no background where the
-  flavors actually differ): accents on the roles by hue family, Surface0 as
-  the selection band, Teal as the carry band — every pair still answering to
-  the AA test on the black ground.
+  flavors actually differ): accents on the roles by hue family, Surface1 as
+  the selection band (amended 2026-08-21: Surface0, picked from the browser
+  proposal, read as barely-there on the real terminal — dim red and heading
+  ride lit variants on the brighter band), Teal as the carry band — every
+  pair still answering to the AA test on the black ground.
 
 ## Open
 

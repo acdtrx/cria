@@ -85,10 +85,20 @@ func TestPaletteKeepsItsHierarchy(t *testing.T) {
 		}
 	}
 
-	// The band is a tint of the background, not a block of colour: a row under
-	// the cursor has to read as the same list, lit.
-	if tint := contrast(bandHex, terminalBG); tint > 2 {
-		t.Errorf("the cursor band is %.2f:1 against the terminal, want a tint rather than a slab", tint)
+	// The bands are tints of the background, not blocks of colour: a row under
+	// the cursor has to read as the same list, lit. Both walls are tuned on the
+	// real terminal: under ~2:1 a band reads as barely-there against true
+	// black, and the frame tone (~3.2:1) is already a slab.
+	for _, tinted := range []struct {
+		name string
+		hex  string
+	}{
+		{"cursor band", bandHex},
+		{"carry band", carryHex},
+	} {
+		if tint := contrast(tinted.hex, terminalBG); tint > 2.5 {
+			t.Errorf("the %s is %.2f:1 against the terminal, want a tint rather than a slab", tinted.name, tint)
+		}
 	}
 }
 

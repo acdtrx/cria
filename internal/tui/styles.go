@@ -41,15 +41,18 @@ const (
 	headingHex = "#9399b2"
 
 	// The cursor's row sits on a band: a Catppuccin surface over the terminal's
-	// own background. Body text and the accents clear AA on it as they stand;
-	// the dim tone and the heading tone do not, so the band carries its own of
-	// each — the same colour lit, never a different one. A heading is on the
-	// band while a mode is standing on the headings themselves — filing an
-	// entry under one, or rearranging them (grouppick.go, managegroups.go); the
-	// list's own cursor never stops on one (docs/specs/TUI.md).
-	bandHex        = "#313244" // Surface0
-	bandDimHex     = "#a6adc8" // dim, lit (Subtext0)
+	// own background — Surface1, because Surface0 reads as barely-there on a
+	// real black terminal. Body text and most accents clear AA on it as they
+	// stand; the dim tone, the heading tone and red do not, so the band carries
+	// its own of each — the same colour lit, never a different one. A heading
+	// is on the band while a mode is standing on the headings themselves —
+	// filing an entry under one, or rearranging them (grouppick.go,
+	// managegroups.go); the list's own cursor never stops on one
+	// (docs/specs/TUI.md).
+	bandHex        = "#45475a" // Surface1
+	bandDimHex     = "#bac2de" // dim, lit (Subtext1)
 	bandHeadingHex = "#b4befe" // heading, lit (Lavender)
+	bandRedHex     = "#f7b1c5" // red, lit
 
 	// The carry band: a group picked up in the manage mode rides a band of its
 	// own hue, so "in your hand" cannot be read as "selected". Teal appears
@@ -103,7 +106,7 @@ var palette = []swatch{
 	{name: "band yellow", hex: yellowHex, on: bandHex, floor: textFloor},
 	{name: "band dim", hex: bandDimHex, on: bandHex, floor: textFloor},
 	{name: "band amber", hex: amberHex, on: bandHex, floor: textFloor},
-	{name: "band red", hex: redHex, on: bandHex, floor: textFloor},
+	{name: "band red", hex: bandRedHex, on: bandHex, floor: textFloor},
 	{name: "band heading", hex: bandHeadingHex, on: bandHex, floor: textFloor},
 
 	{name: "carry heading", hex: carryHeadingHex, on: carryHex, floor: textFloor},
@@ -124,6 +127,7 @@ var (
 	band        = lipgloss.Color(bandHex)
 	bandDim     = lipgloss.Color(bandDimHex)
 	bandHeading = lipgloss.Color(bandHeadingHex)
+	bandRed     = lipgloss.Color(bandRedHex)
 	carryBand   = lipgloss.Color(carryHex)
 	carryTeal   = lipgloss.Color(carryHeadingHex)
 )
@@ -165,7 +169,7 @@ var (
 	bandFactStyle    = lipgloss.NewStyle().Foreground(ink).Background(band)
 	bandQuietStyle   = lipgloss.NewStyle().Foreground(bandDim).Background(band)
 	bandNoticeStyle  = lipgloss.NewStyle().Foreground(amber).Background(band)
-	bandAlarmStyle   = lipgloss.NewStyle().Foreground(red).Background(band)
+	bandAlarmStyle   = lipgloss.NewStyle().Foreground(bandRed).Background(band)
 	bandHeadingStyle = lipgloss.NewStyle().Foreground(bandHeading).Background(band)
 )
 
@@ -261,14 +265,18 @@ func (p rowPaint) alarm() lipgloss.Style {
 }
 
 // phase is a phase word in the colour that phase is spelled in, painted like the
-// row. The one phase drawn as context rather than as a state — a word cria does
-// not know — takes the band's own dim tone, the only grey legible there.
+// row. The two tones the band lights — dim for a word cria does not know, red
+// for a phase that is an alarm — swap for their band readings; the rest are
+// legible there as they stand.
 func (p rowPaint) phase(phase serve.Phase) lipgloss.Style {
 	if !p.cursor {
 		return phaseTone(phase)
 	}
-	if phaseColor(phase) == dim {
+	switch phaseColor(phase) {
+	case dim:
 		return bandQuietStyle
+	case red:
+		return bandAlarmStyle
 	}
 	return phaseTone(phase).Background(band)
 }
