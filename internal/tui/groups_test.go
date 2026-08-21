@@ -188,17 +188,18 @@ func TestEntryRowsAreTheSectionsConcatenated(t *testing.T) {
 }
 
 // With no groups defined the list is exactly the list cria drew before groups
-// existed — same entries, same order, the refused file last under either
-// backend.
+// existed — the backend's own entries in the tree's order, the refused file
+// last under either backend.
 func TestWithoutGroupsTheRowsAreTheListAsItWas(t *testing.T) {
 	frame, _ := serveFrame(t)
 
-	for _, backend := range []config.Backend{config.BackendLlama, config.BackendMLX} {
+	for backend, want := range map[config.Backend]string{
+		config.BackendLlama: "gemma qwen typo",
+		config.BackendMLX:   "mlx-qwen typo",
+	} {
 		frame.prefs.Backend = backend
-		want := frame.rows()
-		got := entryRows(frame.tree, frame.prefs.Groups, backend)
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("the %s rows read %q, want the list's own %q", backend, rowIDs(got), rowIDs(want))
+		if got := rowIDs(frame.rows()); got != want {
+			t.Errorf("the %s list reads %q, want %q", backend, got, want)
 		}
 	}
 }

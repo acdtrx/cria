@@ -1,6 +1,6 @@
 # Step 3 — headings in the entry list
 
-Status: pending
+Status: done
 
 ## Intent
 
@@ -50,4 +50,41 @@ output is byte-identical to today.
 
 ## Result
 
-(recorded on completion)
+What changed:
+
+- `rows()` is now `entryRows(m.tree, m.prefs.Groups, m.prefs.Backend)` — one
+  source for the cursor sequence. `selectedRow`, `reselect`, `clamped` and the
+  pick machinery were not touched.
+- `listLines()` walks `entrySections(...)`: a heading line where
+  `section.heading` says so, then that section's rows through the unchanged
+  `rowLine` path. It tracks the line the selected row lands on and windows over
+  the drawn lines around it, so headings cost capacity and the cursor stays on
+  screen. The empty-backend message still keys off `len(rows) == 0`, so a pane
+  whose only sections are empty groups shows where to write entries rather than
+  bare headings.
+- `headingLine` renders the group name alone (`ungrouped` for the tail), at the
+  pane's left edge — rows are indented past the cursor's marker column, which is
+  what tells the two apart with no glyph spent on it.
+- `headingHex = "#9088b0"` joined the palette table (6.33:1 on black, muted by
+  hue and saturation) with `headingStyle` built from it; `styles_test.go` lists
+  the style, so both palette tests cover it. Unbolded on purpose: the heading is
+  furniture and the ids under it are what the eye hunts for.
+
+Tests: `go test ./...` fully green (phase 2 ends here), `gofmt -l .` silent,
+`go vet ./...` clean.
+
+Deviations:
+
+- **No existing test needed re-anchoring.** Every serve-view fixture is
+  group-free, so all of them kept passing unchanged — which is the byte-identical
+  guarantee showing up as evidence rather than as an assertion. The named line
+  numbers were left alone.
+- Added `TestWithoutGroupsTheListIsDrawnAsItWas`, which compares `listLines`
+  against the concatenated `rowLine`s byte for byte (escapes included) — the
+  explicit legacy anchor the step asked for.
+- **`TestWithoutGroupsTheRowsAreTheListAsItWas` (step 2's) had gone
+  tautological**: it compared `entryRows(...)` with `frame.rows()`, which is now
+  the same call. Re-anchored on the literal id sequences per backend instead.
+- New render tests: headings in group order per backend (hidden headings absent,
+  empty groups keeping theirs), the ungrouped heading only where it separates,
+  the cursor never on a heading, and a short pane windowing over the headings.

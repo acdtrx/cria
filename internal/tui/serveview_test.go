@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -37,6 +38,17 @@ func serveFrame(t *testing.T) (model, *testHost) {
 	return load(t, frame), world
 }
 
+// groupedFrame is the serve view over the grouped fixture (groups_test.go): a
+// tree with entries under both backends and a refused file, filed by
+// preferences that leave a group per case the pane has to draw.
+func groupedFrame(t *testing.T) model {
+	t.Helper()
+	frame, world, _ := testFrameOn(t, newTestHost(&fakeServers{}))
+	world.tree = groupedTree()
+	frame.prefs.Groups = groupedPrefs()
+	return load(t, frame)
+}
+
 // listWidth is the pane the list is drawn into by the assertions here: wide
 // enough that no row is truncated, so what a test reads is the whole row.
 const listWidth = 76
@@ -60,6 +72,19 @@ func list(frame model, capacity int) []string {
 		}
 	}
 	return lines
+}
+
+// headings is the group names the pane draws, in the order it draws them: the
+// lines that start at the pane's left edge, every row being indented past the
+// column the cursor's marker keeps.
+func headings(frame model, capacity int) []string {
+	var names []string
+	for _, line := range list(frame, capacity) {
+		if !strings.HasPrefix(line, nothingHere) && !strings.HasPrefix(line, cursorMark) {
+			names = append(names, line)
+		}
+	}
+	return names
 }
 
 // The list is the active backend's, never a mixed one, and every row carries
@@ -99,6 +124,194 @@ func TestEntryListShowsTheActiveBackend(t *testing.T) {
 	if !strings.Contains(mlx[0], "mlx-qwen") || strings.Contains(strings.Join(mlx, "\n"), "gemma") {
 		t.Errorf("the mlx tab reads %q, want the mlx entry and no llama one", mlx)
 	}
+}
+
+// With no groups defined the list is the drawing it always was: the rows
+// themselves, in order, with nothing over them and no shift in their spacing.
+// Groups are opt-in, so this is the pane most sessions see (docs/specs/TUI.md).
+func TestWithoutGroupsTheListIsDrawnAsItWas(t *testing.T) {
+	frame, _ := serveFrame(t)
+
+	rows := frame.rows()
+	column := idColumn(rows)
+	want := make([]string, 0, len(rows))
+	for i, listed := range rows {
+		want = append(want, frame.rowLine(listed, i == frame.selected, listWidth, column))
+	}
+
+	// Byte for byte, escapes included: a heading line or a changed indent would
+	// show up here rather than in a screenshot months later.
+	if got := frame.listLines(listWidth, len(rows)); !reflect.DeepEqual(got, want) {
+		t.Errorf("the ungrouped list draws\n%q\nwant the rows themselves\n%q", got, want)
+	}
+	if names := headings(frame, 10); len(names) != 0 {
+		t.Errorf("a list with no groups drew the headings %q", names)
+	}
+}
+
+// The list is drawn in sections: each group that has something to show here, in
+// the order the preferences hold them, its entries under it, and the ungrouped
+// tail last. A group whose only members are under the other backend draws no
+// heading at all, while one standing empty keeps its heading so it stays
+// findable (docs/specs/TUI.md).
+func TestTheEntryListDrawsItsGroups(t *testing.T) {
+	cases := []struct {
+		name     string
+		backend  config.Backend
+		headings []string
+		down     []string
+	}{
+		{
+			name: "the llama tab", backend: config.BackendLlama,
+			headings: []string{"daily", "emptied", "ghosts", "ungrouped"},
+			down:     []string{"daily", "air", "dust", "emptied", "ghosts", "ungrouped", "bark", "typo"},
+		},
+		{
+			name: "the mlx tab", backend: config.BackendMLX,
+			headings: []string{"mlx only", "emptied", "ghosts", "ungrouped"},
+			down:     []string{"mlx only", "cliff", "emptied", "ghosts", "ungrouped", "echo", "typo"},
+		},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			frame := groupedFrame(t)
+			frame.prefs.Backend = test.backend
+			frame = frame.reselect(0)
+
+			lines := list(frame, 12)
+			if len(lines) != len(test.down) {
+				t.Fatalf("the pane drew %d lines:\n%s\nwant\n%s", len(lines), strings.Join(lines, "\n"), strings.Join(test.down, "\n"))
+			}
+			for i, expected := range test.down {
+				if !strings.Contains(lines[i], expected) {
+					t.Errorf("line %d reads %q, want it to carry %q", i, lines[i], expected)
+				}
+			}
+			if got := headings(frame, 12); !reflect.DeepEqual(got, test.headings) {
+				t.Errorf("the pane's headings are %q, want %q", got, test.headings)
+			}
+
+			// A heading is drawn as the structure it is rather than as a row that
+			// lost its dot.
+			if drawn := frame.listLines(listWidth, 12)[0]; !strings.HasPrefix(drawn, opener(headingStyle)) {
+				t.Errorf("the first heading is not drawn in the heading tone: %q", drawn)
+			}
+		})
+	}
+}
+
+// The ungrouped heading separates the tail from the groups above it, so it is
+// drawn only where there is something on both sides: no groups means one flat
+// list with nothing over it, and everything filed means no tail to name.
+func TestTheUngroupedHeadingIsDrawnOnlyWhenItSeparates(t *testing.T) {
+	frame, world, _ := testFrameOn(t, newTestHost(&fakeServers{}))
+	// No refused file: one always renders in the tail, since the key that would
+	// file it is the key that could not be read (docs/specs/CONFIG.md).
+	tree := groupedTree()
+	tree.Broken = nil
+	world.tree = tree
+
+	for _, test := range []struct {
+		name   string
+		groups []entryGroup
+		want   []string
+	}{
+		{
+			name: "no groups at all",
+			want: nil,
+		},
+		{
+			name:   "every llama entry filed",
+			groups: []entryGroup{{Name: "daily", Entries: []string{"air", "bark", "dust"}}},
+			want:   []string{"daily"},
+		},
+		{
+			name:   "one entry left out",
+			groups: []entryGroup{{Name: "daily", Entries: []string{"air", "bark"}}},
+			want:   []string{"daily", "ungrouped"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			frame.prefs.Groups = test.groups
+			if got := headings(load(t, frame), 12); !reflect.DeepEqual(got, test.want) {
+				t.Errorf("the pane's headings are %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+// The cursor counts entries, not lines: it never stops on a heading, so eight
+// drawn lines are still four stops and the mark always sits on the row the
+// detail pane is showing (docs/specs/TUI.md).
+func TestTheCursorNeverLandsOnAHeading(t *testing.T) {
+	frame := groupedFrame(t)
+
+	rows := frame.rows()
+	if got, want := rowIDs(rows), "air dust bark typo"; got != want {
+		t.Fatalf("the grouped list holds the rows %q, want %q", got, want)
+	}
+
+	for at, listed := range rows {
+		frame = frame.reselect(at)
+
+		var marked []string
+		for _, line := range list(frame, 12) {
+			if strings.Contains(line, cursorMark) {
+				marked = append(marked, line)
+			}
+		}
+		if len(marked) != 1 {
+			t.Fatalf("row %d is drawn with %d cursors: %q", at, len(marked), marked)
+		}
+		if !strings.Contains(marked[0], listed.id()) {
+			t.Errorf("the cursor sits on %q, want the row for %q", marked[0], listed.id())
+		}
+	}
+
+	// Moving down runs out of list at the last entry rather than at the last
+	// drawn line, headings costing no presses on the way.
+	frame = frame.reselect(0)
+	for range len(rows) + 2 {
+		frame, _ = press(t, frame, typed('j'))
+	}
+	if frame.selected != len(rows)-1 {
+		t.Errorf("holding j left the cursor on row %d, want the last of %d entries", frame.selected, len(rows))
+	}
+}
+
+// A pane too short for the list keeps the cursor's row on it and pays for the
+// headings out of the same capacity: the window is taken over the drawn lines,
+// so the heading a row sits under scrolls with it.
+func TestAShortPaneWindowsOverTheHeadings(t *testing.T) {
+	frame := groupedFrame(t)
+
+	top := list(frame.reselect(0), 3)
+	if want := []string{"daily", "air", "dust"}; !carries(top, want) {
+		t.Errorf("a three-line pane at the top of the list reads %q, want %q", top, want)
+	}
+
+	bottom := list(frame.reselect(3), 3)
+	if want := []string{"ungrouped", "bark", "typo"}; !carries(bottom, want) {
+		t.Errorf("a three-line pane at the end of the list reads %q, want %q", bottom, want)
+	}
+	if !strings.Contains(bottom[len(bottom)-1], cursorMark) {
+		t.Errorf("the pane scrolled the cursor's row off itself: %q", bottom)
+	}
+}
+
+// carries says whether a run of drawn lines holds one expected fact each, in
+// order — the way a list is read down the pane rather than matched exactly.
+func carries(lines, facts []string) bool {
+	if len(lines) != len(facts) {
+		return false
+	}
+	for i, fact := range facts {
+		if !strings.Contains(lines[i], fact) {
+			return false
+		}
+	}
+	return true
 }
 
 // An entry file cria refused stays on the list with the key that failed: one

@@ -31,6 +31,13 @@ const (
 	blueHex   = "#6cb6ff" // the labels of a detail pane, and the mlx backend
 	keyHex    = "#ff8f85" // the keys themselves, in the bar
 
+	// The group headings the entry list is partitioned by: a hue of its own, so
+	// a heading is not read as a row that lost its dot, and muted well under
+	// body text, because the heading is furniture and the entries under it are
+	// what the eye is hunting for. It has no band reading — the cursor never
+	// stops on a heading (docs/specs/TUI.md).
+	headingHex = "#9088b0"
+
 	// The cursor's row sits on a band: the amber accent at a low alpha over the
 	// terminal's own background. Body text and the accents clear AA on it as they
 	// stand; the dim tone does not, so the band carries its own.
@@ -74,6 +81,7 @@ var palette = []swatch{
 	{name: "red", hex: redHex, on: terminalBG, floor: textFloor},
 	{name: "blue", hex: blueHex, on: terminalBG, floor: textFloor},
 	{name: "key", hex: keyHex, on: terminalBG, floor: textFloor},
+	{name: "heading", hex: headingHex, on: terminalBG, floor: textFloor},
 
 	{name: "band ink", hex: inkHex, on: bandHex, floor: textFloor},
 	{name: "band green", hex: greenHex, on: bandHex, floor: textFloor},
@@ -94,6 +102,7 @@ var (
 	red     = lipgloss.Color(redHex)
 	blue    = lipgloss.Color(blueHex)
 	keyRed  = lipgloss.Color(keyHex)
+	heading = lipgloss.Color(headingHex)
 	band    = lipgloss.Color(bandHex)
 	bandDim = lipgloss.Color(bandDimHex)
 )
@@ -105,20 +114,23 @@ var (
 // are structure rather than content, and both are coloured for it — the label
 // says "this is what the value is", the key says "this is what you press".
 // brokenStyle is a row that is listed but cannot be acted on; it borrows the
-// alarm colour because a file cria refused is exactly that.
+// alarm colour because a file cria refused is exactly that. headingStyle names
+// a group of the entry list: structure again, and left unbolded so the name
+// stands over its entries without competing with them for the eye.
 var (
-	frameStyle  = lipgloss.NewStyle().Foreground(border)
-	readyStyle  = lipgloss.NewStyle().Foreground(green)
-	titleStyle  = lipgloss.NewStyle().Foreground(dim).Bold(true)
-	factStyle   = lipgloss.NewStyle().Foreground(ink)
-	labelStyle  = lipgloss.NewStyle().Foreground(blue)
-	keyStyle    = lipgloss.NewStyle().Foreground(keyRed).Bold(true)
-	hintStyle   = lipgloss.NewStyle().Foreground(dim)
-	quietStyle  = lipgloss.NewStyle().Foreground(dim)
-	noticeStyle = lipgloss.NewStyle().Foreground(amber)
-	sizeStyle   = lipgloss.NewStyle().Foreground(amber)
-	alarmStyle  = lipgloss.NewStyle().Foreground(red)
-	brokenStyle = lipgloss.NewStyle().Foreground(red)
+	frameStyle   = lipgloss.NewStyle().Foreground(border)
+	readyStyle   = lipgloss.NewStyle().Foreground(green)
+	titleStyle   = lipgloss.NewStyle().Foreground(dim).Bold(true)
+	factStyle    = lipgloss.NewStyle().Foreground(ink)
+	labelStyle   = lipgloss.NewStyle().Foreground(blue)
+	keyStyle     = lipgloss.NewStyle().Foreground(keyRed).Bold(true)
+	hintStyle    = lipgloss.NewStyle().Foreground(dim)
+	quietStyle   = lipgloss.NewStyle().Foreground(dim)
+	noticeStyle  = lipgloss.NewStyle().Foreground(amber)
+	sizeStyle    = lipgloss.NewStyle().Foreground(amber)
+	alarmStyle   = lipgloss.NewStyle().Foreground(red)
+	brokenStyle  = lipgloss.NewStyle().Foreground(red)
+	headingStyle = lipgloss.NewStyle().Foreground(heading)
 )
 
 // The same styles on the cursor's band. A row under the cursor is drawn on a

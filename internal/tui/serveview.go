@@ -59,8 +59,11 @@ type row struct {
 	broken *config.BrokenEntry
 }
 
-// rows is the list the serve view draws: the active backend's entries, then the
-// entry files cria refused.
+// rows is the list the serve view draws: the active backend's entries in the
+// order their groups put them in, the ungrouped ones after them, then the entry
+// files cria refused. groups.go lays that order out, and it is the only one —
+// the cursor indexes into this sequence and the pane draws it with the headings
+// woven in.
 //
 // One backend at a time, never a mixed list (docs/specs/TUI.md). A refused file
 // appears under both backends, because the key that would sort it under one is
@@ -68,21 +71,7 @@ type row struct {
 // broken file disables only itself and a file nobody can see is one nobody fixes
 // (docs/specs/CONFIG.md).
 func (m model) rows() []row {
-	if m.tree == nil {
-		return nil
-	}
-
-	var rows []row
-	for _, entry := range m.tree.Entries {
-		if entry.Backend != m.prefs.Backend {
-			continue
-		}
-		rows = append(rows, row{entry: entry})
-	}
-	for i := range m.tree.Broken {
-		rows = append(rows, row{broken: &m.tree.Broken[i]})
-	}
-	return rows
+	return entryRows(m.tree, m.prefs.Groups, m.prefs.Backend)
 }
 
 // selectedRow is what the cursor is on, if the list has anything on it.
@@ -145,10 +134,19 @@ func (m model) serveTitle() string {
 	return paneTitle("serve"+titleSeparator) + backendTone(m.prefs.Backend).Render(string(m.prefs.Backend))
 }
 
-// listLines is the entry list, drawn to fill exactly the rows it was given.
+// listLines is the entry list, drawn to fill exactly the rows it was given: the
+// sections in order, each headed by its group's name where groups.go says the
+// heading is drawn at all.
 //
 // The list is a table: the id column is as wide as the widest id on it, so the
 // models line up under each other and a row is read across rather than parsed.
+// The column is the whole pane's rather than each section's — ids that line up
+// down the screen are what makes this one table instead of several.
+//
+// A heading is a drawn line and never a row, so the selection stays an index
+// over entries alone. What that costs is here: the window is taken over the
+// drawn lines, around the line the selected entry landed on, which is what keeps
+// the cursor on screen while the headings above it take capacity of their own.
 func (m model) listLines(inner, capacity int) []string {
 	rows := m.rows()
 	if len(rows) == 0 {
@@ -157,10 +155,38 @@ func (m model) listLines(inner, capacity int) []string {
 
 	column := idColumn(rows)
 	lines := make([]string, 0, len(rows))
-	for i, listed := range rows {
-		lines = append(lines, m.rowLine(listed, i == m.selected, inner, column))
+	cursor, at := 0, 0
+	for _, listed := range entrySections(m.tree, m.prefs.Groups, m.prefs.Backend) {
+		if listed.heading {
+			lines = append(lines, headingLine(listed.name))
+		}
+		for _, drawn := range listed.rows {
+			if at == m.selected {
+				cursor = len(lines)
+			}
+			lines = append(lines, m.rowLine(drawn, at == m.selected, inner, column))
+			at++
+		}
 	}
-	return sizeLines(window(lines, m.selected, capacity), capacity)
+	return sizeLines(window(lines, cursor, capacity), capacity)
+}
+
+// ungroupedHeading names the tail of the list, the entries no group holds. The
+// tail is a section like any other once there are groups above it to be told
+// apart from, so it is named rather than left to run on from the last group
+// (docs/specs/TUI.md).
+const ungroupedHeading = "ungrouped"
+
+// headingLine is one section's name over the rows filed under it: the name, in
+// the heading's own muted tone, and nothing else. No count, no rule — the rows
+// under it are the count, and the heading sits at the pane's left edge while
+// every row is indented past the column the cursor's marker keeps, which is what
+// makes the two read apart without spending a glyph on it.
+func headingLine(name string) string {
+	if name == "" {
+		name = ungroupedHeading
+	}
+	return headingStyle.Render(name)
 }
 
 // idColumn is how wide the id column has to be for every id on the list to fit
