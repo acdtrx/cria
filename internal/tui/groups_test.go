@@ -41,13 +41,15 @@ func groupedTree() *config.Tree {
 
 // groupedPrefs files that tree: a group holding llama entries out of tree order
 // plus an id whose file is gone, a group whose only member is an mlx entry, a
-// group standing empty, and one holding nothing but a dangling id.
+// group standing empty, one holding nothing but a dangling id, and one holding
+// nothing but the refused file.
 func groupedPrefs() []entryGroup {
 	return []entryGroup{
 		{Name: "daily", Entries: []string{"dust", "air", "missing"}},
 		{Name: "mlx only", Entries: []string{"cliff"}},
 		{Name: "emptied", Entries: []string{}},
 		{Name: "ghosts", Entries: []string{"gone"}},
+		{Name: "refused", Entries: []string{"typo"}},
 	}
 }
 
@@ -105,14 +107,15 @@ func TestSectionsLayOutTheEntryList(t *testing.T) {
 			groups:  groupedPrefs(),
 			backend: config.BackendLlama,
 			// daily was filed dust-then-air and holds an id whose file is gone;
-			// "mlx only" has a member, just not one this backend can show.
-			want: []string{"daily+ [air dust]", "mlx only- []", "emptied+ []", "ghosts+ []", "ungrouped+ [bark typo]"},
+			// "mlx only" and "refused" have members, just none this section can
+			// show.
+			want: []string{"daily+ [air dust]", "mlx only- []", "emptied+ []", "ghosts+ []", "refused- []", "ungrouped+ [bark typo]"},
 		},
 		{
 			name:    "the same headings over the other backend's members",
 			groups:  groupedPrefs(),
 			backend: config.BackendMLX,
-			want:    []string{"daily- []", "mlx only+ [cliff]", "emptied+ []", "ghosts+ []", "ungrouped+ [echo typo]"},
+			want:    []string{"daily- []", "mlx only+ [cliff]", "emptied+ []", "ghosts+ []", "refused- []", "ungrouped+ [echo typo]"},
 		},
 	}
 
@@ -123,6 +126,39 @@ func TestSectionsLayOutTheEntryList(t *testing.T) {
 				t.Errorf("the list lays out as\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(test.want, "\n"))
 			}
 		})
+	}
+}
+
+// A refused entry file is still a file, so the group it is filed in has a
+// member — one it cannot show, since refused files render in the ungrouped tail.
+// The heading hides like any other group with nothing under it here; the empty
+// group's standing heading is not for this.
+func TestAGroupOfRefusedFilesHidesItsHeading(t *testing.T) {
+	sections := entrySections(groupedTree(), []entryGroup{{Name: "refused", Entries: []string{"typo"}}}, config.BackendLlama)
+	if got, want := layout(sections), []string{"refused- []", "ungrouped+ [air bark dust typo]"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("the list lays out as\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// The ungrouped heading needs something under it: it separates the tail from the
+// groups above, and there is nothing to separate when the tail is empty.
+func TestTheUngroupedHeadingNeedsSomethingUnderIt(t *testing.T) {
+	tree := &config.Tree{
+		Root: "/home/u/.config/cria",
+		Entries: []config.Entry{
+			{ID: "air", Path: "/home/u/.config/cria/models/air.toml", Backend: config.BackendLlama, Repo: "org/air", Port: 8080, Host: "0.0.0.0", Name: "air"},
+			{ID: "bark", Path: "/home/u/.config/cria/models/bark.toml", Backend: config.BackendLlama, Repo: "org/bark", Port: 8080, Host: "0.0.0.0", Name: "bark"},
+		},
+	}
+
+	filed := []entryGroup{{Name: "daily", Entries: []string{"air", "bark"}}}
+	if got, want := layout(entrySections(tree, filed, config.BackendLlama)), []string{"daily+ [air bark]", "ungrouped- []"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("a list with nothing ungrouped lays out as %q, want %q", got, want)
+	}
+
+	half := []entryGroup{{Name: "daily", Entries: []string{"air"}}}
+	if got, want := layout(entrySections(tree, half, config.BackendLlama)), []string{"daily+ [air]", "ungrouped+ [bark]"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("a list with an ungrouped entry lays out as %q, want %q", got, want)
 	}
 }
 
@@ -188,7 +224,19 @@ func TestPruneDropsGoneIdsAndKeepsEveryGroup(t *testing.T) {
 		{Name: "mlx only", Entries: []string{"cliff"}},
 		{Name: "emptied", Entries: []string{}},
 		{Name: "ghosts", Entries: []string{}},
+		{Name: "refused", Entries: []string{"typo"}},
 	}
+	if !reflect.DeepEqual(pruned, want) {
+		t.Errorf("the pruned groups are %+v, want %+v", pruned, want)
+	}
+}
+
+// A file cria refused is a file that exists: the entry it names keeps its group
+// through the write, so fixing the typo puts it back under its own heading
+// instead of at the bottom of the ungrouped tail.
+func TestPruneKeepsAnEntryWhoseFileIsRefused(t *testing.T) {
+	pruned := pruneGroups([]entryGroup{{Name: "daily", Entries: []string{"typo", "gone"}}}, groupedTree())
+	want := []entryGroup{{Name: "daily", Entries: []string{"typo"}}}
 	if !reflect.DeepEqual(pruned, want) {
 		t.Errorf("the pruned groups are %+v, want %+v", pruned, want)
 	}

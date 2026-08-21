@@ -62,7 +62,10 @@ save time. No rendering changes yet.
 - Decided while implementing: `pruneGroups` against a nil tree prunes nothing —
   a tree cria has not read yet knows no id, so pruning against it would empty
   every group on the first write.
-- Open for step 5/6: "exists in the tree" is `tree.Entries` only, so an id whose
-  file is *currently refused* counts as dangling and is pruned — an entry loses
-  its group while its file has a typo. Widening it to `tree.Broken` too is a
-  one-line change if that is not wanted.
+- Two edge cases settled with the user afterwards and folded in (both in
+  `docs/specs/TUI.md`): a refused entry file counts as existing, so a typo never
+  unfiles an entry — `treeIDs` covers `Entries` and `Broken`, and a group whose
+  only members are refused files has members with nothing to show, so its
+  heading hides rather than standing as an empty group's; and the ungrouped
+  heading needs rows under it, since a heading over an empty tail separates
+  nothing.
