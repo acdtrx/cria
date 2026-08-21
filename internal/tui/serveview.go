@@ -172,7 +172,7 @@ func (m model) listLines(inner, capacity int) []string {
 			if heading.on(target) {
 				cursor = len(lines)
 			}
-			lines = append(lines, headingLine(listed.name, heading.on(target), inner))
+			lines = append(lines, headingLine(listed.name, heading.on(target), heading.held, inner))
 		}
 		for _, drawn := range listed.rows {
 			if at == m.selected && !heading.up {
@@ -186,7 +186,7 @@ func (m model) listLines(inner, capacity int) []string {
 		if heading.on(moveToNewGroup) {
 			cursor = len(lines)
 		}
-		lines = append(lines, headingLine(newGroupLabel, heading.on(moveToNewGroup), inner))
+		lines = append(lines, headingLine(newGroupLabel, heading.on(moveToNewGroup), heading.held, inner))
 	}
 	return sizeLines(window(lines, cursor, capacity), capacity)
 }
@@ -205,15 +205,17 @@ const ungroupedHeading = "ungrouped"
 //
 // The heading a mode is standing on is drawn on the cursor's own band, spanning
 // the pane the way a picked row does — and without the marker, because a heading
-// pointed at is still not a row the list stops on (grouppick.go).
-func headingLine(name string, picked bool, inner int) string {
+// pointed at is still not a row the list stops on (grouppick.go). A heading the
+// manage mode holds in the air rides the carry band instead, teal on teal, so
+// "in your hand" is never read as "selected" (styles.go).
+func headingLine(name string, picked, held bool, inner int) string {
 	if name == "" {
 		name = ungroupedHeading
 	}
 	if !picked {
 		return headingStyle.Render(name)
 	}
-	paint := paintFor(true)
+	paint := rowPaint{cursor: true, held: held}
 	return paint.fill(paint.heading().Render(name), inner)
 }
 

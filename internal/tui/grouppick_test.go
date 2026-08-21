@@ -47,10 +47,11 @@ func assertNothingWritten(t *testing.T, frame model) {
 	}
 }
 
-// pickedHeading is the heading the armed move's cursor is standing on, as the
-// pane draws it: the one heading line on the band. The entry the question is
-// about keeps its own band down in the rows, so the two are told apart the way
-// the eye does it — a row is indented past the marker column, a heading is not.
+// pickedHeading is the heading the armed mode's cursor is standing on, as the
+// pane draws it: the one heading line on a band — the cursor's, or the carry
+// band under a group in the air. The entry the question is about keeps its own
+// band down in the rows, so the two are told apart the way the eye does it — a
+// row is indented past the marker column, a heading is not.
 func pickedHeading(t *testing.T, frame model) string {
 	t.Helper()
 
@@ -60,7 +61,7 @@ func pickedHeading(t *testing.T, frame model) string {
 		if text == "" || strings.HasPrefix(text, nothingHere) || strings.HasPrefix(text, cursorMark) {
 			continue
 		}
-		if strings.Contains(line, opener(bandStyle)) {
+		if strings.Contains(line, opener(bandStyle)) || strings.Contains(line, opener(carryBandStyle)) {
 			picked = append(picked, text)
 		}
 	}

@@ -111,7 +111,10 @@ keybinds get detailed as they are built.
     dropped by the same write, not ungrouped). Nothing is destroyed by a
     disband, so nothing confirms it. Every change is written as it lands, so
     leaving the mode is a way out and never a discard; the mode ends when its
-    last group is disbanded, leaving the notice behind it. Rejected: cursor
+    last group is disbanded, leaving the notice behind it. A held group rides
+    a band of its own hue — teal, meaning exactly "in your hand" and nothing
+    else in cria — so held is never read as selected (settled 2026-08-21,
+    user-chosen over a mauve tint from the recolor proposal). Rejected: cursor
     landing on headings with selection keys changing meaning there — it slows
     the main picking gesture for a rare operation.
   - **Names are typed on the notice line** (`new group: qwen-tests▌`) — the
@@ -125,7 +128,12 @@ keybinds get detailed as they are built.
   by darkness; selection is a background band whose foreground pairs pass AA on
   the band itself; color marks meaning — phase, backend, keys, field labels —
   not decoration. The palette lives in one table that the styles are tested to
-  draw from exclusively.
+  draw from exclusively. The values are **Catppuccin Mocha** (settled
+  2026-08-21, chosen from a side-by-side proposal; Macchiato rejected as
+  near-identical in the accents, and cria paints no background where the
+  flavors actually differ): accents on the roles by hue family, Surface0 as
+  the selection band, Teal as the carry band — every pair still answering to
+  the AA test on the black ground.
 
 ## Open
 

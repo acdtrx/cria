@@ -20,33 +20,44 @@ import (
 // than judged: styles_test.go computes the WCAG relative-luminance ratio of
 // every colour below against the background it is read on and refuses anything
 // under AA (4.5:1), the frame excepted as chrome at 3:1.
+// The values are Catppuccin Mocha (docs/specs/TUI.md): the accents and surfaces
+// of that palette on the terminal's own dark ground — cria paints no background
+// of its own, so the flavor shows only in what is drawn.
 const (
-	inkHex    = "#c6cdd5" // the facts themselves
-	dimHex    = "#7d8590" // context: field values that are not the point, hints, scope labels
-	borderHex = "#586170" // the frame: a rule, not a word
-	greenHex  = "#4ac26b" // running: the server answers
-	yellowHex = "#d9a03d" // downloading: something is happening, nothing is wrong
-	amberHex  = "#e0a458" // starting, notices, sizes, and the llama backend
-	redHex    = "#f47067" // unhealthy, exited, and anything cria could not do
-	blueHex   = "#6cb6ff" // the labels of a detail pane, and the mlx backend
-	keyHex    = "#ff8f85" // the keys themselves, in the bar
+	inkHex    = "#cdd6f4" // the facts themselves (Text)
+	dimHex    = "#7f849c" // context: field values that are not the point, hints, scope labels (Overlay1)
+	borderHex = "#585b70" // the frame: a rule, not a word (Surface2)
+	greenHex  = "#a6e3a1" // running: the server answers (Green)
+	yellowHex = "#f9e2af" // downloading: something is happening, nothing is wrong (Yellow)
+	amberHex  = "#fab387" // starting, notices, sizes, and the llama backend (Peach)
+	redHex    = "#f38ba8" // unhealthy, exited, and anything cria could not do (Red)
+	blueHex   = "#89b4fa" // the labels of a detail pane, and the mlx backend (Blue)
+	keyHex    = "#eba0ac" // the keys themselves, in the bar (Maroon)
 
 	// The group headings the entry list is partitioned by: a hue of its own, so
 	// a heading is not read as a row that lost its dot, and muted well under
 	// body text, because the heading is furniture and the entries under it are
-	// what the eye is hunting for.
-	headingHex = "#9088b0"
+	// what the eye is hunting for. (Overlay2)
+	headingHex = "#9399b2"
 
-	// The cursor's row sits on a band: the amber accent at a low alpha over the
-	// terminal's own background. Body text and the accents clear AA on it as they
-	// stand; the dim tone and the heading tone do not, so the band carries its
-	// own of each — the same colour lit, never a different one. A heading is on
-	// the band while a mode is standing on the headings themselves — filing an
+	// The cursor's row sits on a band: a Catppuccin surface over the terminal's
+	// own background. Body text and the accents clear AA on it as they stand;
+	// the dim tone and the heading tone do not, so the band carries its own of
+	// each — the same colour lit, never a different one. A heading is on the
+	// band while a mode is standing on the headings themselves — filing an
 	// entry under one, or rearranging them (grouppick.go, managegroups.go); the
 	// list's own cursor never stops on one (docs/specs/TUI.md).
-	bandHex        = "#2d2720"
-	bandDimHex     = "#939ca6"
-	bandHeadingHex = "#9b93bb"
+	bandHex        = "#313244" // Surface0
+	bandDimHex     = "#a6adc8" // dim, lit (Subtext0)
+	bandHeadingHex = "#b4befe" // heading, lit (Lavender)
+
+	// The carry band: a group picked up in the manage mode rides a band of its
+	// own hue, so "in your hand" cannot be read as "selected". Teal appears
+	// nowhere else in cria and means exactly this; the carried heading is drawn
+	// in teal too — the one deliberate exception to the-same-colour-lit — so
+	// the whole line changes together (docs/specs/TUI.md).
+	carryHex        = "#1f3d38" // Teal over the terminal's ground
+	carryHeadingHex = "#94e2d5" // Teal
 )
 
 // terminalBG is the background cria is read against: a dark terminal, taken at
@@ -94,6 +105,8 @@ var palette = []swatch{
 	{name: "band amber", hex: amberHex, on: bandHex, floor: textFloor},
 	{name: "band red", hex: redHex, on: bandHex, floor: textFloor},
 	{name: "band heading", hex: bandHeadingHex, on: bandHex, floor: textFloor},
+
+	{name: "carry heading", hex: carryHeadingHex, on: carryHex, floor: textFloor},
 }
 
 // The palette as lipgloss reads it.
@@ -111,6 +124,8 @@ var (
 	band        = lipgloss.Color(bandHex)
 	bandDim     = lipgloss.Color(bandDimHex)
 	bandHeading = lipgloss.Color(bandHeadingHex)
+	carryBand   = lipgloss.Color(carryHex)
+	carryTeal   = lipgloss.Color(carryHeadingHex)
 )
 
 // The styles every screen draws with. One file holds them so a change of palette
@@ -154,10 +169,21 @@ var (
 	bandHeadingStyle = lipgloss.NewStyle().Foreground(bandHeading).Background(band)
 )
 
+// The carried group's band: only a heading ever rides it, so it needs no other
+// pairs (managegroups.go).
+var (
+	carryBandStyle    = lipgloss.NewStyle().Background(carryBand)
+	carryHeadingStyle = lipgloss.NewStyle().Foreground(carryTeal).Background(carryBand)
+)
+
 // rowPaint is how one row of a list is drawn: in the palette as it stands, or on
 // the cursor's band. Both lists ask for it the same way, so the highlight is one
 // decision rather than one per view.
-type rowPaint struct{ cursor bool }
+//
+// held is the carry band under a group picked up in the manage mode. Only
+// heading lines are ever painted held, so only the paths a heading line takes —
+// heading and pad — read it (managegroups.go).
+type rowPaint struct{ cursor, held bool }
 
 // paintFor is the paint a row is drawn with.
 func paintFor(cursor bool) rowPaint { return rowPaint{cursor: cursor} }
@@ -204,13 +230,17 @@ func (p rowPaint) notice() lipgloss.Style {
 	return noticeStyle
 }
 
-// heading is a section's name over the rows filed under it, and its band reading
-// while a mode's cursor stands on that heading (grouppick.go, managegroups.go).
+// heading is a section's name over the rows filed under it, its band reading
+// while a mode's cursor stands on that heading (grouppick.go), and its carry
+// reading while the manage mode holds that heading in the air.
 func (p rowPaint) heading() lipgloss.Style {
-	if p.cursor {
-		return bandHeadingStyle
+	switch {
+	case !p.cursor:
+		return headingStyle
+	case p.held:
+		return carryHeadingStyle
 	}
-	return headingStyle
+	return bandHeadingStyle
 }
 
 // broken is a row cria cannot act on.
@@ -269,8 +299,11 @@ func (p rowPaint) cell(text string, style lipgloss.Style, width int) string {
 // pad is plain space painted like the row, so the band runs unbroken across the
 // separators and the padding rather than showing the terminal through them.
 func (p rowPaint) pad(spaces string) string {
-	if !p.cursor {
+	switch {
+	case !p.cursor:
 		return spaces
+	case p.held:
+		return carryBandStyle.Render(spaces)
 	}
 	return bandStyle.Render(spaces)
 }

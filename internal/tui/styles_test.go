@@ -135,6 +135,8 @@ func TestStylesDrawFromThePalette(t *testing.T) {
 		"band alarm":   bandAlarmStyle,
 		"band heading": bandHeadingStyle,
 
+		"carry heading": carryHeadingStyle,
+
 		"llama": backendTone("llama"),
 		"mlx":   backendTone("mlx"),
 	} {

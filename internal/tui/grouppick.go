@@ -195,6 +195,7 @@ type headingCursor struct {
 	picked    moveTarget
 	ungrouped bool // the tail is one of the answers, so its heading is drawn
 	newGroup  bool // the group that does not exist yet closes the list
+	held      bool // the picked heading is in the air, so it rides the carry band
 }
 
 // headingCursor reads that off the frame.
@@ -203,7 +204,7 @@ func (m model) headingCursor() headingCursor {
 		// Managing stands on the groups and only the groups: the tail is not
 		// one of them, and a group is created by filing an entry into it rather
 		// than from here (managegroups.go).
-		return headingCursor{up: true, picked: moveTarget(at)}
+		return headingCursor{up: true, picked: moveTarget(at), held: m.manage.carrying}
 	}
 
 	picked, filing := m.pickedTarget()

@@ -503,6 +503,31 @@ func TestEscLeavesTheModeWithTheLastWriteKept(t *testing.T) {
 	}
 }
 
+// A group in the air rides the carry band — its own hue, so "in your hand" is
+// never read as "selected". The heading cursor is what says so to the pane:
+// held while carrying, not held while walking, never held under the move.
+func TestACarriedGroupRidesTheCarryBand(t *testing.T) {
+	frame := managingFrame(t)
+	if frame.headingCursor().held {
+		t.Error("the heading cursor reads held while the mode is only walking")
+	}
+
+	frame, _ = press(t, frame, enter)
+	if !frame.headingCursor().held {
+		t.Error("the heading cursor does not read held with a group in the air")
+	}
+	banded := headingLine("daily", true, true, 20)
+	walking := headingLine("daily", true, false, 20)
+	if banded == walking && carryHex != bandHex {
+		t.Error("a held heading draws exactly as a picked one; the carry band is not being painted")
+	}
+
+	moving, _ := press(t, groupedFrame(t), typed('m'))
+	if moving.headingCursor().held {
+		t.Error("the heading cursor reads held under the move pick")
+	}
+}
+
 // A group in the air answers only to the carry: the bar says so, and the keys
 // that change what a group is — rename, disband — wait until it is set down.
 func TestACarriedGroupHoldsTheKeys(t *testing.T) {
