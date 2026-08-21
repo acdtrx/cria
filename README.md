@@ -28,6 +28,8 @@ curl -fsSL https://raw.githubusercontent.com/acdtrx/cria/main/install.sh | sh
 Or grab a tarball from the [latest release](https://github.com/acdtrx/cria/releases/latest),
 or build from source (Go, no cgo): `git clone … && cd cria && go build -o ~/.local/bin/cria .`
 
+Once installed, `cria update` fetches and swaps in the latest release.
+
 You bring the servers — cria orchestrates and never installs:
 
 - [`llama-server`](https://github.com/ggml-org/llama.cpp) — build b8498 or newer

@@ -43,6 +43,15 @@ its subsystem.
   installs (principle 1). The value is validated against the machine's memory
   (loud refusal at ≥ RAM or off macOS); the file carries its own uninstall
   steps in a comment.
+- `cria update` (settled 2026-08-21) — replaces the running binary with the
+  latest GitHub release: the embedded version against the newest release tag,
+  the platform asset verified against the release's `checksums.txt`, then an
+  atomic rename over the executable's resolved path. Equality is the whole
+  comparison — a release binary at the latest tag answers "already the latest"
+  on exit 0 (a true answer), and a dev build matches no tag, so a dev machine
+  updates to the latest release too (deliberate: it is how a hand-deployed
+  host rejoins the release train). Running servers are untouched — they hold
+  the old inode; the new binary applies from the next invocation.
 
 Nothing else: no cache operations from the CLI (`docs/BACKLOG.md`).
 

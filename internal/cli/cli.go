@@ -20,6 +20,7 @@ import (
 
 	"cria/internal/config"
 	"cria/internal/procs"
+	"cria/internal/selfupdate"
 	"cria/internal/serve"
 	"cria/internal/tools"
 )
@@ -35,8 +36,9 @@ const (
 
 // subcommands is the whole v1 surface (docs/specs/CLI.md), in the order the help
 // page presents it: the server lifecycle, then the config tree, then the two
-// generators. Bare `cria` opens the TUI instead of naming a subcommand.
-var subcommands = []string{"start", "stop", "status", "bench", "list", "new", "edit", "docs", "wired-limit"}
+// generators, then the binary's own upkeep. Bare `cria` opens the TUI instead
+// of naming a subcommand.
+var subcommands = []string{"start", "stop", "status", "bench", "list", "new", "edit", "docs", "wired-limit", "update"}
 
 // The flags the surface has, all booleans (docs/specs/CLI.md). `cria new` takes
 // two because they are peers: the backend it scaffolds can be named either way,
@@ -91,6 +93,14 @@ type servers interface {
 	Bench(record serve.Record, spec serve.BenchSpec, report func(serve.BenchStep)) serve.BenchResult
 }
 
+// updater is the part of selfupdate the update subcommand drives — named on the
+// consumer's side for the same reason servers is: the component tests exercise
+// the whole subcommand with no GitHub and no binary to replace.
+type updater interface {
+	LatestVersion() (string, error)
+	Install(version string) (string, error)
+}
+
 // app is one invocation: its two output streams and the subsystems it drives.
 type app struct {
 	out io.Writer
@@ -100,6 +110,7 @@ type app struct {
 	tools    func(config.Settings) tools.Report // the host's managed tools
 	servers  func() (servers, error)            // the state directory and the process table
 	memoryMB func() (int, error)                // the machine's memory; refuses off macOS
+	updater  func() updater                     // GitHub's releases and the binary on disk
 
 	// tui is the program bare `cria` opens. It arrives as a function rather
 	// than an import so this package stays a command-line router: routing to
@@ -131,6 +142,7 @@ func newApp(tui func() error) *app {
 		tools:          tools.Check,
 		servers:        newManager,
 		memoryMB:       physicalMemoryMB,
+		updater:        func() updater { return selfupdate.New() },
 		tui:            tui,
 		poll:           waitPoll,
 		startWindow:    waitStartWindow,
@@ -171,6 +183,8 @@ func (a *app) run(args []string, version string) int {
 		return exitOK
 	case "wired-limit":
 		return a.wiredLimit(args[1:])
+	case "update":
+		return a.update(args[1:], version)
 	default:
 		return a.usage("unknown subcommand %q; valid subcommands are: %s; `cria --help` says what each one does",
 			args[0], strings.Join(subcommands, ", "))

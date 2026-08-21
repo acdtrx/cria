@@ -28,6 +28,7 @@ SUBCOMMANDS
   edit <id>                 open an entry's file in $VISUAL, else $EDITOR
   docs                      print the config schema and a complete example of every file
   wired-limit <MB>          generate the launchd plist that pins iogpu.wired_limit_mb
+  update                    replace this binary with the latest GitHub release
   help                      this page
 
 FLAGS
