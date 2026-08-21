@@ -68,9 +68,37 @@ keybinds get detailed as they are built.
   observation so the box converges in milliseconds rather than at the next
   tick. Status lives in the box, including the status of what cria is doing
   right now.
-- **UI preferences are state, not config**: active backend and last-started entry
-  live in a small file under `~/.local/state/cria/`. The config tree stays
-  human-owned; cria never records preferences there.
+- **UI preferences are state, not config**: active backend, last-started entry
+  and entry groups live in a small file under `~/.local/state/cria/`. The config
+  tree stays human-owned; cria never records preferences there.
+- **Entry groups** (settled 2026-08-21, user-designed): named, ordered groups
+  partition the entry list under muted headings — organization for a list that
+  grows test variations faster than it sheds them. Contracts:
+  - Membership and group order are UI preferences (`ui.json`), never the config
+    tree and never the entry files. An entry belongs to at most one group. Ids
+    that no longer exist are skipped on render and pruned on the next prefs
+    write. With no groups defined the list renders exactly as before.
+  - Groups span backends: each backend's list shows only its own members under
+    a heading; a heading with no members in the active backend is hidden,
+    unless the group is entirely empty (so a just-emptied group stays findable).
+    Ungrouped entries trail under a muted `ungrouped` heading (shown only when
+    groups exist); broken entry files stay last, ungroupable.
+  - The cursor never stops on headings — the entry list stays the picker, and
+    within a group entries keep the tree's alphabetical order; only groups are
+    manually ordered.
+  - **Moving is the front door.** A selection key arms a pick over the group
+    headings themselves (all groups shown while armed, plus `ungrouped` for a
+    grouped entry and `new group…`); ⏎ files the entry, esc cancels. Groups are
+    created only through `new group…` — a group exists because an entry needed
+    it, so there is no separate create key.
+  - **Group management is its own small mode** over the headings: reorder,
+    rename, disband (members return to ungrouped; the notice line reports the
+    outcome). Rejected: cursor landing on headings with selection keys changing
+    meaning there — it slows the main picking gesture for a rare operation.
+  - **Names are typed on the notice line** (`new group: qwen-tests▌`) — the
+    reserved row keeps the list visible and costs no layout shift; ⏎ confirms,
+    esc cancels; empty and duplicate names are refused there. Rejected: a
+    confirm-style panel — heavier than a one-line name needs.
 - **Every text color clears WCAG AA (≥4.5:1) against a dark terminal ground,
   enforced by a palette test** (settled 2026-08-18, after first real use found
   the dim tones illegible): muted tones are muted by hue and saturation, never
