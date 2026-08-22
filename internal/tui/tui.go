@@ -24,6 +24,7 @@ import (
 
 	"cria/internal/config"
 	"cria/internal/hubcache"
+	"cria/internal/picks"
 	"cria/internal/procs"
 	"cria/internal/serve"
 	"cria/internal/tools"
@@ -136,6 +137,13 @@ type model struct {
 	prefs prefs
 	view  view
 
+	// The option picked on each of an entry's choices, as the store held them
+	// when cria opened (internal/picks). It is read once, beside the
+	// preferences, and written back by the picker: this frame is the only thing
+	// that writes the file, so a re-read every tick would only re-read what the
+	// frame already knows (docs/specs/CONFIG.md — picks are state, not config).
+	stored picks.Picks
+
 	listing serve.StatusListing
 	failure error // the last refresh that failed, held until one succeeds
 	alert   alert
@@ -196,12 +204,22 @@ func Run() error {
 		return err
 	}
 
-	// Preferences that could not be read do not stop the program — they are
-	// cria's own memory, not its instructions. The frame starts on the defaults
-	// and carries the reason on screen (loadPrefs).
+	// Neither of cria's two memory files stops the program when it cannot be
+	// read — they are cria's own memory, not its instructions. The frame starts
+	// on the defaults and carries the reason on screen (loadPrefs, picks.Load).
+	//
+	// The line under the box holds one message, so the preferences go first:
+	// they decide what the frame draws at all, where a picks store cria could
+	// not read costs only the picks and every entry still starts on its config
+	// defaults.
 	saved, prefsErr := loadPrefs(root)
+	stored, picksErr := picks.Load(root)
+	memoryErr := prefsErr
+	if memoryErr == nil {
+		memoryErr = picksErr
+	}
 
-	program := tea.NewProgram(newModel(machine(root), root, saved, prefsErr))
+	program := tea.NewProgram(newModel(machine(root), root, saved, stored, memoryErr))
 	_, err = program.Run()
 	return err
 }
@@ -245,19 +263,22 @@ func readCache() (*hubcache.Cache, error) {
 	return hubcache.Read(root)
 }
 
-// newModel builds the frame around the host it drives and its preferences.
-func newModel(driven host, root string, saved prefs, prefsErr error) model {
+// newModel builds the frame around the host it drives, its preferences and the
+// picks it launches entries under. memoryErr is whichever of the two files cria
+// could not read, already reduced to the one the line can carry (Run).
+func newModel(driven host, root string, saved prefs, stored picks.Picks, memoryErr error) model {
 	frame := model{
 		host:     driven,
 		root:     root,
 		prefs:    saved,
+		stored:   stored,
 		width:    defaultWidth,
 		keys:     newKeymap(),
 		bar:      newProgressBar(),
 		interval: refreshInterval,
 	}
-	if prefsErr != nil {
-		frame.alert = alert{text: prefsErr.Error(), bad: true}
+	if memoryErr != nil {
+		frame.alert = alert{text: memoryErr.Error(), bad: true}
 	}
 	frame.keys.retarget(targetOf(frame.listing, frame.prefs))
 	return frame.reselect(0)

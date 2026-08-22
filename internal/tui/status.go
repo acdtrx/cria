@@ -134,6 +134,12 @@ type cell struct {
 	style lipgloss.Style
 }
 
+// The combination a server is running sits against the model it varies: which
+// quant, which layout, which context — the record's own picks, spelled the way
+// `cria start` takes them (docs/specs/TUI.md). A flat entry picked nothing, so
+// its cell is empty and the column collapses out of a box where no server has
+// picks (line).
+//
 // statusRow is a server's place in the box. The phase word carries the colour,
 // so every other fact is spelled in the same weight whatever the phase — a
 // probe that says "connection refused" is normal during a start and alarming
@@ -161,6 +167,7 @@ func statusRow(status serve.Status, verb string, paint rowPaint) serverRow {
 				phase,
 				{string(status.Backend), paint.alarm()},
 				{format.HubReference(status.Repo, status.Quant), paint.alarm()},
+				{format.Picks(status.Selection), paint.alarm()},
 			},
 			tail: paint.alarm().Render(fmt.Sprintf("pid %d is gone", status.PID) +
 				factSeparator + "launched " + status.LaunchedAt.Format(time.DateTime)),
@@ -172,6 +179,7 @@ func statusRow(status serve.Status, verb string, paint rowPaint) serverRow {
 		phase,
 		{string(status.Backend), paint.quiet()},
 		{format.HubReference(status.Repo, status.Quant), paint.fact()},
+		{format.Picks(status.Selection), paint.fact()},
 		{fmt.Sprintf("pid %d", status.PID), paint.quiet()},
 		{fmt.Sprintf(":%d", status.Port), paint.quiet()},
 		{"up " + status.Uptime.Round(time.Second).String(), paint.quiet()},
@@ -221,13 +229,15 @@ func columnWidths(rows []serverRow) []int {
 }
 
 // line draws one row on the grid: each cell padded to its column, the tail as
-// it is. Empty trailing columns collapse rather than leaving a gap before the
-// tail. The row's own paint carries the separators and the padding, so a row on
-// the band reads as one lit line rather than as lit words.
+// it is. A column no row has anything for collapses rather than leaving a gap —
+// the cost `ps` did not answer for, the picks a box of flat servers has none of
+// — and one another row does fill is padded here, so the grid holds. The row's
+// own paint carries the separators and the padding, so a row on the band reads
+// as one lit line rather than as lit words.
 func (r serverRow) line(widths []int) string {
 	var facts []string
 	for i, c := range r.cells {
-		if c.text == "" && i >= len(r.cells)-2 && widths[i] == 0 {
+		if c.text == "" && widths[i] == 0 {
 			continue
 		}
 		facts = append(facts, r.paint.cell(c.text, c.style, widths[i]))

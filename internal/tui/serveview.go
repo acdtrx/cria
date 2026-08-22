@@ -339,12 +339,81 @@ func (m model) entryDetail(entry config.Entry, inner int) []string {
 	}
 	add("cached", m.cachedWord(entry), factStyle)
 
-	command, refused := m.composedCommand(entry)
+	// One reading of the picks feeds both the axes and the command line under
+	// them: what the pane marks as current and what it says a start would run
+	// cannot be two different launches (docs/specs/TUI.md — picking and seeing
+	// the command are one loop).
+	selection := m.picks(entry)
+	lines = append(lines, choiceRows(entry, selection, inner)...)
+
+	command, refused := m.composedCommand(entry, selection)
 	style := factStyle
 	if refused {
 		style = alarmStyle
 	}
 	add("command", command, style)
+	return lines
+}
+
+// pickedMark is what marks the option a start would compose with, the same star
+// `cria list` marks it with: one vocabulary across the surface
+// (docs/specs/CLI.md), and the answer on a terminal drawing no colour.
+const pickedMark = "*"
+
+// choiceRows is an entry's axes as the pane reads them: one block under a single
+// label, one line per choice in the file's order, that choice's options along it
+// in the file's order — `quant: q4* q6 q8`, the current pick starred and drawn
+// as a fact while the alternatives stay context. A flat entry has no axes and
+// gets no block.
+//
+// The choice names live in the value rather than in the label column: they are
+// the author's own words, of no fixed length, and the column truncates at nine
+// cells. Under one label the block reads the way args does — several lines of
+// one thing (entryDetail).
+//
+// A selection naming nothing for an axis leaves that axis unmarked rather than
+// marking it wrongly; the command line under the block is where the refusal
+// that left it so is spelled out (composedCommand).
+func choiceRows(entry config.Entry, selection config.Selection, inner int) []string {
+	if len(entry.Choices) == 0 {
+		return nil
+	}
+
+	room := max(inner-detailLabelWidth, 1)
+	var values []string
+	for _, choice := range entry.Choices {
+		pieces := []string{quietStyle.Render(choice.Name + ":")}
+		for _, option := range choice.Options {
+			if option.Name == selection[choice.Name] {
+				pieces = append(pieces, factStyle.Render(option.Name+pickedMark))
+				continue
+			}
+			pieces = append(pieces, quietStyle.Render(option.Name))
+		}
+		values = append(values, laidOut(pieces, room)...)
+	}
+	return detailBlock("choices", values)
+}
+
+// laidOut runs already-drawn pieces across as many lines of at most width cells
+// as they need. Unlike wrap it never cuts one: each piece carries its own
+// colour, and splitting one mid-escape would spill the sequence onto the screen.
+func laidOut(pieces []string, width int) []string {
+	var lines []string
+	line := ""
+	for _, piece := range pieces {
+		switch {
+		case line == "":
+			line = piece
+		case lipgloss.Width(line)+1+lipgloss.Width(piece) <= width:
+			line += " " + piece
+		default:
+			lines, line = append(lines, line), piece
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
 	return lines
 }
 
@@ -359,16 +428,18 @@ func (m model) cachedWord(entry config.Entry) string {
 	return "no — starting it downloads first"
 }
 
-// composedCommand is the argv a start would run, or why cria cannot spell it.
-// A missing or unfit tool is the honest answer: the program cria would exec is
-// half of that line, and the tool check is what names it (docs/specs/TOOLS.md).
-func (m model) composedCommand(entry config.Entry) (string, bool) {
+// composedCommand is the argv a start would run under one selection, or why
+// cria cannot spell it. A missing or unfit tool is the honest answer: the
+// program cria would exec is half of that line, and the tool check is what
+// names it (docs/specs/TOOLS.md).
+//
+// The selection is handed in rather than read here, so the pane's axes and its
+// command line are one launch (entryDetail).
+func (m model) composedCommand(entry config.Entry, selection config.Selection) (string, bool) {
 	if !m.reported {
 		return "reading the host's tools…", false
 	}
-	// The picks a start off this frame would use, so the line shown is the line
-	// spawned rather than one composed from another combination.
-	launch, err := config.Resolve(entry, m.picks(entry))
+	launch, err := config.Resolve(entry, selection)
 	if err != nil {
 		return err.Error(), true
 	}
@@ -405,15 +476,26 @@ func brokenDetail(broken config.BrokenEntry, inner int) []string {
 // detailField is one label and its value, wrapped into the label's indent so a
 // long path or a whole command line is read rather than truncated.
 func detailField(label, value string, inner int, style lipgloss.Style) []string {
-	room := max(inner-detailLabelWidth, 1)
+	chunks := wrap(value, max(inner-detailLabelWidth, 1))
+	drawn := make([]string, len(chunks))
+	for i, chunk := range chunks {
+		drawn[i] = style.Render(chunk)
+	}
+	return detailBlock(label, drawn)
+}
 
+// detailBlock is one label against value lines that are already drawn: the
+// label in the first line's column, the rest indented under it. Fields reach it
+// through detailField, which wraps a plain value into one style; the axes reach
+// it with lines of their own, each carrying more than one (choiceRows).
+func detailBlock(label string, values []string) []string {
 	var lines []string
-	for i, chunk := range wrap(value, room) {
+	for i, value := range values {
 		head := labelStyle.Render(fit(label, detailLabelWidth))
 		if i > 0 {
 			head = strings.Repeat(" ", detailLabelWidth)
 		}
-		lines = append(lines, head+style.Render(chunk))
+		lines = append(lines, head+value)
 	}
 	return lines
 }

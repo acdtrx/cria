@@ -209,6 +209,50 @@ func TestTheTableHoldsAcrossPhases(t *testing.T) {
 	}
 }
 
+// A server composed from picks names the combination it is running, against the
+// model that combination chose and spelled the way `cria start` takes it — the
+// record's own picks, sorted, one vocabulary with the CLI (docs/specs/TUI.md).
+func TestTheBoxNamesTheRunningCombination(t *testing.T) {
+	status := liveStatus(serve.PhaseRunning)
+	status.Quant, status.Selection = "UD-Q6_K_XL", config.Selection{"quant": "q6", "layout": "coding"}
+
+	lines := box(serve.StatusListing{Servers: []serve.Status{status}}, nil, defaultPrefs())
+	if len(lines) != 1 {
+		t.Fatalf("a running server drew %d lines, want 1: %q", len(lines), lines)
+	}
+	if want := "unsloth/Qwen3-30B-A3B-GGUF:UD-Q6_K_XL  layout=coding quant=q6  pid 4242"; !strings.Contains(lines[0], want) {
+		t.Errorf("the status line reads %q, want the combination against its model: %q", lines[0], want)
+	}
+
+	// A crash report names it too: what exited is a combination, not an entry.
+	dead := liveStatus(serve.PhaseExited)
+	dead.Selection = config.Selection{"quant": "q6"}
+	crash := box(serve.StatusListing{Servers: []serve.Status{dead}}, nil, defaultPrefs())
+	if !strings.Contains(crash[0], "quant=q6") {
+		t.Errorf("the crash line reads %q, want the combination that exited", crash[0])
+	}
+}
+
+// A flat record has no combination and the box keeps no column for one: a box of
+// flat servers is exactly the box it always was. Where one server does have
+// picks, the column exists for both and the grid holds across them.
+func TestTheCombinationColumnCostsFlatRecordsNothing(t *testing.T) {
+	flat := box(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning)}}, nil, defaultPrefs())
+	if want := "unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL  pid 4242"; !strings.Contains(flat[0], want) {
+		t.Errorf("the status line reads %q, want no room spent on picks there are none of: %q", flat[0], want)
+	}
+
+	picked := liveStatus(serve.PhaseRunning)
+	picked.EntryID, picked.Port = "gemma", 8081
+	picked.Selection = config.Selection{"quant": "q6"}
+	mixed := box(serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning), picked}}, nil, defaultPrefs())
+	for _, fact := range []string{"pid ", "up "} {
+		if a, b := runeColumn(mixed[0], fact), runeColumn(mixed[1], fact); a != b || a < 0 {
+			t.Errorf("column %q is not aligned beside a combination: %d vs %d\n%q\n%q", fact, a, b, mixed[0], mixed[1])
+		}
+	}
+}
+
 // A record file cria refused names a pid cria started: it is shown, with the one
 // line that clears it, rather than dropped (CODING-RULES §4).
 func TestBrokenRecordsAreShown(t *testing.T) {

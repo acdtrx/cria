@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"cria/internal/config"
+	"cria/internal/picks"
 	"cria/internal/serve"
 	"cria/internal/tools"
 )
@@ -134,18 +135,8 @@ func TestStartLaunchesTheSelectedEntry(t *testing.T) {
 // (docs/specs/CONFIG.md).
 func TestStartCarriesTheEntrysDefaultPicks(t *testing.T) {
 	fake := &fakeServers{}
-	frame, world, _ := testFrameOn(t, newTestHost(fake))
-	tree := testTree()
-	// The same qwen, written as one entry with an axis instead of one file per
-	// quantization.
-	qwen := &tree.Entries[2]
-	qwen.Quant = ""
-	qwen.Choices = []config.Choice{{Name: "quant", Options: []config.ChoiceOption{
-		{Name: "q4", Quant: "UD-Q4_K_XL"},
-		{Name: "q6", Quant: "UD-Q6_K_XL"},
-	}}}
-	world.tree, world.cache = tree, cachedQwen()
-	frame = load(t, frame).reselect(1)
+	frame, _ := choicesFrame(t, fake)
+	qwen := frame.tree.Entries[2]
 
 	frame, cmd := press(t, frame, enter)
 	frame = answer(t, frame, cmd)
@@ -153,13 +144,32 @@ func TestStartCarriesTheEntrysDefaultPicks(t *testing.T) {
 	if len(fake.started) != 1 || fake.started[0] != "qwen" {
 		t.Fatalf("the start launched %q, want qwen once", fake.started)
 	}
-	if !maps.Equal(fake.picked[0], config.Selection{"quant": "q4"}) {
+	if !maps.Equal(fake.picked[0], config.Selection{"quant": "q4", "layout": "coding"}) {
 		t.Errorf("the start carried the picks %v, want the entry's first option per axis", fake.picked[0])
 	}
 	// And the pane shows the line that start would run, composed from the same
 	// picks (serveview.go).
-	if shown, refused := frame.composedCommand(*qwen); refused || !strings.Contains(shown, "-hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL") {
+	if shown, refused := frame.composedCommand(qwen, frame.picks(qwen)); refused || !strings.Contains(shown, "-hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL") {
 		t.Errorf("the detail pane shows %q, want the command the default picks compose", shown)
+	}
+}
+
+// The picker's picks are the entry's defaults until they are changed, so a bare
+// ⏎ launches them: the stored pick over the config default, per axis
+// (docs/specs/TUI.md — start launches the stored picks).
+func TestStartCarriesTheStoredPicks(t *testing.T) {
+	fake := &fakeServers{}
+	frame, _ := choicesFrame(t, fake)
+	frame.stored = picks.Picks{"qwen": {"quant": "q6"}}
+
+	frame, cmd := press(t, frame, enter)
+	frame = answer(t, frame, cmd)
+
+	if len(fake.started) != 1 || fake.started[0] != "qwen" {
+		t.Fatalf("the start launched %q, want qwen once", fake.started)
+	}
+	if want := (config.Selection{"quant": "q6", "layout": "coding"}); !maps.Equal(fake.picked[0], want) {
+		t.Errorf("the start carried the picks %v, want the stored pick over the defaults %v", fake.picked[0], want)
 	}
 }
 
@@ -447,6 +457,87 @@ func TestRestartStopsThenStarts(t *testing.T) {
 	// The landed restart says nothing; the box shows the fresh server (tui.go).
 	if frame.alert.text != "" {
 		t.Errorf("the frame says %q after the restart landed, want the line empty", frame.alert.text)
+	}
+	// A flat record picked nothing, and its replay passes nothing: the entry is
+	// the whole of what it launches (docs/specs/CONFIG.md).
+	if len(fake.picked[0]) != 0 {
+		t.Errorf("the replay of a flat record carried the picks %v, want none", fake.picked[0])
+	}
+}
+
+// Restart replays the record's own picks, not the picks the store holds now: the
+// box shows what ran, and a swap-back reproduces it — records are
+// self-contained (docs/specs/TUI.md, docs/specs/SERVE.md).
+func TestRestartReplaysTheRecordsPicks(t *testing.T) {
+	live := liveStatus(serve.PhaseRunning)
+	live.Quant, live.Selection = "UD-Q8_K_XL", config.Selection{"quant": "q8", "layout": "chat"}
+	fake := &fakeServers{listing: serve.StatusListing{Servers: []serve.Status{live}}}
+
+	frame, _ := choicesFrame(t, fake)
+	// The picker has moved on since that server was launched.
+	frame.stored = picks.Picks{"qwen": {"quant": "q4", "layout": "coding"}}
+	frame = frame.observed(snapshotMsg{listing: fake.listing})
+
+	frame, cmd := press(t, frame, typed('r'))
+	frame = answer(t, frame, cmd)
+
+	if len(fake.stopped) != 1 || len(fake.started) != 1 {
+		t.Fatalf("the restart stopped %q and started %q, want qwen once each", fake.stopped, fake.started)
+	}
+	if want := (config.Selection{"quant": "q8", "layout": "chat"}); !maps.Equal(fake.picked[0], want) {
+		t.Errorf("the replay carried the picks %v, want the record's own %v", fake.picked[0], want)
+	}
+}
+
+// A combination the entry no longer holds — an option renamed or dropped since
+// the launch — refuses on the notice line with Resolve's own message, and
+// refuses before the stop: falling back to the config defaults would swap the
+// model under a swap-back (docs/specs/TUI.md).
+func TestRestartOfAVanishedCombinationRefuses(t *testing.T) {
+	live := liveStatus(serve.PhaseRunning)
+	live.Selection = config.Selection{"quant": "q5", "layout": "chat"}
+	fake := &fakeServers{listing: serve.StatusListing{Servers: []serve.Status{live}}}
+
+	frame, _ := choicesFrame(t, fake)
+	frame = frame.observed(snapshotMsg{listing: fake.listing})
+
+	frame, cmd := press(t, frame, typed('r'))
+	if cmd != nil {
+		t.Fatal("a replay of a combination the entry no longer holds was handed to a start")
+	}
+	for _, fact := range []string{`choice "quant"`, `no option named "q5"`, "q4, q6, q8"} {
+		if !frame.alert.bad || !strings.Contains(frame.alert.text, fact) {
+			t.Errorf("the refusal reads %q, want it to carry %q", frame.alert.text, fact)
+		}
+	}
+	if len(fake.stopped) != 0 || len(fake.started) != 0 {
+		t.Errorf("the refused replay stopped %v and started %v, want the server left running", fake.stopped, fake.started)
+	}
+}
+
+// A crash report is a record too, so restarting one reproduces the combination
+// that crashed rather than whatever the picker has moved on to. There is nothing
+// to stop: the process is already gone (docs/specs/TUI.md).
+func TestRestartOfACrashReportReplaysItsPicks(t *testing.T) {
+	dead := liveStatus(serve.PhaseExited)
+	dead.Quant, dead.Selection = "UD-Q8_K_XL", config.Selection{"quant": "q8", "layout": "chat"}
+	fake := &fakeServers{listing: serve.StatusListing{Servers: []serve.Status{dead}}}
+
+	frame, _ := choicesFrame(t, fake)
+	frame.stored = picks.Picks{"qwen": {"quant": "q4"}}
+	frame = frame.observed(snapshotMsg{listing: fake.listing})
+
+	frame, cmd := press(t, frame, typed('r'))
+	frame = answer(t, frame, cmd)
+
+	if len(fake.stopped) != 0 {
+		t.Errorf("a restart of a crash report stopped %v, want nothing — the process is gone", fake.stopped)
+	}
+	if len(fake.started) != 1 || fake.started[0] != "qwen" {
+		t.Fatalf("the restart started %q, want qwen once", fake.started)
+	}
+	if want := (config.Selection{"quant": "q8", "layout": "chat"}); !maps.Equal(fake.picked[0], want) {
+		t.Errorf("the replay carried the picks %v, want the crashed record's own %v", fake.picked[0], want)
 	}
 }
 

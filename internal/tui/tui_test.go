@@ -2,6 +2,9 @@ package tui
 
 import (
 	"errors"
+	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +15,7 @@ import (
 
 	"cria/internal/config"
 	"cria/internal/hubcache"
+	"cria/internal/picks"
 	"cria/internal/serve"
 	"cria/internal/tools"
 )
@@ -229,6 +233,37 @@ func testTree() *config.Tree {
 	}
 }
 
+// choicesTree is that tree with qwen written the way a family of variations is
+// written now: one entry with two axes instead of one file per combination
+// (docs/specs/CONFIG.md). Its quant comes from the picked option, and its first
+// options — q4 and coding — are the config defaults.
+func choicesTree() *config.Tree {
+	tree := testTree()
+	qwen := &tree.Entries[2]
+	qwen.Quant = ""
+	qwen.Choices = []config.Choice{
+		{Name: "quant", Options: []config.ChoiceOption{
+			{Name: "q4", Quant: "UD-Q4_K_XL"},
+			{Name: "q6", Quant: "UD-Q6_K_XL"},
+			{Name: "q8", Quant: "UD-Q8_K_XL"},
+		}},
+		{Name: "layout", Options: []config.ChoiceOption{
+			{Name: "coding", Args: []string{"--parallel", "2"}},
+			{Name: "chat", Args: []string{"--parallel", "1"}},
+		}},
+	}
+	return tree
+}
+
+// choicesFrame is the frame over that tree, the cursor on qwen — the entry every
+// picks case below reads or launches.
+func choicesFrame(t *testing.T, fake *fakeServers) (model, *testHost) {
+	t.Helper()
+	frame, world, _ := testFrameOn(t, newTestHost(fake))
+	world.tree, world.cache = choicesTree(), cachedQwen()
+	return load(t, frame).reselect(1), world
+}
+
 // testFrame is a model over a temporary state root, so a preferences write in a
 // test lands nowhere near the host's own.
 func testFrame(t *testing.T, fake *fakeServers) (model, string) {
@@ -245,7 +280,11 @@ func testFrameOn(t *testing.T, world *testHost) (model, *testHost, string) {
 	if err != nil {
 		t.Fatalf("loading the preferences of a fresh state root: %v", err)
 	}
-	frame := newModel(world.host(), root, saved, nil)
+	stored, err := picks.Load(root)
+	if err != nil {
+		t.Fatalf("loading the picks of a fresh state root: %v", err)
+	}
+	frame := newModel(world.host(), root, saved, stored, nil)
 	frame.width, frame.height = 120, 40
 	return frame, world, root
 }
@@ -644,12 +683,51 @@ func TestRefreshTickObservesAndRearms(t *testing.T) {
 // Preferences that could not be read do not stop the program: it opens on the
 // defaults and carries the reason on screen.
 func TestBrokenPreferencesAreReportedOnScreen(t *testing.T) {
-	frame := newModel(newTestHost(&fakeServers{}).host(), t.TempDir(), defaultPrefs(),
+	frame := newModel(newTestHost(&fakeServers{}).host(), t.TempDir(), defaultPrefs(), nil,
 		errors.New("the UI preferences are unreadable"))
 	frame.width, frame.height = 120, 40
 
 	if !strings.Contains(plain(frame.View().Content), "the UI preferences are unreadable") {
 		t.Errorf("the frame does not report the preferences it could not read:\n%s", plain(frame.View().Content))
+	}
+}
+
+// A picks store cria could not read does not stop the program either: the
+// reason is reported once, the entries run their config defaults, and the next
+// pick writes a good file over it (docs/specs/CONFIG.md, Choices).
+func TestABrokenPicksStoreIsReportedAndTheDefaultsStand(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "choices.json"), []byte("{ not json"), 0o644); err != nil {
+		t.Fatalf("writing a corrupt picks store: %v", err)
+	}
+	stored, err := picks.Load(root)
+	if err == nil {
+		t.Fatal("a corrupt picks store loaded without a word")
+	}
+
+	world := newTestHost(&fakeServers{})
+	world.tree, world.cache = choicesTree(), cachedQwen()
+	frame := newModel(world.host(), root, defaultPrefs(), stored, err)
+	frame.width, frame.height = 120, 40
+	frame = load(t, frame).reselect(1)
+
+	if !strings.Contains(frame.alert.text, "unreadable") {
+		t.Errorf("the frame says %q, want the reason the picks could not be read", frame.alert.text)
+	}
+	if !strings.Contains(plain(frame.View().Content), "the stored picks at") {
+		t.Errorf("the reading is not on screen:\n%s", plain(frame.View().Content))
+	}
+	qwen := frame.tree.Entries[2]
+	if want := (config.Selection{"quant": "q4", "layout": "coding"}); !maps.Equal(frame.picks(qwen), want) {
+		t.Errorf("a broken store left the entry on %v, want the config defaults %v", frame.picks(qwen), want)
+	}
+
+	// Once: the store is read at launch and nowhere else, so a dismissed
+	// reading does not come back on the next tick.
+	frame, _ = press(t, frame, escape)
+	frame = load(t, frame)
+	if frame.alert.text != "" {
+		t.Errorf("the frame says %q after the reading was dismissed, want the line empty", frame.alert.text)
 	}
 }
 
@@ -697,7 +775,7 @@ func TestFrameFollowsTheTerminal(t *testing.T) {
 
 // A frame drawn before the terminal has said how wide it is still draws.
 func TestFrameDrawsBeforeTheFirstResize(t *testing.T) {
-	frame := newModel(newTestHost(&fakeServers{}).host(), t.TempDir(), defaultPrefs(), nil)
+	frame := newModel(newTestHost(&fakeServers{}).host(), t.TempDir(), defaultPrefs(), nil, nil)
 	if frame.frameWidth() != defaultWidth {
 		t.Errorf("the frame draws at %d cells before the first resize, want %d", frame.frameWidth(), defaultWidth)
 	}

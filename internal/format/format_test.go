@@ -26,3 +26,28 @@ func TestBytes(t *testing.T) {
 		}
 	}
 }
+
+// A combination is spelled the way `cria start` takes it, sorted so every face
+// of one status writes it the same way. Nothing picked is nothing written: a
+// flat entry has no combination at all.
+func TestPicks(t *testing.T) {
+	cases := []struct {
+		name      string
+		selection map[string]string
+		want      string
+	}{
+		{name: "nothing picked", selection: nil, want: ""},
+		{name: "one axis", selection: map[string]string{"quant": "q6"}, want: "quant=q6"},
+		{
+			name:      "sorted, not in any caller's order",
+			selection: map[string]string{"quant": "q6", "layout": "coding", "context": "long"},
+			want:      "context=long layout=coding quant=q6",
+		},
+	}
+
+	for _, test := range cases {
+		if got := Picks(test.selection); got != test.want {
+			t.Errorf("%s: Picks(%v) = %q, want %q", test.name, test.selection, got, test.want)
+		}
+	}
+}

@@ -1,6 +1,6 @@
 # Step 6 — TUI detail and start
 
-Status: not started
+Status: done
 
 ## Intent
 
@@ -40,3 +40,37 @@ No picker yet — picks change only via `choices.json` edits until step 7.
   stored selection; restart-last passes the record's selection, incl. the
   no-longer-resolves refusal; status box shows the combo.
 - Suite green or expected reds named (mid-phase step).
+
+## Result
+
+- The model holds the store (`m.stored`), read once in `Run` beside the prefs —
+  the step file's "re-reads before use" note described something `loadPrefs`
+  never did: prefs are read once and written through, and picks now mirror
+  that exactly; correct on the merits too, since the TUI is the store's only
+  writer. A broken store surfaces on the notice line (prefs' failure first when
+  both break — the frame depends on prefs, only picks on the store).
+- `m.picks(entry)` merges stored over defaults; the impossible merge refusal is
+  left to travel as a nil selection that `config.Resolve` turns down loudly —
+  never a silent fall back to defaults.
+- Detail pane: one `choices` block (label-column cells truncate at nine, and
+  axis names are author-chosen, so names live in the value lines) —
+  `quant: q4* q6 q8` per axis, pick in factStyle + star, alternatives
+  quietStyle, no new palette entries; `composedCommand(entry, selection)` takes
+  the same selection that drew the block, so the two cannot disagree.
+- Restart-last replays the RECORD's selection via `replayOf`, which refuses an
+  unresolvable replay on the notice line **before the stop** — a fallback would
+  swap the model under a swap-back, and stopping first would leave nothing for
+  the refusal to protect. Found and fixed in the same stroke: the crash-report
+  restart (`restartShownEntry`) previously started on current defaults — a
+  silent combination swap; it now replays the exited record too, while the
+  cross-session last-started id (no record behind it) starts on stored picks.
+- `spelledPicks` moved to `internal/format` as `format.Picks` — shared display
+  vocabulary, CLI now imports it. Status box: the combination is a real column
+  after the model reference; the empty-column collapse rule generalised so a
+  box of flat records renders byte-identical to today.
+- Watch in live use (recorded, out of scope here): the entry list's cached
+  marker and the CLI list row read the entry's *declared* repo/quant — an
+  entry whose quant lives in options shows a bare repo, and cached-ness is not
+  resolved through the current picks. Step 7 takes the cached-marker half.
+- Suite fully green (`go test -count=1 ./...`), gofmt silent, vet clean —
+  verified independently in review. Mid-phase step, no expected reds.

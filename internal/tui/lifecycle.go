@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"cria/internal/config"
+	"cria/internal/picks"
 	"cria/internal/serve"
 	"cria/internal/tools"
 )
@@ -132,21 +133,40 @@ func (m model) startSelected() (tea.Model, tea.Cmd) {
 	return m.pend(selected.entry.ID, verbStarting), m.launch(selected.entry)
 }
 
-// launch is the start sequence as a command. The sequence itself is
-// docs/specs/SERVE.md's, in the order `cria start` asks it: the tool gate before
-// the port check — a host without llama-server has to hear about llama-server,
-// not about a busy port — and the port before anything is spawned.
+// launch is the start sequence as a command, under the picks this frame holds
+// for the entry.
 func (m model) launch(entry config.Entry) tea.Cmd {
-	settings, selection := m.settings(), m.picks(entry)
+	return m.launchWith(entry, m.picks(entry))
+}
+
+// launchWith is that sequence under a selection the caller settled — the stored
+// picks for a start, a record's own picks for a replay (restartServer). The
+// sequence itself is docs/specs/SERVE.md's, in the order `cria start` asks it:
+// the tool gate before the port check — a host without llama-server has to hear
+// about llama-server, not about a busy port — and the port before anything is
+// spawned.
+func (m model) launchWith(entry config.Entry, selection config.Selection) tea.Cmd {
+	settings := m.settings()
 	check, servers := m.host.tools, m.host.servers
 	return func() tea.Msg { return startEntry(entry, selection, settings, check, servers) }
 }
 
-// picks is what a start off this frame composes with: the entry's config
-// defaults — its first option per choice, and nothing at all for a flat entry
-// (docs/specs/CONFIG.md).
+// picks is what a start off this frame composes with: the picks the store holds
+// for the entry, over its config defaults — the first option of each axis, and
+// nothing at all for a flat entry (docs/specs/CONFIG.md). A stored pick naming a
+// choice or an option the entry no longer declares falls back to the default
+// without a word, which is the store's own doctrine: the entry file is the
+// authority that moved (internal/picks).
+//
+// The merge can only refuse an explicit pick, and a frame has none to give — the
+// picker sets defaults, and one-shot picks are CLI territory (docs/specs/TUI.md).
+// The refusal it cannot reach is left to travel rather than swallowed: the
+// selection it would come back with is nil, and config.Resolve turns that down
+// in the detail pane and in serve alike, where quietly falling back to the
+// config defaults would launch a combination nobody picked.
 func (m model) picks(entry config.Entry) config.Selection {
-	return config.DefaultSelection(entry)
+	selection, _ := picks.Merge(entry, m.stored[entry.ID], nil)
+	return selection
 }
 
 // startEntry runs that sequence off the UI thread.
@@ -322,13 +342,13 @@ func (m model) dismissRecord(record serve.Record) (tea.Model, tea.Cmd) {
 // again — the one-keypress swap-back after a stop. Both legs are one action, so
 // the box says "restarting" until the second one lands.
 func (m model) restartServer(record serve.Record) (tea.Model, tea.Cmd) {
-	entry, found := m.entryNamed(record.EntryID)
-	if !found {
-		m.alert = alert{text: restartsNothing(record.EntryID), bad: true}
+	entry, selection, err := m.replayOf(record)
+	if err != nil {
+		m.alert = alert{text: err.Error(), bad: true}
 		return m, nil
 	}
 
-	settings, selection := m.settings(), m.picks(entry)
+	settings := m.settings()
 	check, servers := m.host.tools, m.host.servers
 	return m.pend(entry.ID, verbRestarting), func() tea.Msg {
 		if err := servers.Stop(record); err != nil {
@@ -341,9 +361,23 @@ func (m model) restartServer(record serve.Record) (tea.Model, tea.Cmd) {
 // restartShownEntry is r with nothing running to act on. The box is showing a
 // crash report, or the entry that was started last on a host where nothing is
 // (docs/specs/TUI.md), and a restart there is a start: there is nothing to stop.
+//
+// A crash report is a record, so it is replayed like any other — the box names
+// the combination that crashed and the key reproduces it. The last-started entry
+// crosses sessions as an id alone, with no record behind it, so that one starts
+// on the stored picks exactly as ⏎ on the list would.
 func (m model) restartShownEntry() (tea.Model, tea.Cmd) {
-	id, shown := m.shownEntryID()
-	if !shown {
+	if record, exited := m.exitedRecord(); exited {
+		entry, selection, err := m.replayOf(record)
+		if err != nil {
+			m.alert = alert{text: err.Error(), bad: true}
+			return m, nil
+		}
+		return m.pend(entry.ID, verbStarting), m.launchWith(entry, selection)
+	}
+
+	id := m.prefs.LastStarted
+	if id == "" {
 		return m, nil
 	}
 	entry, found := m.entryNamed(id)
@@ -352,6 +386,27 @@ func (m model) restartShownEntry() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m.pend(entry.ID, verbStarting), m.launch(entry)
+}
+
+// replayOf is the launch one record is started again from: its entry as the tree
+// declares it now, and the picks the record itself was composed with — never the
+// stored ones. The box shows what ran, so a swap-back reproduces it, records
+// being self-contained (docs/specs/TUI.md, docs/specs/SERVE.md).
+//
+// A selection the entry can no longer resolve — its choices edited since the
+// launch — refuses here, with Resolve's own message, and refuses *before* the
+// stop: falling back to the config defaults would swap the model under a
+// swap-back, and stopping first would leave nothing running for the refusal to
+// have protected. A record with no picks is a flat entry's and resolves as one.
+func (m model) replayOf(record serve.Record) (config.Entry, config.Selection, error) {
+	entry, found := m.entryNamed(record.EntryID)
+	if !found {
+		return config.Entry{}, nil, errors.New(restartsNothing(record.EntryID))
+	}
+	if _, err := config.Resolve(entry, record.Selection); err != nil {
+		return config.Entry{}, nil, err
+	}
+	return entry, record.Selection, nil
 }
 
 // restartsNothing is an entry the config tree no longer declares: a record is
@@ -452,18 +507,19 @@ func orUnreadable(value string) string {
 	return value
 }
 
-// shownEntryID is the entry the status box names with nothing running: the
-// crash report it is showing, else the entry that was started last — the
-// fallback that keeps restart a target across sessions (docs/specs/TUI.md).
+// exitedRecord is the crash report the status box is showing, when it is showing
+// one. It is the half of "what the box names with nothing running" that has a
+// record behind it — the other half is the last-started entry, an id the
+// preferences carry across sessions (restartShownEntry, docs/specs/TUI.md).
 // A server cria can see is never answered for here: the keys that could mean any
 // of several ask which (pick.go).
-func (m model) shownEntryID() (string, bool) {
+func (m model) exitedRecord() (serve.Record, bool) {
 	for _, status := range m.listing.Servers {
 		if status.Phase == serve.PhaseExited {
-			return status.EntryID, true
+			return status.Record, true
 		}
 	}
-	return m.prefs.LastStarted, m.prefs.LastStarted != ""
+	return serve.Record{}, false
 }
 
 // settings is the tree-wide configuration an action resolves against — the tool

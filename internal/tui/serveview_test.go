@@ -10,6 +10,7 @@ import (
 
 	"cria/internal/config"
 	"cria/internal/hubcache"
+	"cria/internal/picks"
 	"cria/internal/serve"
 )
 
@@ -459,9 +460,83 @@ func TestDetailCommandIsTheOneStartWouldRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("composing the entry's command: %v", err)
 	}
-	shown, refused := frame.composedCommand(entry)
+	shown, refused := frame.composedCommand(entry, frame.picks(entry))
 	if refused || shown != strings.Join(want, " ") {
 		t.Errorf("the pane shows %q, want %q", shown, strings.Join(want, " "))
+	}
+}
+
+// An entry with choices carries its axes in the pane: one line per choice in
+// the file's order, its options along it in the file's order, the option a start
+// would compose with marked — and the command line under them is that same
+// option's, so picking and seeing the command are one loop (docs/specs/TUI.md).
+func TestDetailPaneMarksTheCurrentPicks(t *testing.T) {
+	frame, _ := choicesFrame(t, &fakeServers{})
+
+	detail := plain(strings.Join(frame.detailLines(200, 30), "\n"))
+	for _, fact := range []string{
+		"choices",
+		"quant: q4* q6 q8",
+		"layout: coding* chat",
+		"-hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL --host 0.0.0.0 --port 8080 --ctx-size 16384 --jinja --parallel 2",
+	} {
+		if !strings.Contains(detail, fact) {
+			t.Errorf("the detail pane does not carry %q:\n%s", fact, detail)
+		}
+	}
+
+	// The pick is the fact on its line and the alternatives are context — the
+	// pane's own hierarchy, so the current combination is read down the block
+	// without spelling the star out.
+	drawn := strings.Join(frame.detailLines(200, 30), "\n")
+	if !strings.Contains(drawn, factStyle.Render("q4"+pickedMark)) {
+		t.Errorf("the pane does not draw the current pick as a fact:\n%s", drawn)
+	}
+	if !strings.Contains(drawn, quietStyle.Render("q6")) {
+		t.Errorf("the pane does not draw the options beside the pick as context:\n%s", drawn)
+	}
+
+	// A pane too narrow for a whole axis wraps it into the label's indent and
+	// never cuts an option in half: the options and their mark are what the
+	// block is read for.
+	narrow := plain(strings.Join(frame.detailLines(22, 30), "\n"))
+	if want := "choices  quant: q4* q6\n         q8\n         layout:\n         coding* chat"; !strings.Contains(narrow, want) {
+		t.Errorf("the narrow pane draws\n%s\nwant the axes wrapped into the indent:\n%s", narrow, want)
+	}
+}
+
+// The pane follows the stored picks, which are the entry's defaults until they
+// are changed — not the file's first options. A stored pick the entry no longer
+// holds falls back to the config default without a word: the file is the
+// authority that moved (docs/specs/CONFIG.md, Choices).
+func TestDetailPaneFollowsTheStoredPicks(t *testing.T) {
+	frame, _ := choicesFrame(t, &fakeServers{})
+	frame.stored = picks.Picks{"qwen": {"quant": "q6"}}
+
+	detail := plain(strings.Join(frame.detailLines(200, 30), "\n"))
+	for _, fact := range []string{"quant: q4 q6* q8", "layout: coding* chat",
+		"-hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q6_K_XL"} {
+		if !strings.Contains(detail, fact) {
+			t.Errorf("the detail pane does not carry %q:\n%s", fact, detail)
+		}
+	}
+
+	frame.stored = picks.Picks{"qwen": {"quant": "q5"}}
+	stale := plain(strings.Join(frame.detailLines(200, 30), "\n"))
+	if !strings.Contains(stale, "quant: q4* q6 q8") || !strings.Contains(stale, "UD-Q4_K_XL") {
+		t.Errorf("a pick the entry no longer holds did not fall back to the config default:\n%s", stale)
+	}
+}
+
+// A flat entry has nothing to pick, so its pane is exactly the pane it always
+// was: no axes, no block, no room spent on a line that would say nothing.
+func TestDetailPaneOfAFlatEntryHasNoAxes(t *testing.T) {
+	frame, _ := serveFrame(t)
+	frame = frame.reselect(1) // qwen, one file per variation
+
+	detail := plain(strings.Join(frame.detailLines(200, 30), "\n"))
+	if strings.Contains(detail, "choices") {
+		t.Errorf("the pane of a flat entry draws an axes block:\n%s", detail)
 	}
 }
 
