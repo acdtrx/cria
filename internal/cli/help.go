@@ -19,17 +19,17 @@ USAGE
   cria <subcommand> [flags]
 
 SUBCOMMANDS
-  start <id> [--wait]       start the entry <id>; --wait blocks until it serves or fails
-  stop [<id>]               stop a running server; the id is required when several run
-  status [--json]           what every server cria started is doing right now
-  bench [<id>] [flags]      measure a running server: prefill and decode tokens/second
-  list [--paths]            the entries the config tree declares
-  new <id> [--llama|--mlx]  scaffold an entry file and open your editor on it
-  edit <id>                 open an entry's file in $VISUAL, else $EDITOR
-  docs                      print the config schema and a complete example of every file
-  wired-limit <MB>          generate the launchd plist that pins iogpu.wired_limit_mb
-  update                    replace this binary with the latest GitHub release
-  help                      this page
+  start <id> [picks] [--wait]  start the entry <id>; --wait blocks until it serves or fails
+  stop [<id>]                  stop a running server; the id is required when several run
+  status [--json]              what every server cria started is doing right now
+  bench [<id>] [flags]         measure a running server: prefill and decode tokens/second
+  list [--paths]               the entries the config tree declares
+  new <id> [--llama|--mlx]     scaffold an entry file and open your editor on it
+  edit <id>                    open an entry's file in $VISUAL, else $EDITOR
+  docs                         print the config schema and a complete example of every file
+  wired-limit <MB>             generate the launchd plist that pins iogpu.wired_limit_mb
+  update                       replace this binary with the latest GitHub release
+  help                         this page
 
 FLAGS
   --wait      start: block until the server answers its health endpoint, or fails
@@ -42,6 +42,12 @@ FLAGS
   --mlx       new: scaffold an mlx entry
   --version   print the version of this binary
   --help, -h  this page
+
+PICKS
+  An entry can declare choices — quants, context sizes, layouts — and a start picks
+  along them: cria start <id> [choice=option ...] [--wait], as in cria start qwen quant=q6.
+  A pick there is one-shot: it composes that launch and leaves the stored picks alone.
+  cria list prints each entry's choices with its current pick marked.
 
 EXIT CODES
   0 the asked-for thing is true or done, 1 it is not, 2 the command line could not be routed.

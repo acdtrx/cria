@@ -3,10 +3,12 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"strings"
 	"testing"
 	"time"
 
+	"cria/internal/config"
 	"cria/internal/procs"
 	"cria/internal/serve"
 )
@@ -225,6 +227,77 @@ func TestStatusJSONDocument(t *testing.T) {
 		if got := refused[field]; got != want {
 			t.Errorf("broken[0].%s is %#v, want %#v", field, got, want)
 		}
+	}
+}
+
+// A server composed from picks is reported as the combination it is, in both
+// faces and in the vocabulary `cria start` takes — sorted, since the record is
+// read without the config tree that holds the axes' file order
+// (docs/specs/SERVE.md).
+func TestStatusNamesTheRunningPicks(t *testing.T) {
+	status := runningStatus()
+	status.Selection = config.Selection{"quant": "q6", "layout": "coding"}
+	fake := &fakeServers{snapshots: serve.StatusListing{Servers: []serve.Status{status}}}
+
+	app, out, errOut := newTestApp(testTree(), fake)
+	if code := app.status(nil); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if !strings.Contains(out.String(), "\n  picks layout=coding quant=q6\n") {
+		t.Errorf("cria printed %q, want the combination the server was composed from", out)
+	}
+
+	app, out, errOut = newTestApp(testTree(), fake)
+	if code := app.status([]string{"--json"}); code != exitOK {
+		t.Fatalf("exit code %d with --json, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	var document struct {
+		Servers []struct {
+			Picks map[string]string `json:"picks"`
+		} `json:"servers"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &document); err != nil {
+		t.Fatalf("the document does not parse: %v\n%s", err, out)
+	}
+	if len(document.Servers) != 1 {
+		t.Fatalf("the document holds %d servers, want the one the listing holds", len(document.Servers))
+	}
+	if !maps.Equal(document.Servers[0].Picks, map[string]string{"quant": "q6", "layout": "coding"}) {
+		t.Errorf("picks is %v, want the record's own selection", document.Servers[0].Picks)
+	}
+}
+
+// A flat entry has no combination, so neither face invents one: no picks line,
+// and no key in the document.
+func TestStatusOmitsPicksForAFlatEntry(t *testing.T) {
+	fake := &fakeServers{snapshots: serve.StatusListing{Servers: []serve.Status{runningStatus()}}}
+
+	app, out, errOut := newTestApp(testTree(), fake)
+	if code := app.status(nil); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if strings.Contains(out.String(), "picks") {
+		t.Errorf("cria printed %q, want a flat entry's block exactly as it always was", out)
+	}
+
+	app, out, errOut = newTestApp(testTree(), fake)
+	if code := app.status([]string{"--json"}); code != exitOK {
+		t.Fatalf("exit code %d with --json, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(out.Bytes(), &document); err != nil {
+		t.Fatalf("the document does not parse: %v\n%s", err, out)
+	}
+	servers, ok := document["servers"].([]any)
+	if !ok || len(servers) != 1 {
+		t.Fatalf("servers is %#v, want the one server the listing holds", document["servers"])
+	}
+	server, ok := servers[0].(map[string]any)
+	if !ok {
+		t.Fatalf("the server is %#v, want an object", servers[0])
+	}
+	if _, present := server["picks"]; present {
+		t.Errorf("the document carries picks for a flat entry: %#v", server["picks"])
 	}
 }
 

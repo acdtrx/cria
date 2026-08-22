@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/picks"
 	"cria/internal/procs"
 	"cria/internal/serve"
 	"cria/internal/tools"
@@ -183,7 +184,8 @@ func newTestApp(tree *config.Tree, fake *fakeServers) (*app, *bytes.Buffer, *byt
 		tree:           func() (*config.Tree, error) { return tree, nil },
 		tools:          func(config.Settings) tools.Report { return usableReport() },
 		servers:        func() (servers, error) { return fake, nil },
-		memoryMB:       func() (int, error) { return 16384, nil }, // a 16 GiB machine
+		picksStore:     func() (picks.Picks, error) { return picks.Picks{}, nil }, // nothing picked yet
+		memoryMB:       func() (int, error) { return 16384, nil },                 // a 16 GiB machine
 		tui:            func() error { return nil },
 		poll:           time.Millisecond,
 		startWindow:    200 * time.Millisecond,
@@ -236,6 +238,18 @@ func choicesEntry() config.Entry {
 	}
 }
 
+// pickyEntry is the same entry with a second axis, for what needs more than one
+// pick in view: which axis a pick lands on, and what the axes a pick does not
+// name keep.
+func pickyEntry() config.Entry {
+	entry := choicesEntry()
+	entry.Choices = append(entry.Choices, config.Choice{Name: "layout", Options: []config.ChoiceOption{
+		{Name: "chat", Args: []string{"--parallel", "1"}},
+		{Name: "coding", Args: []string{"--parallel", "4"}},
+	}})
+	return entry
+}
+
 // testRecord is what cria writes down when it launches the tree's entry.
 func testRecord() serve.Record {
 	return serve.Record{
@@ -265,7 +279,7 @@ func TestRouting(t *testing.T) {
 		{name: "the version is printed", args: []string{"--version"}, want: exitOK, contains: "cria 9.9.9-test"},
 		{name: "docs prints the config schema", args: []string{"docs"}, want: exitOK, contains: "backend"},
 		{name: "an unknown subcommand names the valid set", args: []string{"serve"}, want: exitUsage, contains: "valid subcommands are: start, stop, status, bench, list, new, edit, docs, wired-limit, update"},
-		{name: "start needs an entry id", args: []string{"start"}, want: exitUsage, contains: "usage: cria start <id> [--wait]"},
+		{name: "start needs an entry id", args: []string{"start"}, want: exitUsage, contains: "usage: cria start <id> [choice=option ...] [--wait]"},
 		{name: "start takes one entry id", args: []string{"start", "a", "b"}, want: exitUsage, contains: "one entry at a time (got a, b)"},
 		{name: "start refuses a flag it does not know", args: []string{"start", "qwen", "--now"}, want: exitUsage, contains: "unknown flag --now"},
 		{name: "stop takes one entry id", args: []string{"stop", "a", "b"}, want: exitUsage, contains: "one entry at a time (got a, b)"},

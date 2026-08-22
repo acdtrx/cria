@@ -8,22 +8,31 @@ import (
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/picks"
 	"cria/internal/serve"
 )
 
-// start runs `cria start <id> [--wait]`: the command line, down to the entry it
-// names and the picks it launches under.
+// startSynopsis is the command line every start refusal points back at
+// (docs/specs/CLI.md).
+const startSynopsis = "cria start <id> [choice=option ...] [" + waitFlag + "]"
+
+// start runs `cria start <id> [choice=option ...] [--wait]`: the command line,
+// down to the entry it names and the picks it launches under.
 func (a *app) start(args []string) int {
-	ids, wait, unknown := splitFlag(args, waitFlag)
+	rest, wait, unknown := splitFlag(args, waitFlag)
 	if unknown != "" {
-		return a.usage("start: unknown flag %s; usage: cria start <id> [%s]", unknown, waitFlag)
+		return a.usage("start: unknown flag %s; usage: %s", unknown, startSynopsis)
+	}
+	ids, explicit, err := splitPicks(rest)
+	if err != nil {
+		return a.usage("start: %v; usage: %s", err, startSynopsis)
 	}
 	if len(ids) == 0 {
-		return a.usage("start: no entry named; usage: cria start <id> [%s]", waitFlag)
+		return a.usage("start: no entry named; usage: %s", startSynopsis)
 	}
 	if len(ids) > 1 {
-		return a.usage("start: one entry at a time (got %s); usage: cria start <id> [%s]",
-			strings.Join(ids, ", "), waitFlag)
+		return a.usage("start: one entry at a time (got %s); usage: %s",
+			strings.Join(ids, ", "), startSynopsis)
 	}
 	id := ids[0]
 
@@ -35,10 +44,59 @@ func (a *app) start(args []string) int {
 	if !found {
 		return a.refuseUnknownEntry(tree, id)
 	}
-	// The picks this start composes with: the entry's config defaults — its
-	// first option per choice, and nothing at all for a flat entry
-	// (docs/specs/CONFIG.md).
-	return a.startEntry(tree, entry, config.DefaultSelection(entry), wait)
+
+	// The three layers a launch is decided by (docs/specs/CONFIG.md, Choices):
+	// the entry's config defaults, under the picks the store holds, under the
+	// ones typed here. The store is read and left alone — a pick on the command
+	// line is one-shot, so an agent's experiment never changes what the next bare
+	// start launches.
+	//
+	// A flat entry has nothing to pick, so nothing to look up: its launch is what
+	// it always was, and a store cria cannot read is not its problem. A pick typed
+	// against it is still refused, by the merge, naming what the entry has.
+	var stored config.Selection
+	if len(entry.Choices) > 0 {
+		stored = a.storedPicks()[entry.ID]
+	}
+	selection, err := picks.Merge(entry, stored, explicit)
+	if err != nil {
+		return a.fail("start %s: %v", id, err)
+	}
+	return a.startEntry(tree, entry, selection, wait)
+}
+
+// splitPicks separates the entry id on a start's command line from the picks
+// beside it.
+//
+// `=` is what tells them apart: an id cannot contain one (docs/specs/CONFIG.md,
+// the id charset), so `quant=q4` is never an id and `qwen` is never a pick, and
+// the two may be typed in any order like the flag they share the line with. The
+// split is at the *first* `=`: a choice's name cannot hold one either, so a
+// second `=` belongs to the option and is answered where the option is — by
+// name, against the options the entry has.
+//
+// Both halves must be named. `=q4` and `quant=` are neither an id nor a pick,
+// and reading them as one would launch something nobody asked for.
+func splitPicks(args []string) ([]string, config.Selection, error) {
+	var ids []string
+	explicit := config.Selection{}
+
+	for _, arg := range args {
+		choice, option, isPick := strings.Cut(arg, "=")
+		if !isPick {
+			ids = append(ids, arg)
+			continue
+		}
+		if choice == "" || option == "" {
+			return nil, nil, fmt.Errorf("%q is not a pick; a pick is choice=option, both named", arg)
+		}
+		if picked, twice := explicit[choice]; twice {
+			return nil, nil, fmt.Errorf("choice %q is picked twice (%s and %s); one option per choice",
+				choice, picked, option)
+		}
+		explicit[choice] = option
+	}
+	return ids, explicit, nil
 }
 
 // startEntry is the start sequence itself, from a named entry and a settled

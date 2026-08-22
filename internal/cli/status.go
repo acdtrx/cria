@@ -2,9 +2,12 @@ package cli
 
 import (
 	"encoding/json"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
+	"cria/internal/config"
 	"cria/internal/format"
 	"cria/internal/serve"
 )
@@ -99,8 +102,34 @@ func (a *app) reportServer(status serve.Status) {
 		}
 	}
 
+	// The picks sit against the command they composed: a combination is what the
+	// server is, and the line below is what that came to (docs/specs/SERVE.md).
+	// A flat entry picked nothing, so there is no line — its block is the one it
+	// always was.
+	if len(status.Selection) > 0 {
+		a.printf("  picks %s\n", spelledPicks(status.Selection))
+	}
 	a.printf("  command %s\n", strings.Join(status.Command, " "))
 	a.printf("  log %s\n", status.LogPath)
+}
+
+// spelledPicks writes a running combination the way `cria start` takes it, so
+// what a status names is what reproduces it: `quant=q6 layout=coding`, one
+// vocabulary across the surface (docs/specs/CLI.md).
+//
+// The order is sorted, and deliberately not the entry's. A record is
+// self-contained (docs/specs/SERVE.md): status reads it without the config tree
+// so that editing or deleting an entry never confuses its running server, and
+// the file order its axes were written in is not something the record carries.
+// Loading the tree to recover that order would trade the invariant for a
+// cosmetic gain, and sorted is what the JSON document's keys come out in anyway,
+// so the two faces of one status agree.
+func spelledPicks(selection config.Selection) string {
+	pairs := make([]string, 0, len(selection))
+	for _, choice := range slices.Sorted(maps.Keys(selection)) {
+		pairs = append(pairs, choice+"="+selection[choice])
+	}
+	return strings.Join(pairs, " ")
 }
 
 // The `cria status --json` document is a projection, not a marshalled snapshot.
@@ -112,28 +141,34 @@ func (a *app) reportServer(status serve.Status) {
 // So the field names below are the machine contract (docs/specs/CLI.md): every
 // one of them is always present, so a script never has to tell "absent" from
 // "zero", and none of them is dropped when empty.
+//
+// `picks` is the one field that is absent rather than empty, because absent is
+// what it means: a flat entry has no combination at all, where `{}` would read
+// as an entry with axes and nothing picked on them — a state that cannot exist.
+// The record spells it the same way (docs/specs/SERVE.md).
 type statusDocument struct {
 	Servers []serverDocument `json:"servers"`
 	Broken  []brokenDocument `json:"broken"`
 }
 
 type serverDocument struct {
-	Entry         string           `json:"entry"`
-	Backend       string           `json:"backend"`
-	Repo          string           `json:"repo"`
-	Quant         string           `json:"quant"`
-	Host          string           `json:"host"`
-	Port          int              `json:"port"`
-	PID           int              `json:"pid"`
-	Phase         string           `json:"phase"`
-	UptimeSeconds float64          `json:"uptime_seconds"`
-	RSSBytes      int64            `json:"rss_bytes"`
-	CPUPercent    float64          `json:"cpu_percent"`
-	Health        healthDocument   `json:"health"`
-	Progress      progressDocument `json:"progress"`
-	Command       []string         `json:"command"`
-	Log           string           `json:"log"`
-	LaunchedAt    time.Time        `json:"launched_at"`
+	Entry         string            `json:"entry"`
+	Backend       string            `json:"backend"`
+	Repo          string            `json:"repo"`
+	Quant         string            `json:"quant"`
+	Picks         map[string]string `json:"picks,omitempty"` // choice → picked option; absent for a flat entry
+	Host          string            `json:"host"`
+	Port          int               `json:"port"`
+	PID           int               `json:"pid"`
+	Phase         string            `json:"phase"`
+	UptimeSeconds float64           `json:"uptime_seconds"`
+	RSSBytes      int64             `json:"rss_bytes"`
+	CPUPercent    float64           `json:"cpu_percent"`
+	Health        healthDocument    `json:"health"`
+	Progress      progressDocument  `json:"progress"`
+	Command       []string          `json:"command"`
+	Log           string            `json:"log"`
+	LaunchedAt    time.Time         `json:"launched_at"`
 }
 
 type healthDocument struct {
@@ -170,6 +205,7 @@ func statusDocumentOf(listing serve.StatusListing) statusDocument {
 			Backend:       string(status.Backend),
 			Repo:          status.Repo,
 			Quant:         status.Quant,
+			Picks:         status.Selection,
 			Host:          status.Host,
 			Port:          status.Port,
 			PID:           status.PID,

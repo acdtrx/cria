@@ -2,12 +2,14 @@ package cli
 
 import (
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 
 	"cria/internal/config"
 	"cria/internal/format"
+	"cria/internal/picks"
 )
 
 // entriesDirName is the directory the config tree keeps entries in, named here
@@ -17,10 +19,12 @@ const entriesDirName = "models"
 // list runs `cria list [--paths]`: what the config tree declares, one line per
 // entry.
 //
-// It asks the tree and nothing else. Whether an entry could start right now
-// depends on a tool check, a port and a process table — three questions with
-// their own commands — and answering them here would turn a listing into a
-// slow, partial `cria status` (docs/specs/CLI.md).
+// It asks the tree and the picks store, and nothing else. Whether an entry could
+// start right now depends on a tool check, a port and a process table — three
+// questions with their own commands — and answering them here would turn a
+// listing into a slow, partial `cria status` (docs/specs/CLI.md). Which option
+// is picked on each axis is not one of them: it is a file cria wrote itself, and
+// it is half of what an entry with choices declares.
 //
 // The exit code is about the read, not the contents: a tree that loaded exits
 // zero however little it holds. An empty tree is a true answer to "what is
@@ -54,8 +58,18 @@ func (a *app) list(args []string) int {
 		}
 		rows = append(rows, row)
 	}
-	for _, line := range aligned(rows) {
+	// The store is read only when there is an axis to show a pick on: a tree of
+	// flat entries is listed exactly as it always was, without going near cria's
+	// state.
+	var stored picks.Picks
+	if declaresChoices(tree) {
+		stored = a.storedPicks()
+	}
+	for i, line := range aligned(rows) {
 		a.printf("%s\n", line)
+		for _, axis := range choiceLines(tree.Entries[i], stored) {
+			a.printf("  %s\n", axis)
+		}
 	}
 
 	// The refused files come last, under the entries that loaded, with their ids
@@ -69,6 +83,48 @@ func (a *app) list(args []string) int {
 		a.printf("%s\n", line)
 	}
 	return exitOK
+}
+
+// declaresChoices answers whether any entry in the tree has an axis to pick
+// along.
+func declaresChoices(tree *config.Tree) bool {
+	return slices.ContainsFunc(tree.Entries, func(entry config.Entry) bool { return len(entry.Choices) > 0 })
+}
+
+// choiceLines is what an entry's axes read as under its row: one line per
+// choice, indented under the id, naming the choice and its options in file order
+// with the current pick marked — `quant: q4* q6 q8`. A flat entry has none, and
+// its listing is the one line it always was.
+//
+// The line is two answers in one. Its names are the vocabulary
+// `cria start <id> choice=option` takes, and its mark is what a bare
+// `cria start <id>` would compose with (docs/specs/CLI.md).
+//
+// Which option is current is picks.Merge's rule and nobody else's: the stored
+// pick while the entry still holds it, the config default — the first option —
+// once the entry has moved on. With no explicit pick to refuse there is nothing
+// here the merge can turn down, so its refusal is not a case this has to
+// answer; an axis it somehow declined to resolve is listed unmarked rather than
+// marked wrongly.
+func choiceLines(entry config.Entry, stored picks.Picks) []string {
+	if len(entry.Choices) == 0 {
+		return nil
+	}
+	current, _ := picks.Merge(entry, stored[entry.ID], nil)
+
+	lines := make([]string, 0, len(entry.Choices))
+	for _, choice := range entry.Choices {
+		var line strings.Builder
+		line.WriteString(choice.Name + ":")
+		for _, option := range choice.Options {
+			line.WriteString(" " + option.Name)
+			if option.Name == current[choice.Name] {
+				line.WriteString("*")
+			}
+		}
+		lines = append(lines, line.String())
+	}
+	return lines
 }
 
 // aligned pads every cell to its column's widest, so ids, backends and models

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"cria/internal/config"
+	"cria/internal/picks"
 )
 
 // listedTree is a tree whose ids and models are of different lengths, so the
@@ -46,6 +47,89 @@ func TestListPrintsOneAlignedLinePerEntry(t *testing.T) {
 			t.Errorf("line %d is %q, want %q", i+1, line, want[i])
 		}
 	}
+}
+
+// An entry with choices carries its axes under its row: one line per choice, its
+// options in file order with the current pick marked. That is what an agent
+// reads to learn what `cria start <id> choice=option` may name, and what a bare
+// start would launch (docs/specs/CLI.md).
+func TestListShowsEachEntrysChoices(t *testing.T) {
+	tree := listedTree()
+	tree.Entries = append(tree.Entries, pickyEntry())
+
+	// Nothing picked yet: the config default — each axis's first option — is what
+	// a start would compose with.
+	app, out, errOut := newTestApp(tree, &fakeServers{})
+	if code := app.list(nil); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	lines := printedLines(out.String())
+	if len(lines) != 5 {
+		t.Fatalf("cria printed %d lines:\n%s\nwant three entries and two axes", len(lines), out)
+	}
+	if !strings.HasPrefix(lines[2], "qwen-choices  llama  unsloth/Qwen3-30B-A3B-GGUF ") {
+		t.Errorf("the entry's row is %q, want it aligned with the rest of the listing", lines[2])
+	}
+	for i, want := range []string{"  quant: q4* q6", "  layout: chat* coding"} {
+		if lines[3+i] != want {
+			t.Errorf("axis line %d is %q, want %q", i+1, lines[3+i], want)
+		}
+	}
+
+	// A stored pick is what is marked — it is what a bare start composes with —
+	// and the axes it does not name keep their defaults.
+	app, out, errOut = newTestApp(tree, &fakeServers{})
+	app.picksStore = func() (picks.Picks, error) {
+		return picks.Picks{"qwen-choices": {"layout": "coding"}}, nil
+	}
+	if code := app.list(nil); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	lines = printedLines(out.String())
+	for i, want := range []string{"  quant: q4* q6", "  layout: chat coding*"} {
+		if lines[3+i] != want {
+			t.Errorf("axis line %d is %q, want %q", i+1, lines[3+i], want)
+		}
+	}
+
+	// A stored pick the entry no longer holds is stale, not an error: the config
+	// default is marked, because that is what would launch.
+	app, out, errOut = newTestApp(tree, &fakeServers{})
+	app.picksStore = func() (picks.Picks, error) {
+		return picks.Picks{"qwen-choices": {"quant": "q8"}}, nil
+	}
+	if code := app.list(nil); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if lines = printedLines(out.String()); lines[3] != "  quant: q4* q6" {
+		t.Errorf("the axis reads %q, want the config default marked", lines[3])
+	}
+}
+
+// A tree of flat entries is listed exactly as it always was, and without going
+// near cria's state: there is no axis to mark a pick on.
+func TestListOfFlatEntriesReadsNoPicks(t *testing.T) {
+	app, out, errOut := newTestApp(listedTree(), &fakeServers{})
+	read := 0
+	app.picksStore = func() (picks.Picks, error) {
+		read++
+		return picks.Picks{}, nil
+	}
+
+	if code := app.list(nil); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if read != 0 {
+		t.Errorf("cria read the picks store %d time(s) for a tree with no choices", read)
+	}
+	if lines := printedLines(out.String()); len(lines) != 2 {
+		t.Errorf("cria printed %d lines:\n%s\nwant one per entry", len(lines), out)
+	}
+}
+
+// printedLines is a listing as the lines it is read down.
+func printedLines(printed string) []string {
+	return strings.Split(strings.TrimRight(printed, "\n"), "\n")
 }
 
 // --paths adds the file each entry was read from, as the last column: the answer

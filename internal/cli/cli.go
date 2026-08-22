@@ -6,7 +6,8 @@
 //
 // The subsystems reach this package through one struct, so an invocation is a
 // value: where its output goes, how it loads the config tree, how it checks the
-// tools, and how it reaches the state directory. Dispatch builds the real one;
+// tools, how it reaches the state directory and what has been picked in it.
+// Dispatch builds the real one;
 // the component tests build one over fakes, which is what lets every refusal,
 // exit code and rendered document be exercised with no server on the host.
 package cli
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/picks"
 	"cria/internal/procs"
 	"cria/internal/selfupdate"
 	"cria/internal/serve"
@@ -106,11 +108,12 @@ type app struct {
 	out io.Writer
 	err io.Writer
 
-	tree     func() (*config.Tree, error)       // the config tree, read on demand
-	tools    func(config.Settings) tools.Report // the host's managed tools
-	servers  func() (servers, error)            // the state directory and the process table
-	memoryMB func() (int, error)                // the machine's memory; refuses off macOS
-	updater  func() updater                     // GitHub's releases and the binary on disk
+	tree       func() (*config.Tree, error)       // the config tree, read on demand
+	tools      func(config.Settings) tools.Report // the host's managed tools
+	servers    func() (servers, error)            // the state directory and the process table
+	picksStore func() (picks.Picks, error)        // what was picked before this invocation
+	memoryMB   func() (int, error)                // the machine's memory; refuses off macOS
+	updater    func() updater                     // GitHub's releases and the binary on disk
 
 	// tui is the program bare `cria` opens. It arrives as a function rather
 	// than an import so this package stays a command-line router: routing to
@@ -133,7 +136,8 @@ func Dispatch(args []string, version string, tui func() error) int {
 }
 
 // newApp wires the real world: the process's own streams, the config tree where
-// config.Root puts it, the host's tools, and a manager over the state directory.
+// config.Root puts it, the host's tools, a manager over the state directory and
+// the picks stored beside it.
 func newApp(tui func() error) *app {
 	return &app{
 		out:            os.Stdout,
@@ -141,6 +145,7 @@ func newApp(tui func() error) *app {
 		tree:           loadTree,
 		tools:          tools.Check,
 		servers:        newManager,
+		picksStore:     loadPicks,
 		memoryMB:       physicalMemoryMB,
 		updater:        func() updater { return selfupdate.New() },
 		tui:            tui,
@@ -222,6 +227,36 @@ func newManager() (servers, error) {
 		return nil, err
 	}
 	return serve.New(root, procs.System{}), nil
+}
+
+// loadPicks reads the picks store out of the state root, where it sits beside
+// the records: picks are cria's own state, not config (docs/specs/CONFIG.md,
+// Choices). It is read on demand for the same reason the manager is built on
+// demand — the subcommands that never look at an entry's choices have no
+// business resolving a state directory.
+func loadPicks() (picks.Picks, error) {
+	root, err := serve.Root()
+	if err != nil {
+		return picks.Picks{}, err
+	}
+	return picks.Load(root)
+}
+
+// storedPicks is what was picked before this invocation. Reading is all the CLI
+// ever does with the store: a `choice=option` argument overrides one start and
+// is gone after it, and the picker is the only thing that writes
+// (docs/specs/CONFIG.md, Choices).
+//
+// A store cria could not read is an aside, never a refusal. The file is cria's
+// own state and it always answers with usable picks — the config defaults —
+// so the launch that follows is a launch, and the note is what says why it may
+// not be the one that was picked last.
+func (a *app) storedPicks() picks.Picks {
+	stored, err := a.picksStore()
+	if err != nil {
+		a.note("%v", err)
+	}
+	return stored
 }
 
 // printf writes what the invocation was asked for: the answer, the progress

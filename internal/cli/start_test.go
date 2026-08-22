@@ -3,11 +3,14 @@ package cli
 import (
 	"errors"
 	"maps"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/picks"
 	"cria/internal/serve"
 	"cria/internal/tools"
 )
@@ -546,5 +549,276 @@ func TestStartWaitFollowsADownload(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "qwen is running") {
 		t.Errorf("cria printed %q, want the verdict the wait settled on", out)
+	}
+}
+
+// storedIn points an invocation at a picks store on disk. Every test that is
+// about the store uses a temp state root: what cria writes there is exactly what
+// is being asserted, and nothing of the machine's own state is read or touched.
+func storedIn(a *app, root string) {
+	a.picksStore = func() (picks.Picks, error) { return picks.Load(root) }
+}
+
+// writeStoredPicks puts a picks store in a state root, spelled by hand — the
+// file cria wrote on some earlier run (internal/picks).
+func writeStoredPicks(t *testing.T, root, document string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "choices.json"), []byte(document), 0o644); err != nil {
+		t.Fatalf("writing the picks store: %v", err)
+	}
+}
+
+// A pick on the command line is what the start composes with, typed on either
+// side of the id like the flag it shares the line with (docs/specs/CLI.md).
+func TestStartTakesPicksFromTheCommandLine(t *testing.T) {
+	tree := testTree()
+	tree.Entries = append(tree.Entries, choicesEntry())
+
+	for _, args := range [][]string{{"qwen-choices", "quant=q6"}, {"quant=q6", "qwen-choices"}} {
+		fake := &fakeServers{record: testRecord()}
+		app, _, errOut := newTestApp(tree, fake)
+
+		if code := app.start(args); code != exitOK {
+			t.Fatalf("`cria start %s` exited %d, want %d (stderr: %s)", strings.Join(args, " "), code, exitOK, errOut)
+		}
+		if len(fake.picked) != 1 || !maps.Equal(fake.picked[0], config.Selection{"quant": "q6"}) {
+			t.Errorf("`cria start %s` carried the picks %v, want the one that was typed",
+				strings.Join(args, " "), fake.picked)
+		}
+	}
+
+	// Several picks compose together, and an axis nobody named keeps its config
+	// default.
+	tree = testTree()
+	tree.Entries = append(tree.Entries, pickyEntry())
+	fake := &fakeServers{record: testRecord()}
+	app, _, errOut := newTestApp(tree, fake)
+
+	if code := app.start([]string{"qwen-choices", "quant=q6", "layout=coding"}); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if len(fake.picked) != 1 || !maps.Equal(fake.picked[0], config.Selection{"quant": "q6", "layout": "coding"}) {
+		t.Errorf("the start carried the picks %v, want both of the ones that were typed", fake.picked)
+	}
+}
+
+// A bare start launches what was picked last: the store's picks over the config
+// defaults, and an explicit pick over both — per axis, so naming one leaves the
+// others where they were (docs/specs/CONFIG.md, Choices).
+func TestStartLaunchesTheStoredPicks(t *testing.T) {
+	root := t.TempDir()
+	writeStoredPicks(t, root, `{"qwen-choices": {"quant": "q6"}}`)
+
+	tree := testTree()
+	tree.Entries = append(tree.Entries, pickyEntry())
+
+	fake := &fakeServers{record: testRecord()}
+	app, _, errOut := newTestApp(tree, fake)
+	storedIn(app, root)
+
+	if code := app.start([]string{"qwen-choices"}); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if len(fake.picked) != 1 || !maps.Equal(fake.picked[0], config.Selection{"quant": "q6", "layout": "chat"}) {
+		t.Errorf("a bare start carried the picks %v, want the stored quant and the default layout", fake.picked)
+	}
+
+	fake = &fakeServers{record: testRecord()}
+	app, _, errOut = newTestApp(tree, fake)
+	storedIn(app, root)
+
+	if code := app.start([]string{"qwen-choices", "layout=coding"}); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if len(fake.picked) != 1 || !maps.Equal(fake.picked[0], config.Selection{"quant": "q6", "layout": "coding"}) {
+		t.Errorf("the start carried the picks %v, want the typed layout over the stored quant", fake.picked)
+	}
+
+	// A stored pick the entry no longer holds is not an error: the config default
+	// stands in for it, and the launch goes ahead.
+	writeStoredPicks(t, root, `{"qwen-choices": {"quant": "q8"}}`)
+	fake = &fakeServers{record: testRecord()}
+	app, _, errOut = newTestApp(tree, fake)
+	storedIn(app, root)
+
+	if code := app.start([]string{"qwen-choices"}); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if len(fake.picked) != 1 || !maps.Equal(fake.picked[0], config.Selection{"quant": "q4", "layout": "chat"}) {
+		t.Errorf("a start under a stale stored pick carried %v, want the config defaults", fake.picked)
+	}
+}
+
+// A pick on the command line writes nothing. It composes one launch and is gone
+// after it, so an agent's experiment never changes what the next bare start
+// launches (docs/specs/CONFIG.md, Choices).
+func TestStartNeverWritesThePicksStore(t *testing.T) {
+	tree := testTree()
+	tree.Entries = append(tree.Entries, choicesEntry())
+
+	// A state root with no store at all: a start under an explicit pick must not
+	// be what creates one.
+	root := t.TempDir()
+	fake := &fakeServers{record: testRecord()}
+	app, _, errOut := newTestApp(tree, fake)
+	storedIn(app, root)
+
+	if code := app.start([]string{"qwen-choices", "quant=q6"}); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	left, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("reading the state root: %v", err)
+	}
+	if len(left) != 0 {
+		t.Errorf("the start left %d file(s) in the state root, want the store untouched: %v", len(left), left)
+	}
+
+	// And a store that was already there comes back byte for byte: the pick that
+	// overrode it changed the launch, not the file.
+	document := `{"qwen-choices": {"quant": "q6"}}`
+	writeStoredPicks(t, root, document)
+
+	fake = &fakeServers{record: testRecord()}
+	app, _, errOut = newTestApp(tree, fake)
+	storedIn(app, root)
+
+	if code := app.start([]string{"qwen-choices", "quant=q4"}); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if len(fake.picked) != 1 || !maps.Equal(fake.picked[0], config.Selection{"quant": "q4"}) {
+		t.Errorf("the start carried the picks %v, want the one-shot pick over the stored one", fake.picked)
+	}
+	after, err := os.ReadFile(filepath.Join(root, "choices.json"))
+	if err != nil {
+		t.Fatalf("reading the picks store back: %v", err)
+	}
+	if string(after) != document {
+		t.Errorf("the picks store reads %q, want it exactly as it was: %q", after, document)
+	}
+}
+
+// A picks store cria cannot read is an aside, not a refusal: the launch goes
+// ahead on the config defaults, and the note is what says they may not be what
+// was picked last (docs/specs/CONFIG.md, Choices).
+func TestStartNotesABrokenPicksStore(t *testing.T) {
+	root := t.TempDir()
+	writeStoredPicks(t, root, "{ this was hand-edited")
+
+	tree := testTree()
+	tree.Entries = append(tree.Entries, choicesEntry())
+	fake := &fakeServers{record: testRecord()}
+	app, out, errOut := newTestApp(tree, fake)
+	storedIn(app, root)
+
+	if code := app.start([]string{"qwen-choices"}); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if len(fake.picked) != 1 || !maps.Equal(fake.picked[0], config.Selection{"quant": "q4"}) {
+		t.Errorf("the start carried the picks %v, want the config defaults", fake.picked)
+	}
+	for _, want := range []string{"note:", "unreadable", "using the config defaults"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("cria printed %q on stderr, want it to contain %q", errOut, want)
+		}
+	}
+	if !strings.Contains(out.String(), "started qwen") {
+		t.Errorf("cria printed %q on stdout, want the launch the note did not stop", out)
+	}
+}
+
+// A pick cria cannot read as one is a command line it cannot route: it costs the
+// usage code and names the form it wanted (docs/specs/CLI.md).
+func TestStartRefusesAPickItCannotRead(t *testing.T) {
+	cases := []struct {
+		name     string
+		args     []string
+		contains string
+	}{
+		{
+			name:     "the same choice picked twice",
+			args:     []string{"qwen-choices", "quant=q4", "quant=q6"},
+			contains: `choice "quant" is picked twice (q4 and q6)`,
+		},
+		{
+			name:     "a pick with no choice",
+			args:     []string{"qwen-choices", "=q4"},
+			contains: `"=q4" is not a pick`,
+		},
+		{
+			name:     "a pick with no option",
+			args:     []string{"qwen-choices", "quant="},
+			contains: `"quant=" is not a pick`,
+		},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			tree := testTree()
+			tree.Entries = append(tree.Entries, choicesEntry())
+			fake := &fakeServers{record: testRecord()}
+			app, _, errOut := newTestApp(tree, fake)
+
+			if code := app.start(test.args); code != exitUsage {
+				t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitUsage, errOut)
+			}
+			for _, want := range []string{test.contains, "usage: " + startSynopsis} {
+				if !strings.Contains(errOut.String(), want) {
+					t.Errorf("cria printed %q, want it to contain %q", errOut, want)
+				}
+			}
+			if len(fake.started) != 0 {
+				t.Errorf("cria started %+v on a command line it could not read", fake.started)
+			}
+		})
+	}
+}
+
+// A pick that reads as one but names nothing the entry has is a failure, not a
+// usage error: the command line was routable, the entry just has no such
+// combination — and the refusal names what it does have (docs/specs/CLI.md).
+func TestStartRefusesPicksTheEntryDoesNotHave(t *testing.T) {
+	cases := []struct {
+		name  string
+		args  []string
+		wants []string
+	}{
+		{
+			name:  "a choice the entry has not",
+			args:  []string{"qwen-choices", "qunt=q4"},
+			wants: []string{`has no choice named "qunt"`, "its choices are: quant"},
+		},
+		{
+			name:  "an option the choice has not",
+			args:  []string{"qwen-choices", "quant=q8"},
+			wants: []string{`has no option named "q8"`, "its options are: q4, q6"},
+		},
+		{
+			name:  "a pick against a flat entry",
+			args:  []string{"qwen", "quant=q4"},
+			wants: []string{"has no choices", "quant"},
+		},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			tree := testTree()
+			tree.Entries = append(tree.Entries, choicesEntry())
+			fake := &fakeServers{record: testRecord()}
+			app, _, errOut := newTestApp(tree, fake)
+
+			if code := app.start(test.args); code != exitFailure {
+				t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitFailure, errOut)
+			}
+			for _, want := range test.wants {
+				if !strings.Contains(errOut.String(), want) {
+					t.Errorf("cria printed %q, want it to contain %q", errOut, want)
+				}
+			}
+			if len(fake.asked) != 0 || len(fake.started) != 0 {
+				t.Errorf("cria asked about ports %v and started %+v for a pick that names nothing",
+					fake.asked, fake.started)
+			}
+		})
 	}
 }
