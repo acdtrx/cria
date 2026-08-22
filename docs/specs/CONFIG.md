@@ -89,9 +89,12 @@ next to the options, where fit measurements already live.
 - **Composition**: the entry's `args`, then each choice's picked option's `args`,
   in the file's choice order. The effective `repo`/`quant` are the entry's unless
   a picked option replaces them.
-- **Collisions are loud, at load** (settled 2026-08-22): a flag token (leading
-  `-`) appearing in two parts that could ever compose together — the entry's
-  `args` and any option, or options of two *different* choices — is an error;
+- **Collisions are loud, at load** (settled 2026-08-22): a flag token appearing
+  in two parts that could ever compose together — the entry's `args` and any
+  option, or options of two *different* choices — is an error; a flag token is
+  leading `-`s followed by a letter (amended 2026-08-22, found in build: a bare
+  number like `-1` is a value flags commonly take, and two parts passing the
+  same number fight over nothing);
   options of the same choice share tokens freely (they are alternatives, and
   forcing the overlap apart is what keeps the axes orthogonal). The comparison is
   by token, values ignored — the same flag twice with equal values is still an

@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -146,6 +147,122 @@ func TestEntryRulesAccept(t *testing.T) {
 				Name:    "demo",
 			},
 		},
+		{
+			name: "an entry that varies on two axes",
+			entry: "backend = \"llama\"\nrepo = \"unsloth/Qwen3-30B-A3B-GGUF\"\nquant = \"UD-Q4_K_XL\"\nport = 8080\n" +
+				"args = [\"--jinja\"]\n" +
+				"[[choice]]\nname = \"quant\"\n" +
+				"  [[choice.option]]\n  name = \"q4\"\n  quant = \"UD-Q4_K_XL\"\n  args = [\"--ctx-size\", \"32768\"]\n" +
+				"  [[choice.option]]\n  name = \"q8\"\n  quant = \"Q8_0\"\n  args = [\"--ctx-size\", \"16384\"]\n" +
+				"[[choice]]\nname = \"slots\"\n" +
+				"  [[choice.option]]\n  name = \"one\"\n" +
+				"  [[choice.option]]\n  name = \"four\"\n  args = [\"--parallel\", \"4\"]\n",
+			want: Entry{
+				ID:      "demo",
+				Backend: BackendLlama,
+				Repo:    "unsloth/Qwen3-30B-A3B-GGUF",
+				Quant:   "UD-Q4_K_XL",
+				Port:    8080,
+				Host:    "0.0.0.0",
+				Name:    "demo",
+				Args:    []string{"--jinja"},
+				Choices: []Choice{
+					{
+						Name: "quant",
+						Options: []ChoiceOption{
+							{Name: "q4", Quant: "UD-Q4_K_XL", Args: []string{"--ctx-size", "32768"}},
+							{Name: "q8", Quant: "Q8_0", Args: []string{"--ctx-size", "16384"}},
+						},
+					},
+					{
+						Name: "slots",
+						Options: []ChoiceOption{
+							{Name: "one"},
+							{Name: "four", Args: []string{"--parallel", "4"}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "a one-option choice is a named block of args",
+			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\n" +
+				"[[choice]]\nname = \"debug\"\n  [[choice.option]]\n  name = \"verbose\"\n  args = [\"--verbose\"]\n",
+			want: Entry{
+				ID:      "demo",
+				Backend: BackendLlama,
+				Repo:    "org/name",
+				Port:    8080,
+				Host:    "0.0.0.0",
+				Name:    "demo",
+				Choices: []Choice{{
+					Name:    "debug",
+					Options: []ChoiceOption{{Name: "verbose", Args: []string{"--verbose"}}},
+				}},
+			},
+		},
+		{
+			name: "an mlx entry's options replace the repo, since a quantization is one",
+			entry: "backend = \"mlx\"\nrepo = \"mlx-community/Qwen3-30B-A3B-4bit\"\nport = 8080\n" +
+				"[[choice]]\nname = \"quant\"\n" +
+				"  [[choice.option]]\n  name = \"4bit\"\n  repo = \"mlx-community/Qwen3-30B-A3B-4bit\"\n" +
+				"  [[choice.option]]\n  name = \"8bit\"\n  repo = \"mlx-community/Qwen3-30B-A3B-8bit\"\n",
+			want: Entry{
+				ID:      "demo",
+				Backend: BackendMLX,
+				Repo:    "mlx-community/Qwen3-30B-A3B-4bit",
+				Port:    8080,
+				Host:    "0.0.0.0",
+				Name:    "demo",
+				Choices: []Choice{{
+					Name: "quant",
+					Options: []ChoiceOption{
+						{Name: "4bit", Repo: "mlx-community/Qwen3-30B-A3B-4bit"},
+						{Name: "8bit", Repo: "mlx-community/Qwen3-30B-A3B-8bit"},
+					},
+				}},
+			},
+		},
+		{
+			name: "options of one choice share flags freely — they are alternatives",
+			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\n" +
+				"[[choice]]\nname = \"ctx\"\n" +
+				"  [[choice.option]]\n  name = \"short\"\n  args = [\"--ctx-size\", \"8192\"]\n" +
+				"  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n",
+			want: Entry{
+				ID:      "demo",
+				Backend: BackendLlama,
+				Repo:    "org/name",
+				Port:    8080,
+				Host:    "0.0.0.0",
+				Name:    "demo",
+				Choices: []Choice{{
+					Name: "ctx",
+					Options: []ChoiceOption{
+						{Name: "short", Args: []string{"--ctx-size", "8192"}},
+						{Name: "long", Args: []string{"--ctx-size", "65536"}},
+					},
+				}},
+			},
+		},
+		{
+			name: "the same value in two axes is not a collision; only flags are compared",
+			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--seed\", \"-1\"]\n" +
+				"[[choice]]\nname = \"sampling\"\n  [[choice.option]]\n  name = \"greedy\"\n  args = [\"--top-k\", \"-1\"]\n",
+			want: Entry{
+				ID:      "demo",
+				Backend: BackendLlama,
+				Repo:    "org/name",
+				Port:    8080,
+				Host:    "0.0.0.0",
+				Name:    "demo",
+				Args:    []string{"--seed", "-1"},
+				Choices: []Choice{{
+					Name:    "sampling",
+					Options: []ChoiceOption{{Name: "greedy", Args: []string{"--top-k", "-1"}}},
+				}},
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -160,6 +277,12 @@ func TestEntryRulesAccept(t *testing.T) {
 			}
 		})
 	}
+}
+
+// entryWith is the smallest entry that loads, plus the lines a case is about: a
+// choice case then reads as the choice it tests and nothing else.
+func entryWith(lines string) string {
+	return "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\n" + lines
 }
 
 func TestEntryRulesReject(t *testing.T) {
@@ -299,6 +422,109 @@ func TestEntryRulesReject(t *testing.T) {
 			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\n[tools]\nhf = \"/usr/bin/hf\"\n",
 			wantKey: "tools",
 		},
+		{
+			name:    "choice must be a list of tables",
+			entry:   entryWith("choice = \"quant\"\n"),
+			wantKey: "choice",
+		},
+		{
+			name:    "a choice needs a name",
+			entry:   entryWith("[[choice]]\n  [[choice.option]]\n  name = \"q4\"\n"),
+			wantKey: "choice.name",
+		},
+		{
+			name:    "a choice name is spelled like an entry id",
+			entry:   entryWith("[[choice]]\nname = \"context size\"\n  [[choice.option]]\n  name = \"q4\"\n"),
+			wantKey: "choice.name",
+		},
+		{
+			name: "two choices may not share a name",
+			entry: entryWith("[[choice]]\nname = \"quant\"\n  [[choice.option]]\n  name = \"q4\"\n" +
+				"[[choice]]\nname = \"quant\"\n  [[choice.option]]\n  name = \"q8\"\n"),
+			wantKey: "choice.name",
+		},
+		{
+			name:    "a choice with no options has nothing to pick",
+			entry:   entryWith("[[choice]]\nname = \"quant\"\n"),
+			wantKey: "choice.option",
+		},
+		{
+			name:    "an empty option list has nothing to pick either",
+			entry:   entryWith("[[choice]]\nname = \"quant\"\noption = []\n"),
+			wantKey: "choice.option",
+		},
+		{
+			name:    "an unknown key inside a choice is a typo",
+			entry:   entryWith("[[choice]]\nname = \"quant\"\ndefault = \"q4\"\n  [[choice.option]]\n  name = \"q4\"\n"),
+			wantKey: "choice.default",
+		},
+		{
+			name:    "an option needs a name",
+			entry:   entryWith("[[choice]]\nname = \"quant\"\n  [[choice.option]]\n  quant = \"Q8_0\"\n"),
+			wantKey: "choice.option.name",
+		},
+		{
+			name:    "an option name is spelled like an entry id",
+			entry:   entryWith("[[choice]]\nname = \"quant\"\n  [[choice.option]]\n  name = \"q4:xl\"\n"),
+			wantKey: "choice.option.name",
+		},
+		{
+			name: "two options of one choice may not share a name",
+			entry: entryWith("[[choice]]\nname = \"quant\"\n" +
+				"  [[choice.option]]\n  name = \"q4\"\n  [[choice.option]]\n  name = \"q4\"\n"),
+			wantKey: "choice.option.name",
+		},
+		{
+			name:    "an unknown key inside an option is a typo",
+			entry:   entryWith("[[choice]]\nname = \"quant\"\n  [[choice.option]]\n  name = \"q4\"\n  ctx = 16384\n"),
+			wantKey: "choice.option.ctx",
+		},
+		{
+			name: "an option's quant belongs to llama only",
+			entry: "backend = \"mlx\"\nrepo = \"org/name\"\nport = 8080\n" +
+				"[[choice]]\nname = \"quant\"\n  [[choice.option]]\n  name = \"q8\"\n  quant = \"Q8_0\"\n",
+			wantKey: "choice.option.quant",
+		},
+		{
+			name:    "an option's repo must name an org",
+			entry:   entryWith("[[choice]]\nname = \"quant\"\n  [[choice.option]]\n  name = \"q4\"\n  repo = \"Qwen3-30B\"\n"),
+			wantKey: "choice.option.repo",
+		},
+		{
+			name: "only one choice may replace the quant",
+			entry: entryWith("[[choice]]\nname = \"quant\"\n  [[choice.option]]\n  name = \"q4\"\n  quant = \"UD-Q4_K_XL\"\n" +
+				"[[choice]]\nname = \"size\"\n  [[choice.option]]\n  name = \"big\"\n  quant = \"Q8_0\"\n"),
+			wantKey: "choice.option.quant",
+		},
+		{
+			name: "only one choice may replace the repo",
+			entry: entryWith("[[choice]]\nname = \"quant\"\n  [[choice.option]]\n  name = \"q4\"\n  repo = \"org/q4\"\n" +
+				"[[choice]]\nname = \"fork\"\n  [[choice.option]]\n  name = \"other\"\n  repo = \"org/other\"\n"),
+			wantKey: "choice.option.repo",
+		},
+		{
+			name:    "an option may not restate a flag cria composes",
+			entry:   entryWith("[[choice]]\nname = \"quant\"\n  [[choice.option]]\n  name = \"q4\"\n  args = [\"--port\", \"9090\"]\n"),
+			wantKey: "choice.option.args",
+		},
+		{
+			name: "a flag in the entry's args may not also be set by an option",
+			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--ctx-size\", \"16384\"]\n" +
+				"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n",
+			wantKey: "choice.option.args",
+		},
+		{
+			name: "the same flag with the same value is still two homes",
+			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--ctx-size\", \"16384\"]\n" +
+				"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"same\"\n  args = [\"--ctx-size\", \"16384\"]\n",
+			wantKey: "choice.option.args",
+		},
+		{
+			name: "options of two different choices may not set the same flag",
+			entry: entryWith("[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n" +
+				"[[choice]]\nname = \"offload\"\n  [[choice.option]]\n  name = \"cpu\"\n  args = [\"--ctx-size=8192\"]\n"),
+			wantKey: "choice.option.args",
+		},
 	}
 
 	for _, test := range tests {
@@ -313,6 +539,43 @@ func TestEntryRulesReject(t *testing.T) {
 			}
 			if keyErr.Key != test.wantKey {
 				t.Errorf("error names key %q, want %q (%v)", keyErr.Key, test.wantKey, err)
+			}
+		})
+	}
+}
+
+// A collision is about two places at once, so the refusal names both: the flag
+// and each home that sets it, which is what the author has to go and edit.
+func TestFlagCollisionNamesBothHomes(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry string
+		want  []string
+	}{
+		{
+			name: "the entry's args against an option",
+			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--ctx-size\", \"16384\"]\n" +
+				"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n",
+			want: []string{"--ctx-size", "the entry's args", `option "long" of choice "ctx"`},
+		},
+		{
+			name: "one axis against another",
+			entry: entryWith("[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n" +
+				"[[choice]]\nname = \"offload\"\n  [[choice.option]]\n  name = \"cpu\"\n  args = [\"--ctx-size=8192\"]\n"),
+			want: []string{"--ctx-size", `option "long" of choice "ctx"`, `option "cpu" of choice "offload"`},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			entry, err := loadOne(t, "", test.entry)
+			if err == nil {
+				t.Fatalf("entry was accepted as %+v, want the collision refused", entry)
+			}
+			for _, want := range test.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal is %q, want it to name %s", err, want)
+				}
 			}
 		})
 	}
@@ -472,7 +735,7 @@ func TestSchemaDefinitionsCarryTheirDocs(t *testing.T) {
 			if k.rules == "" {
 				t.Errorf("key %q has no rules line to document it", name)
 			}
-			if k.kind == kindTable {
+			if k.kind.holdsKeys() {
 				walk(t, k.keys, name+".")
 				continue
 			}
@@ -498,6 +761,7 @@ func TestKindNames(t *testing.T) {
 		{kindInteger, "integer"},
 		{kindStringList, "string[]"},
 		{kindTable, "table"},
+		{kindTableArray, "table[]"},
 	}
 	for _, test := range tests {
 		if got := test.kind.String(); got != test.want {

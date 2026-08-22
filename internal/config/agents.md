@@ -17,8 +17,10 @@ learn the schema from this page.
 - `cria new <id> [--llama|--mlx]` scaffolds a commented starting file (the same
   example `cria docs` prints) and opens `$EDITOR` on it — or write the file from
   scratch; both end at the same schema.
-- Another quant, or another set of args, is another entry file — not another
-  section in this one.
+- Another model is another entry file. One model run in variations — quants,
+  context sizes, feature toggles — declares them as `[[choice]]` axes inside its
+  own file, one axis per thing that varies, and flags that must vary together in
+  the same option.
 - cria composes the model, port and host flags itself. Every other server flag
   goes in `args`, verbatim; check the server's own `--help` for what belongs
   there, since cria does not validate them.

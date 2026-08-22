@@ -51,8 +51,8 @@ LAYOUT
 
   An entry's id is its filename minus .toml — the name "cria start <id>" takes. An
   id holds letters, digits, '-', '_' and '.'; anything else is refused. One file is
-  one launchable thing: another quant is another entry, another set of args is
-  another entry.
+  one launchable thing: another model is another entry, while one model run in
+  variations declares them as [[choice]] axes inside its own file.
 
 ENTRY KEYS — models/<id>.toml
 
@@ -147,7 +147,7 @@ func schemaRows(s schema, prefix string) []docsRow {
 			rules = string(k.onlyBackend) + " only — " + rules
 		}
 		rows = append(rows, docsRow{name: prefix + k.name, kind: k.kind.String(), required: required, rules: rules})
-		if k.kind == kindTable {
+		if k.kind.holdsKeys() {
 			rows = append(rows, schemaRows(k.keys, prefix+k.name+".")...)
 		}
 	}
@@ -167,10 +167,15 @@ func ExampleEntry(backend Backend) string {
 	var file strings.Builder
 	writeComment(&file, fmt.Sprintf(exampleEntryPreamble, backend, entrySchema.requiredNames()))
 	for _, k := range entrySchema {
-		if k.onlyBackend != "" && k.onlyBackend != backend {
+		if k.kind.holdsKeys() || (k.onlyBackend != "" && k.onlyBackend != backend) {
 			continue
 		}
 		writeExampleKey(&file, k, backend)
+	}
+	for _, k := range entrySchema {
+		if k.kind.holdsKeys() {
+			writeExampleAxis(&file, k, backend)
+		}
 	}
 	return file.String()
 }
@@ -178,6 +183,48 @@ func ExampleEntry(backend Backend) string {
 const exampleEntryPreamble = "A complete models/<id>.toml for the %q backend: every key cria understands, " +
 	"each under the rules that govern it. Required: %s. Delete the keys you do not " +
 	"need — cria never rewrites this file, so the comments you leave here stay."
+
+// writeExampleAxis writes an axis the entry could declare, commented out. An
+// entry needs none — the template someone is handed has to be launchable as it
+// lands — so the block shows the shape and the keys at their example values,
+// ready to have the comment markers taken off.
+func writeExampleAxis(file *strings.Builder, k key, backend Backend) {
+	file.WriteString("\n")
+	writeComment(file, strings.TrimRight(k.rules, ".")+". "+exampleAxisNote)
+	file.WriteString("#\n")
+	for _, line := range exampleBlockLines(k, "", "", backend) {
+		if line == "" {
+			file.WriteString("#\n")
+			continue
+		}
+		file.WriteString("# " + line + "\n")
+	}
+}
+
+const exampleAxisNote = "Uncomment the block below to declare one, and repeat its option table for every " +
+	"further pick."
+
+// exampleBlockLines renders one [[table]] block and the blocks nested in it as
+// the plain TOML an author would write, each key at its example value. Scalar
+// keys come before the nested blocks because TOML gives every key after a header
+// to that header's table.
+func exampleBlockLines(k key, prefix, indent string, backend Backend) []string {
+	lines := []string{indent + k.header(prefix)}
+	for _, sub := range k.keys {
+		if sub.kind.holdsKeys() || (sub.onlyBackend != "" && sub.onlyBackend != backend) {
+			continue
+		}
+		lines = append(lines, indent+sub.name+" = "+sub.exampleFor(backend))
+	}
+	for _, sub := range k.keys {
+		if !sub.kind.holdsKeys() {
+			continue
+		}
+		lines = append(lines, "")
+		lines = append(lines, exampleBlockLines(sub, prefix+k.name+".", indent+"  ", backend)...)
+	}
+	return lines
+}
 
 // exampleSettings renders a complete config.toml. Scalar keys come before any
 // table because TOML gives every key after a [table] header to that table; the
@@ -196,7 +243,7 @@ func exampleSettings() string {
 		}
 		file.WriteString("\n")
 		writeComment(&file, k.rules)
-		file.WriteString("[" + k.name + "]\n")
+		file.WriteString(k.header("") + "\n")
 		for _, sub := range k.keys {
 			writeExampleKey(&file, sub, "")
 		}

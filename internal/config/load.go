@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -144,19 +145,15 @@ func resolveEntry(id, path string, table map[string]any, settings Settings) (*En
 		Args:    optStrings(table, "args"),
 	}
 
-	// A key the schema binds to one backend is refused on any other, from the same
-	// declaration `cria docs` renders that backend's example from.
-	for _, k := range entrySchema {
-		if k.onlyBackend == "" || k.onlyBackend == entry.Backend {
-			continue
-		}
-		if _, present := table[k.name]; present {
-			return nil, &KeyError{
-				Key:    k.name,
-				Reason: fmt.Sprintf("only the %q backend takes it; this entry's backend is %q", k.onlyBackend, entry.Backend),
-			}
-		}
+	if err := refuseOtherBackendKeys(entrySchema, table, "", entry.Backend); err != nil {
+		return nil, err
 	}
+
+	choices, err := resolveChoices(table, entry.Backend, entry.Args)
+	if err != nil {
+		return nil, err
+	}
+	entry.Choices = choices
 
 	if entry.Port == 0 {
 		if settings.DefaultPort == 0 {
@@ -181,6 +178,145 @@ func resolveEntry(id, path string, table map[string]any, settings Settings) (*En
 	return &entry, nil
 }
 
+// refuseOtherBackendKeys refuses a key the schema binds to a backend this entry
+// does not run, from the same declaration `cria docs` renders that backend's
+// example from. prefix qualifies the key name the way the schema check does.
+func refuseOtherBackendKeys(s schema, table map[string]any, prefix string, backend Backend) error {
+	for _, k := range s {
+		if k.onlyBackend == "" || k.onlyBackend == backend {
+			continue
+		}
+		if _, present := table[k.name]; present {
+			return &KeyError{
+				Key:    prefix + k.name,
+				Reason: fmt.Sprintf("only the %q backend takes it; this entry's backend is %q", k.onlyBackend, backend),
+			}
+		}
+	}
+	return nil
+}
+
+// resolveChoices turns an entry's checked [[choice]] tables into its axes. It
+// holds every rule that needs more than one option in view: names that identify
+// a choice and a pick, a typed key replaced by one axis only, and the flag
+// collisions below (docs/specs/CONFIG.md).
+func resolveChoices(table map[string]any, backend Backend, baseArgs []string) ([]Choice, error) {
+	tables := optTables(table, "choice")
+	if len(tables) == 0 {
+		return nil, nil
+	}
+
+	choices := make([]Choice, 0, len(tables))
+	axisNames := map[string]bool{}
+	quantAxis, repoAxis := "", ""
+
+	for _, choiceTable := range tables {
+		choice := Choice{Name: optString(choiceTable, "name")}
+		if axisNames[choice.Name] {
+			return nil, &KeyError{
+				Key:    "choice.name",
+				Reason: fmt.Sprintf("the entry already has a choice named %q; a name identifies one axis", choice.Name),
+			}
+		}
+		axisNames[choice.Name] = true
+
+		optionNames := map[string]bool{}
+		for _, optionTable := range optTables(choiceTable, "option") {
+			if err := refuseOtherBackendKeys(choiceOptionSchema, optionTable, "choice.option.", backend); err != nil {
+				return nil, err
+			}
+			option := ChoiceOption{
+				Name:  optString(optionTable, "name"),
+				Quant: optString(optionTable, "quant"),
+				Repo:  optString(optionTable, "repo"),
+				Args:  optStrings(optionTable, "args"),
+			}
+			if optionNames[option.Name] {
+				return nil, &KeyError{
+					Key:    "choice.option.name",
+					Reason: fmt.Sprintf("choice %q already has an option named %q; a name identifies one pick", choice.Name, option.Name),
+				}
+			}
+			optionNames[option.Name] = true
+
+			// A key two axes both replace has no answer once both are picked — the same
+			// reason a flag may not live in two axes.
+			if option.Quant != "" {
+				if quantAxis != "" && quantAxis != choice.Name {
+					return nil, &KeyError{Key: "choice.option.quant", Reason: replacedTwice(quantAxis, choice.Name)}
+				}
+				quantAxis = choice.Name
+			}
+			if option.Repo != "" {
+				if repoAxis != "" && repoAxis != choice.Name {
+					return nil, &KeyError{Key: "choice.option.repo", Reason: replacedTwice(repoAxis, choice.Name)}
+				}
+				repoAxis = choice.Name
+			}
+
+			choice.Options = append(choice.Options, option)
+		}
+		choices = append(choices, choice)
+	}
+
+	if err := refuseFlagCollisions(baseArgs, choices); err != nil {
+		return nil, err
+	}
+	return choices, nil
+}
+
+// replacedTwice phrases the refusal of a key two axes both replace; both are
+// named because either one of them is the one to move.
+func replacedTwice(first, second string) string {
+	return fmt.Sprintf("the options of choices %q and %q both replace it, and both are picked at once; keep it on one axis", first, second)
+}
+
+// argsHome is one part of a launch that carries flags: the entry's own args, or
+// one option's. Options of the same choice are alternatives — they never compose
+// together, so they share flags freely; anything else can meet in one command
+// line (docs/specs/CONFIG.md).
+type argsHome struct {
+	label  string
+	choice int // the choice this home belongs to; -1 for the entry's own args
+	tokens []string
+}
+
+// refuseFlagCollisions refuses a flag two parts of a launch could both
+// contribute. It compares the parts pairwise rather than enumerating the
+// combinations they make: the pairs are what a collision is made of, and there
+// are few of them where combinations multiply.
+func refuseFlagCollisions(baseArgs []string, choices []Choice) error {
+	homes := []argsHome{{label: "the entry's args", choice: -1, tokens: flagTokens(baseArgs)}}
+	for i, choice := range choices {
+		for _, option := range choice.Options {
+			homes = append(homes, argsHome{
+				label:  fmt.Sprintf("option %q of choice %q", option.Name, choice.Name),
+				choice: i,
+				tokens: flagTokens(option.Args),
+			})
+		}
+	}
+
+	for i, home := range homes {
+		for _, earlier := range homes[:i] {
+			if earlier.choice == home.choice {
+				continue
+			}
+			for _, token := range home.tokens {
+				if !slices.Contains(earlier.tokens, token) {
+					continue
+				}
+				return &KeyError{
+					Key: "choice.option.args",
+					Reason: fmt.Sprintf("%s is set by %s and by %s, which compose into one launch; keep it in one of them",
+						token, earlier.label, home.label),
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // parseTable parses one config file into a plain table. Decoding into a map
 // rather than a Go struct is what lets the schema be the contract: it alone
 // decides which keys exist, what type each takes and what an error says.
@@ -197,9 +333,9 @@ func parseTable(data []byte) (map[string]any, error) {
 	return table, nil
 }
 
-// The three readers below run after schema.check has proved the file's types, so
-// a value of the wrong type is unreachable; an absent key reads as the zero
-// value, which resolveEntry and loadSettings turn into the documented default.
+// The readers below run after schema.check has proved the file's types, so a
+// value of the wrong type is unreachable; an absent key reads as the zero value,
+// which resolveEntry and loadSettings turn into the documented default.
 
 func optString(table map[string]any, name string) string {
 	value, ok := table[name].(string)
@@ -227,4 +363,16 @@ func optStrings(table map[string]any, name string) []string {
 		values[i] = element.(string)
 	}
 	return values
+}
+
+func optTables(table map[string]any, name string) []map[string]any {
+	list, ok := table[name].([]any)
+	if !ok {
+		return nil
+	}
+	tables := make([]map[string]any, len(list))
+	for i, element := range list {
+		tables[i] = element.(map[string]any)
+	}
+	return tables
 }

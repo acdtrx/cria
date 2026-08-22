@@ -17,6 +17,7 @@ const (
 	kindInteger
 	kindStringList
 	kindTable
+	kindTableArray
 )
 
 // String names the kind the way TOML and `cria docs` spell it.
@@ -30,9 +31,18 @@ func (k kind) String() string {
 		return "string[]"
 	case kindTable:
 		return "table"
+	case kindTableArray:
+		return "table[]"
 	default:
 		return fmt.Sprintf("kind(%d)", int(k))
 	}
+}
+
+// holdsKeys reports whether a value of this kind is made of further keys — a
+// [table] or a list of [[table]]s. Those keys carry their parent's name as a
+// prefix everywhere: in an error, in the docs table and in an example.
+func (k kind) holdsKeys() bool {
+	return k == kindTable || k == kindTableArray
 }
 
 // key is one config key: the type it takes, the rules it must satisfy, and the
@@ -59,6 +69,16 @@ func (k key) exampleFor(backend Backend) string {
 		return value
 	}
 	return k.example
+}
+
+// header spells the line a keyed value opens with in a file: [table] for one
+// table, [[table]] for each table of a list. prefix carries the enclosing key
+// names, the way TOML nests them.
+func (k key) header(prefix string) string {
+	if k.kind == kindTableArray {
+		return "[[" + prefix + k.name + "]]"
+	}
+	return "[" + prefix + k.name + "]"
 }
 
 // schema is an ordered list of keys; the order is the order `cria docs` prints
@@ -124,6 +144,75 @@ var entrySchema = schema{
 		rules:          "extra flags passed to the server verbatim; cria composes the model, port and host flags itself",
 		example:        `["--ctx-size", "16384", "--jinja"]`,
 		backendExample: map[Backend]string{BackendMLX: `["--max-tokens", "32768"]`},
+		check:          checkArgs,
+	},
+	{
+		name:  "choice",
+		kind:  kindTableArray,
+		rules: "a pick-one axis this entry varies on: the [[choice.option]] tables under it are the picks, and cria folds the picked one into the launch without reading its flags — so flags that must vary together belong in the same option",
+		keys:  choiceSchema,
+	},
+}
+
+// choiceSchema is one [[choice]]: a named axis and the options to pick between.
+// Rules that span options — names unique within the axis, a typed key or a flag
+// two parts of a launch would fight over — live in resolveChoices, the only place
+// that sees a whole entry's axes at once.
+var choiceSchema = schema{
+	{
+		name:     "name",
+		kind:     kindString,
+		required: true,
+		rules:    "the axis's name, unique within the entry; it is what `cria start <id> choice=option` names, so it is spelled like an entry id",
+		example:  `"quant"`,
+		check:    checkName,
+	},
+	{
+		name:     "option",
+		kind:     kindTableArray,
+		required: true,
+		rules:    "the picks, in file order; at least one, and the first is the default until a pick is made",
+		keys:     choiceOptionSchema,
+		check:    checkAtLeastOneOption,
+	},
+}
+
+// choiceOptionSchema is one [[choice.option]]: what this pick replaces and what
+// it adds. It is deliberately the entry's own vocabulary minus everything cria
+// resolves once per entry — a pick varies the model and its flags, never the port
+// it is served on.
+var choiceOptionSchema = schema{
+	{
+		name:           "name",
+		kind:           kindString,
+		required:       true,
+		rules:          "the pick's name, unique within its choice; spelled like an entry id",
+		example:        `"q4"`,
+		backendExample: map[Backend]string{BackendMLX: `"4bit"`},
+		check:          checkName,
+	},
+	{
+		name:        "quant",
+		kind:        kindString,
+		onlyBackend: BackendLlama,
+		rules:       "replaces the entry's quant when this option is picked; only one choice's options may set it",
+		example:     `"UD-Q4_K_XL"`,
+		check:       checkNonEmpty,
+	},
+	{
+		name:           "repo",
+		kind:           kindString,
+		rules:          "replaces the entry's repo when this option is picked (an mlx quantization is its own repo); only one choice's options may set it",
+		example:        `"unsloth/Qwen3-30B-A3B-128K-GGUF"`,
+		backendExample: map[Backend]string{BackendMLX: `"mlx-community/Qwen3-30B-A3B-8bit"`},
+		check:          checkRepo,
+	},
+	{
+		name:           "args",
+		kind:           kindStringList,
+		rules:          "appended to the entry's args when this option is picked; a flag set here may not also be set by the entry's args or by another choice's options, since those compose into one launch",
+		example:        `["--n-cpu-moe", "24"]`,
+		backendExample: map[Backend]string{BackendMLX: `["--temp", "0.7"]`},
 		check:          checkArgs,
 	},
 }
@@ -206,15 +295,24 @@ func (s schema) check(table map[string]any, prefix string) error {
 		if err := k.kind.match(value); err != nil {
 			return &KeyError{Key: prefix + k.name, Reason: err.Error()}
 		}
-		if k.kind == kindTable {
-			if err := k.keys.check(value.(map[string]any), prefix+k.name+"."); err != nil {
-				return err
-			}
-			continue
-		}
 		if k.check != nil {
 			if err := k.check(value); err != nil {
 				return &KeyError{Key: prefix + k.name, Reason: err.Error()}
+			}
+		}
+		switch k.kind {
+		case kindTable:
+			if err := k.keys.check(value.(map[string]any), prefix+k.name+"."); err != nil {
+				return err
+			}
+		case kindTableArray:
+			// Every table in the list is the same key, so they all check against the
+			// same sub-schema under the same name: the report points at the key, and
+			// the file has one place to look for it.
+			for _, element := range value.([]any) {
+				if err := k.keys.check(element.(map[string]any), prefix+k.name+"."); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -277,6 +375,16 @@ func (k kind) match(value any) error {
 	case kindTable:
 		if _, ok := value.(map[string]any); !ok {
 			return typeMismatch(k, value)
+		}
+	case kindTableArray:
+		list, ok := value.([]any)
+		if !ok {
+			return typeMismatch(k, value)
+		}
+		for i, element := range list {
+			if _, ok := element.(map[string]any); !ok {
+				return fmt.Errorf("element %d: want table, got %s", i, tomlType(element))
+			}
 		}
 	}
 	return nil
@@ -348,6 +456,27 @@ func checkNonEmpty(value any) error {
 	return nil
 }
 
+// checkName holds the charset of a name an author gives a choice or one of its
+// options: both are typed on the command line (`cria start <id> choice=option`),
+// so they are spelled exactly like an entry id.
+func checkName(value any) error {
+	name := value.(string)
+	if !isName(name) {
+		return fmt.Errorf("want letters, digits, '-', '_' and '.', got %q", name)
+	}
+	return nil
+}
+
+// checkAtLeastOneOption refuses an axis with nothing on it: a choice exists to be
+// picked from, and one option is already meaningful — a named block of args that
+// is always on.
+func checkAtLeastOneOption(value any) error {
+	if len(value.([]any)) == 0 {
+		return fmt.Errorf("want at least one option to pick between, got an empty list")
+	}
+	return nil
+}
+
 // checkAbsPath refuses a relative tool path: the override exists precisely to
 // bypass PATH lookup, so it must name the binary outright.
 func checkAbsPath(value any) error {
@@ -362,7 +491,10 @@ func checkAbsPath(value any) error {
 // separate-value and --flag=value spellings.
 func checkArgs(value any) error {
 	for i, element := range value.([]any) {
-		flag, _, _ := strings.Cut(element.(string), "=")
+		flag, ok := flagToken(element.(string))
+		if !ok {
+			continue
+		}
 		for _, composed := range composedFlags {
 			if flag == composed {
 				return fmt.Errorf("element %d: cria composes %s itself from this entry's keys; remove it from args", i, composed)
@@ -370,6 +502,37 @@ func checkArgs(value any) error {
 		}
 	}
 	return nil
+}
+
+// flagToken reads an args element as a flag: the flag it names, without any
+// --flag=value payload, and whether it names one at all. A leading '-' followed
+// by a letter is a flag; "-1" and "-0.5" are values a flag takes, and two parts
+// of one launch may pass the same number without fighting over anything.
+func flagToken(arg string) (string, bool) {
+	name, _, _ := strings.Cut(arg, "=")
+	rest := strings.TrimLeft(name, "-")
+	if rest == name || rest == "" {
+		return "", false
+	}
+	switch first := rest[0]; {
+	case first >= 'a' && first <= 'z', first >= 'A' && first <= 'Z':
+		return name, true
+	default:
+		return "", false
+	}
+}
+
+// flagTokens lists the flags an args list sets. Values are left out, so two parts
+// of a launch setting the same flag collide whatever they set it to
+// (docs/specs/CONFIG.md).
+func flagTokens(args []string) []string {
+	var tokens []string
+	for _, arg := range args {
+		if token, ok := flagToken(arg); ok {
+			tokens = append(tokens, token)
+		}
+	}
+	return tokens
 }
 
 // isName reports whether s is spelled with the characters cria allows in an entry

@@ -37,6 +37,25 @@ type Entry struct {
 	Host    string   // resolved: the entry's own host, else default_host, else 0.0.0.0
 	Name    string   // display name; the id when the file sets none
 	Args    []string // extra flags handed to the server verbatim
+	Choices []Choice // the axes this entry varies on, in file order; none for a flat entry
+}
+
+// Choice is one axis an entry varies on: a named set of options, exactly one of
+// which is picked for a launch. cria folds the picked option into the command
+// line and never interprets what its flags mean (docs/specs/CONFIG.md).
+type Choice struct {
+	Name    string
+	Options []ChoiceOption // at least one, in file order; the first is the config default
+}
+
+// ChoiceOption is one pick of a choice: what it replaces and what it adds when it
+// is the picked one. Which combinations of options make sense is the author's
+// knowledge, not cria's — flags that must vary together live in one choice.
+type ChoiceOption struct {
+	Name  string
+	Quant string   // llama only; replaces the entry's quant when set
+	Repo  string   // replaces the entry's repo when set
+	Args  []string // appended to the entry's args
 }
 
 // Settings is config.toml: the defaults entries fall back to and the tool paths

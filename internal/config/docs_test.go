@@ -22,23 +22,35 @@ func TestDocsNamesEveryDefinedKey(t *testing.T) {
 }
 
 // The examples are the templates agents copy, so every key a backend takes must
-// appear in that backend's example at its example value.
+// appear in that backend's example at its example value — the keys of a nested
+// block under that block's own header.
 func TestDocsExamplesShowEveryKeyOfTheirBackend(t *testing.T) {
+	var walk func(t *testing.T, s schema, prefix, example string, backend Backend)
+	walk = func(t *testing.T, s schema, prefix, example string, backend Backend) {
+		for _, k := range s {
+			if k.onlyBackend != "" && k.onlyBackend != backend {
+				if strings.Contains(example, k.name+" =") {
+					t.Errorf("the %q example sets %q, a key only the %q backend takes", backend, k.name, k.onlyBackend)
+				}
+				continue
+			}
+			if k.kind.holdsKeys() {
+				if header := k.header(prefix); !strings.Contains(example, header) {
+					t.Errorf("the %q example has no %s block", backend, header)
+				}
+				walk(t, k.keys, prefix+k.name+".", example, backend)
+				continue
+			}
+			if assignment := k.name + " = " + k.exampleFor(backend); !strings.Contains(example, assignment) {
+				t.Errorf("the %q example does not hold %q", backend, assignment)
+			}
+		}
+	}
+
 	for _, backend := range []Backend{BackendLlama, BackendMLX} {
 		t.Run(string(backend), func(t *testing.T) {
 			example := ExampleEntry(backend)
-			for _, k := range entrySchema {
-				assignment := k.name + " = " + k.exampleFor(backend)
-				if k.onlyBackend != "" && k.onlyBackend != backend {
-					if strings.Contains(example, k.name+" =") {
-						t.Errorf("the %q example sets %q, a key only the %q backend takes", backend, k.name, k.onlyBackend)
-					}
-					continue
-				}
-				if !strings.Contains(example, assignment) {
-					t.Errorf("the %q example does not hold %q", backend, assignment)
-				}
-			}
+			walk(t, entrySchema, "", example, backend)
 			if !strings.Contains(Docs(), example) {
 				t.Errorf("the %q example is not part of the `cria docs` page", backend)
 			}
@@ -46,12 +58,74 @@ func TestDocsExamplesShowEveryKeyOfTheirBackend(t *testing.T) {
 	}
 }
 
+// An axis is opt-in structure, so the example carries it commented out: what
+// `cria new` writes is a launchable flat entry, and uncommenting the block is all
+// it takes to start varying the entry.
+func TestDocsExamplesCarryTheAxisCommentedOut(t *testing.T) {
+	for _, backend := range []Backend{BackendLlama, BackendMLX} {
+		t.Run(string(backend), func(t *testing.T) {
+			example := ExampleEntry(backend)
+			for _, k := range entrySchema {
+				if !k.kind.holdsKeys() {
+					continue
+				}
+				if !strings.Contains(example, "# "+k.header("")) {
+					t.Errorf("the %q example does not offer a commented-out %s block", backend, k.header(""))
+				}
+				if strings.Contains(example, "\n"+k.header("")) {
+					t.Errorf("the %q example declares a live %s block; the template must stay flat", backend, k.header(""))
+				}
+			}
+
+			entry, err := loadOne(t, "", example)
+			if err != nil {
+				t.Fatalf("the %q example was refused: %v", backend, err)
+			}
+			if len(entry.Choices) != 0 {
+				t.Errorf("the %q example loaded with axes %+v, want a flat entry", backend, entry.Choices)
+			}
+
+			uncommented, err := loadOne(t, "", uncommentAxis(example))
+			if err != nil {
+				t.Fatalf("the %q example with its axis uncommented was refused: %v", backend, err)
+			}
+			if len(uncommented.Choices) != 1 || len(uncommented.Choices[0].Options) != 1 {
+				t.Errorf("the uncommented %q example loaded axes %+v, want one axis of one option", backend, uncommented.Choices)
+			}
+		})
+	}
+}
+
+// uncommentAxis takes the comment markers off the block an example ends with —
+// what someone does by hand when they start varying an entry.
+func uncommentAxis(example string) string {
+	lines := strings.Split(example, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.HasPrefix(line, "# [[") {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return example
+	}
+	for i := start; i < len(lines); i++ {
+		if lines[i] == "#" {
+			lines[i] = ""
+			continue
+		}
+		lines[i] = strings.TrimPrefix(lines[i], "# ")
+	}
+	return strings.Join(lines, "\n")
+}
+
 func TestDocsSettingsExampleShowsEveryTreeKey(t *testing.T) {
 	example := exampleSettings()
 	for _, k := range treeSchema {
 		if k.kind == kindTable {
-			if !strings.Contains(example, "["+k.name+"]") {
-				t.Errorf("the config.toml example has no [%s] section", k.name)
+			if !strings.Contains(example, k.header("")) {
+				t.Errorf("the config.toml example has no %s section", k.header(""))
 			}
 			for _, sub := range k.keys {
 				if !strings.Contains(example, sub.name+" = "+sub.example) {
@@ -151,7 +225,7 @@ func definedKeyNames() []string {
 	walk = func(s schema, prefix string) {
 		for _, k := range s {
 			names = append(names, prefix+k.name)
-			if k.kind == kindTable {
+			if k.kind.holdsKeys() {
 				walk(k.keys, prefix+k.name+".")
 			}
 		}

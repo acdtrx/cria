@@ -1,6 +1,6 @@
 # Step 1 — `[[choice]]` schema
 
-Status: not started
+Status: done
 
 ## Intent
 
@@ -46,3 +46,29 @@ Nothing consumes choices yet.
 - `cria docs` output contains the choices schema and the commented example;
   the schema test keeps docs and parser in one source.
 - Suite green or expected reds named (mid-phase step).
+
+## Result
+
+- `internal/config` gains `Choice`/`ChoiceOption` on `Entry`, a `kindTableArray`
+  schema kind (checked per element under the same dotted key), `choiceSchema` +
+  `choiceOptionSchema` rendered into `cria docs` and the examples from the
+  parser's own definitions, and `resolveChoices`/`refuseFlagCollisions` in
+  `load.go` for the rules that need a whole entry in view. Collisions compare
+  homes pairwise (entry args + every option), never enumerating combinations.
+- All acceptance-criteria tests present: 5 accept cases, 18 refusals, the
+  broken-choice isolation test, and a docs test proving the commented example
+  axis loads when uncommented while the scaffold stays a launchable flat entry.
+- `go test ./...` fully green (no expected reds), `gofmt -l .` silent,
+  `go vet ./...` clean — verified independently in review.
+- Decided while implementing: a **flag token is leading `-`s followed by a
+  letter** — a bare `-1` is a value, not a flag, so two parts passing the same
+  number never collide (`docs/specs/CONFIG.md` amended in this step); error
+  keys are dotted and index-free (`choice.option.args`), the *reason* naming
+  the offending choice/option by name; `option = []` is refused as "nothing to
+  pick between" while a missing option table hits the required-key path; the
+  docs example shows one commented option table with a note to repeat it per
+  pick.
+- The `cria docs` LAYOUT paragraph and the embedded `agents.md` still carried
+  "another quant is another entry file" — replaced with the choices rule in the
+  same edit: both render on the page that documents the new schema, and a
+  self-contradiction there is an agent trap.

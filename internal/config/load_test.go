@@ -91,6 +91,43 @@ func TestLoadIsolatesBrokenEntries(t *testing.T) {
 	}
 }
 
+// A choice is validated per entry like everything else: an axis that fights the
+// entry it lives in disables that file and names the key, while the entries
+// around it load.
+func TestLoadIsolatesABrokenChoice(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		settingsFile:      "default_port = 8080\n",
+		"models/aaa.toml": "backend = \"llama\"\nrepo = \"org/aaa\"\n",
+		"models/broken.toml": "backend = \"llama\"\nrepo = \"org/broken\"\nargs = [\"--ctx-size\", \"16384\"]\n" +
+			"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n",
+		"models/zzz.toml": "backend = \"llama\"\nrepo = \"org/zzz\"\n" +
+			"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n",
+	})
+
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	var ids []string
+	for _, entry := range tree.Entries {
+		ids = append(ids, entry.ID)
+	}
+	if strings.Join(ids, ",") != "aaa,zzz" {
+		t.Errorf("valid entries are %v, want [aaa zzz]", ids)
+	}
+	if len(tree.Broken) != 1 || tree.Broken[0].ID != "broken" {
+		t.Fatalf("broken entries are %+v, want only broken", tree.Broken)
+	}
+	var keyErr *KeyError
+	if !errors.As(tree.Broken[0].Err, &keyErr) {
+		t.Fatalf("broken entry error is %T (%v), want a *KeyError", tree.Broken[0].Err, tree.Broken[0].Err)
+	}
+	if keyErr.Key != "choice.option.args" {
+		t.Errorf("broken entry names key %q, want %q", keyErr.Key, "choice.option.args")
+	}
+}
+
 // An id is a filename, so its charset is enforced at discovery: a file cria
 // cannot name is a broken entry, not a tree failure.
 func TestLoadRejectsIdsOutsideTheCharset(t *testing.T) {
