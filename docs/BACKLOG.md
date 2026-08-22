@@ -57,12 +57,22 @@ Group entries under headings as themes emerge.
   is unconditional — the machine is left as found even when validation fails —
   and a failed restore is its own loud error naming what is serving now.
   Rejected: validating on a second port with both models resident — the
-  machine that needs this is exactly the one without memory for two. To settle
-  at build time: target == the running entry (restart-and-prove in place?),
-  `--json` for the agent, and the note that other clients of the shared port
-  see the window. (noted 2026-08-23, user-designed, deferred by choice.)
-  Revisit trigger: the next agent-driven profile-writing session against a
-  live server — build it before that session; it is wanted.
+  machine that needs this is exactly the one without memory for two.
+  Settled 2026-08-23: target == the running entry follows the same protocol
+  (the point may be validating a new combination of it; restore replays the
+  record's picks either way, one code path); no `--json` — the agent's
+  contract is the exit code and a concise reason, and structured output earns
+  its place only if validate ever grows measurements; the busy gate refuses
+  when the running server is mid-generation, and the signal must be
+  is-processing, never open-connections — the validating agent's own client
+  holds an idle keep-alive socket to the port, so counting connections would
+  refuse on the caller's ghost. llama's documented `/slots` endpoint answers
+  it (verify at build time: the enable flag, and what the endpoint exposes on
+  a 0.0.0.0 bind before cria composes it); mlx documents no equivalent, so
+  mlx gets the honest degradation (a warning, or a coarse check that names
+  its false positive) plus an override flag. Revisit trigger: the next
+  agent-driven profile-writing session against a live server — build it
+  before that session; it is wanted.
 
 ## Cache view (orphans)
 
