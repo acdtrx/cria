@@ -126,9 +126,16 @@ keybinds get detailed as they are built.
     place, with the typed name left to correct. Rejected: a confirm-style panel
     — heavier than a one-line name needs.
 - **The choice picker** (settled 2026-08-22, user-designed): a selection key on
-  an entry with choices opens a small modal over the list — one row per choice,
-  the options laid along it; ↑/↓ moves between rows, ←/→ picks along one; ⏎ or
-  esc closes. Contracts:
+  an entry with choices opens a box floating over the list's corner, sized to
+  its rows, the list still visible around it (amended 2026-08-23 after live
+  use, user-chosen: the picker configures the entry the cursor is on, and
+  standing in the list's pane read as leaving the list rather than configuring
+  in place) — one row per choice, the options laid along it; ↑/↓ moves between
+  rows, ←/→ picks along one; ⏎ or esc closes. The current pick rides a small
+  mauve band — the picked chip — in the picker and the detail pane alike
+  (amended 2026-08-23, user-chosen over a star suffix: a background is the
+  mark, so the option's name stays the only text; the star remains `cria
+  list`'s, whose output draws no colour). Contracts:
   - Every change writes the pick to `choices.json` at the keypress — picks are
     the entry's new defaults "until I change them", so leaving the modal is a
     way out and never a discard (same doctrine as group management). One-shot
@@ -152,8 +159,9 @@ keybinds get detailed as they are built.
   flavors actually differ): accents on the roles by hue family, Surface1 as
   the selection band (amended 2026-08-21: Surface0, picked from the browser
   proposal, read as barely-there on the real terminal — dim red and heading
-  ride lit variants on the brighter band), Teal as the carry band — every
-  pair still answering to the AA test on the black ground.
+  ride lit variants on the brighter band), Teal as the carry band, Mauve as
+  the picked chip (amended 2026-08-23) — every pair still answering to the AA
+  test on the black ground.
 
 ## Open
 

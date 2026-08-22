@@ -15,10 +15,12 @@ import (
 // opens over the list, one row per axis with that axis's options laid along it
 // (docs/specs/TUI.md).
 //
-// It stands where the entry list stands and leaves the detail pane beside it
-// alone. The pane is what the picking is watched in — every ←/→ re-composes the
-// command line under the axes — so covering it would break the one loop the
-// picker exists for.
+// It floats over the list's corner, sized to its rows, and leaves the detail
+// pane beside it alone (serveScreen). Floating is the gesture's meaning:
+// configuring the entry the cursor is on, with the list still visible around
+// the box saying where that is. And the pane is what the picking is watched
+// in — every ←/→ re-composes the command line under the axes — so covering it
+// would break the one loop the picker exists for.
 //
 // Nothing here is held unsaved. Every ←/→ writes the store as it lands, so ⏎ and
 // esc are two ways out of a mode with nothing to confirm, and leaving is never a
@@ -209,37 +211,45 @@ func (m model) pickedChoice(entry config.Entry) (config.Choice, bool) {
 	return entry.Choices[clamped(m.picker.cursor, len(entry.Choices))], true
 }
 
-// pickerPane is the picker drawn where the entry list would be: the entry it is
-// about in the title, one row per axis under it. An entry whose axes have gone
-// draws nothing — the next keypress closes the mode, and a read of the tree
-// closes it before that (closeStalePicker).
-func (m model) pickerPane(width, rows int) string {
+// pickerBox is the floating box serveScreen lays over the list's corner: the
+// entry it is about in the title, one row per axis, sized to its own rows
+// rather than to the pane it covers. An entry whose axes have gone draws an
+// empty box — the next keypress closes the mode, and a read of the tree closes
+// it before that (closeStalePicker).
+//
+// The width is the widest row's, clamped so the box stays inside the screen
+// with its own margin on the right; the height is one line per axis, windowed
+// on the cursor when the screen is shorter than the entry has axes.
+func (m model) pickerBox(width, rows int) string {
 	title := paneTitle(picksTitle + titleSeparator + m.picker.entry)
 	entry, open := m.pickedEntry()
 	if !open {
-		return pane(title, width, sizeLines(nil, rows-2))
+		return pane(title, minWidth, sizeLines(nil, 1))
 	}
-	return pane(title, width, m.pickerLines(entry, width-4, rows-2))
-}
 
-// pickerLines is the axes as the picker draws them: one row per choice in the
-// file's order, each name in a column of its own with that choice's options
-// along it in the file's order, the current pick starred the way the detail pane
-// stars it. The row the cursor is on rides the band, marker included — the entry
-// list's own vocabulary, so the picker reads as part of the list it stands in.
-//
-// One reading of the picks draws every row, and it is the same reading the
-// detail pane beside it composes its command line from (m.picks).
-func (m model) pickerLines(entry config.Entry, inner, capacity int) []string {
+	// One reading of the picks draws every row, and it is the same reading the
+	// detail pane beside the box composes its command line from (m.picks).
 	selection := m.picks(entry)
 	cursor := clamped(m.picker.cursor, len(entry.Choices))
 	column := choiceColumn(entry.Choices)
 
-	lines := make([]string, 0, len(entry.Choices))
+	paints := make([]rowPaint, 0, len(entry.Choices))
+	rows2 := make([]string, 0, len(entry.Choices))
+	widest := 0
 	for at, choice := range entry.Choices {
-		lines = append(lines, choiceLine(choice, selection, at == cursor, inner, column))
+		paint, row := choiceRow(choice, selection, at == cursor, column)
+		widest = max(widest, lipgloss.Width(row))
+		paints = append(paints, paint)
+		rows2 = append(rows2, row)
 	}
-	return sizeLines(window(lines, cursor, capacity), capacity)
+
+	boxWidth := min(max(widest+4, lipgloss.Width(title)+6, minWidth), width-2*overlayX)
+	lines := make([]string, len(rows2))
+	for i, row := range rows2 {
+		lines[i] = paints[i].fill(row, boxWidth-4)
+	}
+	capacity := min(len(lines), max(rows-overlayY-2, 1))
+	return pane(title, boxWidth, sizeLines(window(lines, cursor, capacity), capacity))
 }
 
 // choiceColumn is how wide the axis-name column has to be for every name to fit
@@ -257,21 +267,24 @@ func choiceColumn(choices []config.Choice) int {
 // own word apart from the options after it.
 func choiceLabel(choice config.Choice) string { return choice.Name + ":" }
 
-// choiceLine is one axis as a row of the picker: the name, then the options with
-// the current pick marked as the fact of the row and the rest as the context
-// around it — the detail pane's hierarchy, painted like a list row.
+// choiceRow is one axis as a row of the picker, unfilled so the box can size
+// itself to the widest before padding any (pickerBox): the name, then the
+// options with the current pick on the mauve chip (pickedStyle) and the rest as
+// the context around it — the detail pane's hierarchy, painted like a list row.
+// The chip keeps its own background on the cursor's band: the chip is what the
+// axis is set to, the band is where the cursor is.
 //
-// A row wider than the pane loses its tail rather than wrapping: a picker's row
+// A row wider than the box loses its tail rather than wrapping: a picker's row
 // is one axis, and ←/→ walk it whether or not every option fits on screen.
-func choiceLine(choice config.Choice, selection config.Selection, cursor bool, inner, column int) string {
+func choiceRow(choice config.Choice, selection config.Selection, cursor bool, column int) (rowPaint, string) {
 	paint := paintFor(cursor)
 	pieces := []string{paint.cell(choiceLabel(choice), paint.quiet(), column)}
 	for _, option := range choice.Options {
 		if option.Name == selection[choice.Name] {
-			pieces = append(pieces, paint.fact().Render(option.Name+pickedMark))
+			pieces = append(pieces, pickedStyle.Render(option.Name))
 			continue
 		}
 		pieces = append(pieces, paint.quiet().Render(option.Name))
 	}
-	return paint.fill(paint.marker()+paint.join(pieces...), inner)
+	return paint, paint.marker() + paint.join(pieces...)
 }

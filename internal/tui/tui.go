@@ -418,8 +418,8 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.pressInManage(pressed)
 	case m.picker != nil:
 		// One entry's choices hold it while they are being picked over: the
-		// picker stands in the list's own pane, and the keys that read a row
-		// would read the row it is standing on (choicepick.go).
+		// picker floats over the list, and the keys that read a row would read
+		// the row it is floating on (choicepick.go).
 		return m.pressInPicker(pressed)
 	case m.pick != nil:
 		// The pick comes before the bench pane rather than after it: ⏎ in that

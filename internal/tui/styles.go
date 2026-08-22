@@ -63,6 +63,15 @@ const (
 	// active thing on screen, and both answer to the hierarchy test's walls.
 	carryHex        = "#344f4b" // Teal over the terminal's ground
 	carryHeadingHex = "#94e2d5" // Teal
+
+	// The picked chip: the option a bare start composes with rides a small
+	// band of its own hue, in the picker and in the detail pane alike. Mauve
+	// appears nowhere else in cria and means exactly this — a background
+	// carries the mark so the option's own name stays the only text on the
+	// row (user-chosen 2026-08-23 over a star suffix). Like the carried
+	// heading, the whole chip changes hue together.
+	pickedHex    = "#3a2f52" // Mauve over the terminal's ground
+	pickedInkHex = "#cba6f7" // Mauve
 )
 
 // terminalBG is the background cria is read against: a dark terminal, taken at
@@ -112,6 +121,8 @@ var palette = []swatch{
 	{name: "band heading", hex: bandHeadingHex, on: bandHex, floor: textFloor},
 
 	{name: "carry heading", hex: carryHeadingHex, on: carryHex, floor: textFloor},
+
+	{name: "picked", hex: pickedInkHex, on: pickedHex, floor: textFloor},
 }
 
 // The palette as lipgloss reads it.
@@ -132,6 +143,8 @@ var (
 	bandRed     = lipgloss.Color(bandRedHex)
 	carryBand   = lipgloss.Color(carryHex)
 	carryTeal   = lipgloss.Color(carryHeadingHex)
+	pickedBand  = lipgloss.Color(pickedHex)
+	pickedInk   = lipgloss.Color(pickedInkHex)
 )
 
 // The styles every screen draws with. One file holds them so a change of palette
@@ -181,6 +194,12 @@ var (
 	carryBandStyle    = lipgloss.NewStyle().Background(carryBand)
 	carryHeadingStyle = lipgloss.NewStyle().Foreground(carryTeal).Background(carryBand)
 )
+
+// The picked chip: only an option's own name ever rides it, so it needs no
+// other pairs. It keeps its background on the cursor's band too — the chip is
+// what the row is *set to*, and the band is where the cursor *is*, and the two
+// must stay readable through each other (choicepick.go, serveview.go).
+var pickedStyle = lipgloss.NewStyle().Foreground(pickedInk).Background(pickedBand)
 
 // rowPaint is how one row of a list is drawn: in the palette as it stands, or on
 // the cursor's band. Both lists ask for it the same way, so the highlight is one

@@ -34,19 +34,37 @@ func pickingFrame(t *testing.T) model {
 	return frame
 }
 
-// pickerLines is the picker as a person reads it, one line per axis.
+// pickerLines is the picker as a person reads it, one line per axis: the box
+// rendered through the real path and stripped of its frame. capacity is the
+// axis lines the screen would have room for (pickerBox's own arithmetic).
 func pickerLines(frame model, capacity int) []string {
-	entry, open := frame.pickedEntry()
-	if !open {
-		return nil
-	}
+	rows := strings.Split(frame.pickerBox(200, capacity+overlayY+2), "\n")
 	var lines []string
-	for _, line := range frame.pickerLines(entry, listWidth, capacity) {
-		if trimmed := strings.TrimRight(plain(line), " "); trimmed != "" {
-			lines = append(lines, trimmed)
+	for _, row := range rows[1 : len(rows)-1] {
+		text := strings.TrimSuffix(strings.TrimRight(plain(row), " "), "│")
+		text = strings.TrimRight(strings.TrimPrefix(text, "│ "), " ")
+		if text != "" {
+			lines = append(lines, text)
 		}
 	}
 	return lines
+}
+
+// pickedOn asserts which option rides the chip in the picker's box — the mark
+// the plain text no longer carries (pickedStyle, user-chosen over a star).
+func pickedOn(t *testing.T, frame model, on []string, off []string) {
+	t.Helper()
+	box := frame.pickerBox(200, 15)
+	for _, name := range on {
+		if !strings.Contains(box, pickedStyle.Render(name)) {
+			t.Errorf("option %q does not ride the picked chip", name)
+		}
+	}
+	for _, name := range off {
+		if strings.Contains(box, pickedStyle.Render(name)) {
+			t.Errorf("option %q rides the picked chip, and is not the pick", name)
+		}
+	}
 }
 
 // savedPicks is the store as the next launch would read it: off the file, not
@@ -78,22 +96,26 @@ func TestThePicksKeyOpensThePickerOverTheList(t *testing.T) {
 	}
 	assertNoPicksWritten(t, frame)
 
-	want := []string{"▸ quant:   q4*  q6  q8", "  layout:  coding*  chat"}
+	want := []string{"▸ quant:   q4  q6  q8", "  layout:  coding  chat"}
 	if got := pickerLines(frame, 12); !reflect.DeepEqual(got, want) {
 		t.Errorf("the picker draws\n%q\nwant\n%q", got, want)
 	}
+	pickedOn(t, frame, []string{"q4", "coding"}, []string{"q6", "q8", "chat"})
 
-	// The pane stands where the list stands, and the detail pane beside it keeps
+	// The box floats over the list's corner: the list's own title stays drawn
+	// above it saying what is underneath, and the detail pane beside it keeps
 	// showing what these picks would run.
-	screen := plain(frame.serveScreen(200, 14))
-	for _, part := range []string{picksTitle + titleSeparator + "qwen", "q4*",
+	raw := frame.serveScreen(200, 14)
+	screen := plain(raw)
+	for _, part := range []string{picksTitle + titleSeparator + "qwen",
+		"serve" + titleSeparator + "llama",
 		"-hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL", detailTitle} {
 		if !strings.Contains(screen, part) {
 			t.Errorf("the serve view does not draw %q while the picker is up:\n%s", part, screen)
 		}
 	}
-	if strings.Contains(screen, "serve"+titleSeparator+"llama") {
-		t.Errorf("the picker left the entry list drawn beside it:\n%s", screen)
+	if !strings.Contains(raw, pickedStyle.Render("q4")) {
+		t.Error("the pick rides no chip anywhere on the composed screen")
 	}
 
 	bar := plain(renderKeybar(200, frame.groups()...))
@@ -237,9 +259,10 @@ func TestEveryPickIsWrittenAtTheKeypress(t *testing.T) {
 	}
 
 	// The row shows what was written, and only the axis that moved changed.
-	if got, want := pickerLines(frame, 12), "▸ quant:   q4  q6*  q8"; got[0] != want {
+	if got, want := pickerLines(frame, 12), "▸ quant:   q4  q6  q8"; got[0] != want {
 		t.Errorf("the picked row reads %q, want %q", got[0], want)
 	}
+	pickedOn(t, frame, []string{"q6"}, []string{"q4", "q8"})
 }
 
 // A store cria cannot write is not a pick that did not happen: the picker stays
@@ -265,9 +288,10 @@ func TestAFailedWriteKeepsThePickerUpAndSaysSo(t *testing.T) {
 	if got := frame.stored["qwen"]["quant"]; got != "q6" {
 		t.Errorf("the session forgot the pick as well: %q", got)
 	}
-	if got, want := pickerLines(frame, 12)[0], "▸ quant:   q4  q6*  q8"; got != want {
+	if got, want := pickerLines(frame, 12)[0], "▸ quant:   q4  q6  q8"; got != want {
 		t.Errorf("the row reads %q, want %q — the pick is still shown", got, want)
 	}
+	pickedOn(t, frame, []string{"q6"}, []string{"q4"})
 }
 
 // ⏎ and esc both just close: every pick was written as it was made, so there is
@@ -333,11 +357,12 @@ func TestTheDetailPaneFollowsAPickMadeInThePicker(t *testing.T) {
 	frame := pickingFrame(t)
 
 	frame, _ = press(t, frame, right)
-	detail := plain(strings.Join(frame.detailLines(200, 30), "\n"))
-	for _, fact := range []string{"quant: q4 q6* q8", "-hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q6_K_XL"} {
-		if !strings.Contains(detail, fact) {
-			t.Errorf("the detail pane does not carry %q while the picker is up:\n%s", fact, detail)
-		}
+	drawn := strings.Join(frame.detailLines(200, 30), "\n")
+	if !strings.Contains(plain(drawn), "-hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q6_K_XL") {
+		t.Errorf("the command line does not follow the pick while the picker is up:\n%s", plain(drawn))
+	}
+	if !strings.Contains(drawn, pickedStyle.Render("q6")) || strings.Contains(drawn, pickedStyle.Render("q4")) {
+		t.Errorf("the pane's chip does not follow the pick while the picker is up:\n%s", plain(drawn))
 	}
 
 	frame, _ = pressAll(t, frame, typed('j'), right)

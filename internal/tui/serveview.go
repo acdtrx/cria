@@ -103,35 +103,66 @@ func (m model) entryNamed(id string) (config.Entry, bool) {
 // them: side by side where there is width for both, stacked where there is not.
 // Neither is dropped — a picker with no detail is a list of names cria has
 // already said are not worth memorising.
+//
+// The choice picker floats over the list's corner of whichever layout stands
+// (choicepick.go): the list stays visible around it — the picker is configuring
+// the entry the cursor is on, not replacing the place it was found — and the
+// detail pane is never what it covers, since watching the command line follow
+// the picks is the loop the picker exists for (docs/specs/TUI.md, amended
+// 2026-08-23 from standing in the list's pane, user-chosen after live use).
 func (m model) serveScreen(width, rows int) string {
-	if width >= sideBySideWidth {
+	var body string
+	switch {
+	case width >= sideBySideWidth:
 		listWidth := width / 2
 		detailWidth := width - listWidth
-		return lipgloss.JoinHorizontal(lipgloss.Top,
+		body = lipgloss.JoinHorizontal(lipgloss.Top,
 			m.listPane(listWidth, rows),
 			pane(paneTitle(detailTitle), detailWidth, m.detailLines(detailWidth-4, rows-2)))
+	default:
+		detailRows := rows / 2
+		listRows := rows - detailRows
+		if detailRows < minPaneRows || listRows < minPaneRows {
+			// Too short to stack: the list is the half that can be acted on, so
+			// it is the half that stays.
+			body = m.listPane(width, rows)
+			break
+		}
+		body = m.listPane(width, listRows) + "\n" +
+			pane(paneTitle(detailTitle), width, m.detailLines(width-4, detailRows-2))
 	}
 
-	detailRows := rows / 2
-	listRows := rows - detailRows
-	if detailRows < minPaneRows || listRows < minPaneRows {
-		// Too short to stack: the list is the half that can be acted on, so it
-		// is the half that stays.
-		return m.listPane(width, rows)
+	if m.picker == nil {
+		return body
 	}
-	return m.listPane(width, listRows) + "\n" +
-		pane(paneTitle(detailTitle), width, m.detailLines(width-4, detailRows-2))
+	return overlaid(body, m.pickerBox(width, rows))
 }
 
-// listPane is what stands in the serve view's list half: the entry list, or the
-// choice picker while one is open over it (choicepick.go). The detail pane is
-// never what a picker covers — watching the command line follow the picks is the
-// loop the picker exists for (docs/specs/TUI.md).
+// listPane is the serve view's list half: the entry list, always — the picker
+// floats over it rather than standing in for it (serveScreen).
 func (m model) listPane(width, rows int) string {
-	if m.picker != nil {
-		return m.pickerPane(width, rows)
-	}
 	return pane(m.serveTitle(), width, m.listLines(width-4, rows-2))
+}
+
+// Where the picker floats over the serve screen: one row down and two columns
+// in from the list's own corner, so the list's title and its first border row
+// stay visible saying what is underneath.
+const (
+	overlayX = 2
+	overlayY = 1
+)
+
+// overlaid composites the picker over the serve screen's top-left corner. The
+// compositor is what flattens and z-sorts the layers — a bare layer draws only
+// its own content — and the layers replace whole cells, spaces included, so the
+// box is opaque and what it covers is cut out rather than showing through.
+func overlaid(body, box string) string {
+	canvas := lipgloss.NewCanvas(lipgloss.Width(body), lipgloss.Height(body))
+	canvas.Compose(lipgloss.NewCompositor(
+		lipgloss.NewLayer(body),
+		lipgloss.NewLayer(box).X(overlayX).Y(overlayY).Z(1),
+	))
+	return canvas.Render()
 }
 
 // serveTitle names the list and says whose it is: the active backend in its own
@@ -366,16 +397,12 @@ func (m model) entryDetail(entry config.Entry, inner int) []string {
 	return lines
 }
 
-// pickedMark is what marks the option a start would compose with, the same star
-// `cria list` marks it with: one vocabulary across the surface
-// (docs/specs/CLI.md), and the answer on a terminal drawing no colour.
-const pickedMark = "*"
-
 // choiceRows is an entry's axes as the pane reads them: one block under a single
 // label, one line per choice in the file's order, that choice's options along it
-// in the file's order — `quant: q4* q6 q8`, the current pick starred and drawn
-// as a fact while the alternatives stay context. A flat entry has no axes and
-// gets no block.
+// in the file's order — the current pick on the mauve chip (pickedStyle) while
+// the alternatives stay context. The chip is the pane's whole mark: the star
+// stays `cria list`'s, whose output draws no colour (user-chosen 2026-08-23
+// over carrying the star here too). A flat entry has no axes and gets no block.
 //
 // The choice names live in the value rather than in the label column: they are
 // the author's own words, of no fixed length, and the column truncates at nine
@@ -396,7 +423,7 @@ func choiceRows(entry config.Entry, selection config.Selection, inner int) []str
 		pieces := []string{quietStyle.Render(choice.Name + ":")}
 		for _, option := range choice.Options {
 			if option.Name == selection[choice.Name] {
-				pieces = append(pieces, factStyle.Render(option.Name+pickedMark))
+				pieces = append(pieces, pickedStyle.Render(option.Name))
 				continue
 			}
 			pieces = append(pieces, quietStyle.Render(option.Name))
