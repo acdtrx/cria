@@ -45,6 +45,25 @@ Group entries under headings as themes emerge.
   detection.) Revisit trigger: a vision model's first start visibly sits in
   `starting` while gigabytes of projector download.
 
+- **`cria validate <id> [choice=option ...]` — swap, prove, restore.** An agent
+  running on the local model cannot validate a profile it just wrote: starting
+  it means stopping the model it thinks with. Validate makes that safe as one
+  blocking command — stop the running server (keeping its record), start the
+  target, wait green, send one real completion (fit-proofing: /health passes
+  while the first request can still die — the q8 speculative-batch death, the
+  mini's Metal limit), stop it, restart the previous server from its record's
+  own picks (replayOf's contract), exit with the target's verdict. The agent
+  only infers before and after the command, so its branch never burns. Restore
+  is unconditional — the machine is left as found even when validation fails —
+  and a failed restore is its own loud error naming what is serving now.
+  Rejected: validating on a second port with both models resident — the
+  machine that needs this is exactly the one without memory for two. To settle
+  at build time: target == the running entry (restart-and-prove in place?),
+  `--json` for the agent, and the note that other clients of the shared port
+  see the window. (noted 2026-08-23, user-designed, deferred by choice.)
+  Revisit trigger: the next agent-driven profile-writing session against a
+  live server — build it before that session; it is wanted.
+
 ## Cache view (orphans)
 
 - **Orphan blobs have no unit.** The real Qwen3.8 repo holds a complete 1.37 GB
