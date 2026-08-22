@@ -211,15 +211,15 @@ func (m model) pickedChoice(entry config.Entry) (config.Choice, bool) {
 	return entry.Choices[clamped(m.picker.cursor, len(entry.Choices))], true
 }
 
-// pickerBox is the floating box serveScreen lays over the list's corner: the
-// entry it is about in the title, one row per axis, sized to its own rows
-// rather than to the pane it covers. An entry whose axes have gone draws an
-// empty box — the next keypress closes the mode, and a read of the tree closes
-// it before that (closeStalePicker).
+// pickerBox is the floating box serveScreen centers over the list: the entry
+// it is about in the title, one row per axis, sized to its own rows rather
+// than to the pane it covers. An entry whose axes have gone draws an empty
+// box — the next keypress closes the mode, and a read of the tree closes it
+// before that (closeStalePicker).
 //
-// The width is the widest row's, clamped so the box stays inside the screen
-// with its own margin on the right; the height is one line per axis, windowed
-// on the cursor when the screen is shorter than the entry has axes.
+// width and rows are the list's own rectangle. The box's width is the widest
+// row's, clamped a cell inside the pane's; the height is one line per axis,
+// windowed on the cursor when the pane is shorter than the entry has axes.
 func (m model) pickerBox(width, rows int) string {
 	title := paneTitle(picksTitle + titleSeparator + m.picker.entry)
 	entry, open := m.pickedEntry()
@@ -243,12 +243,12 @@ func (m model) pickerBox(width, rows int) string {
 		rows2 = append(rows2, row)
 	}
 
-	boxWidth := min(max(widest+4, lipgloss.Width(title)+6, minWidth), width-2*overlayX)
+	boxWidth := min(max(widest+4, lipgloss.Width(title)+6, minWidth), width-2)
 	lines := make([]string, len(rows2))
 	for i, row := range rows2 {
 		lines[i] = paints[i].fill(row, boxWidth-4)
 	}
-	capacity := min(len(lines), max(rows-overlayY-2, 1))
+	capacity := min(len(lines), max(rows-2, 1))
 	return pane(title, boxWidth, sizeLines(window(lines, cursor, capacity), capacity))
 }
 

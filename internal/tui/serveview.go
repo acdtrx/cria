@@ -104,30 +104,33 @@ func (m model) entryNamed(id string) (config.Entry, bool) {
 // Neither is dropped — a picker with no detail is a list of names cria has
 // already said are not worth memorising.
 //
-// The choice picker floats over the list's corner of whichever layout stands
+// The choice picker floats centered over the list of whichever layout stands
 // (choicepick.go): the list stays visible around it — the picker is configuring
 // the entry the cursor is on, not replacing the place it was found — and the
 // detail pane is never what it covers, since watching the command line follow
 // the picks is the loop the picker exists for (docs/specs/TUI.md, amended
-// 2026-08-23 from standing in the list's pane, user-chosen after live use).
+// 2026-08-23 from standing in the list's pane, user-chosen after live use;
+// centered over corner-pinned the same day, same route).
 func (m model) serveScreen(width, rows int) string {
 	var body string
+	listWidth, listRows := width, rows // the list's rectangle, always at the body's top-left
 	switch {
 	case width >= sideBySideWidth:
-		listWidth := width / 2
+		listWidth = width / 2
 		detailWidth := width - listWidth
 		body = lipgloss.JoinHorizontal(lipgloss.Top,
 			m.listPane(listWidth, rows),
 			pane(paneTitle(detailTitle), detailWidth, m.detailLines(detailWidth-4, rows-2)))
 	default:
 		detailRows := rows / 2
-		listRows := rows - detailRows
-		if detailRows < minPaneRows || listRows < minPaneRows {
+		stackedRows := rows - detailRows
+		if detailRows < minPaneRows || stackedRows < minPaneRows {
 			// Too short to stack: the list is the half that can be acted on, so
 			// it is the half that stays.
 			body = m.listPane(width, rows)
 			break
 		}
+		listRows = stackedRows
 		body = m.listPane(width, listRows) + "\n" +
 			pane(paneTitle(detailTitle), width, m.detailLines(width-4, detailRows-2))
 	}
@@ -135,7 +138,7 @@ func (m model) serveScreen(width, rows int) string {
 	if m.picker == nil {
 		return body
 	}
-	return overlaid(body, m.pickerBox(width, rows))
+	return overlaid(body, m.pickerBox(listWidth, listRows), listWidth, listRows)
 }
 
 // listPane is the serve view's list half: the entry list, always — the picker
@@ -144,23 +147,19 @@ func (m model) listPane(width, rows int) string {
 	return pane(m.serveTitle(), width, m.listLines(width-4, rows-2))
 }
 
-// Where the picker floats over the serve screen: one row down and two columns
-// in from the list's own corner, so the list's title and its first border row
-// stay visible saying what is underneath.
-const (
-	overlayX = 2
-	overlayY = 1
-)
-
-// overlaid composites the picker over the serve screen's top-left corner. The
-// compositor is what flattens and z-sorts the layers — a bare layer draws only
-// its own content — and the layers replace whole cells, spaces included, so the
-// box is opaque and what it covers is cut out rather than showing through.
-func overlaid(body, box string) string {
+// overlaid composites the picker over the middle of the list's rectangle — the
+// pane the picking is about, whose own top-left is the body's. The compositor
+// is what flattens and z-sorts the layers — a bare layer draws only its own
+// content — and the layers replace whole cells, spaces included, so the box is
+// opaque and what it covers is cut out rather than showing through.
+func overlaid(body, box string, paneWidth, paneRows int) string {
 	canvas := lipgloss.NewCanvas(lipgloss.Width(body), lipgloss.Height(body))
 	canvas.Compose(lipgloss.NewCompositor(
 		lipgloss.NewLayer(body),
-		lipgloss.NewLayer(box).X(overlayX).Y(overlayY).Z(1),
+		lipgloss.NewLayer(box).
+			X(max((paneWidth-lipgloss.Width(box))/2, 0)).
+			Y(max((paneRows-lipgloss.Height(box))/2, 0)).
+			Z(1),
 	))
 	return canvas.Render()
 }

@@ -126,7 +126,7 @@ keybinds get detailed as they are built.
     place, with the typed name left to correct. Rejected: a confirm-style panel
     — heavier than a one-line name needs.
 - **The choice picker** (settled 2026-08-22, user-designed): a selection key on
-  an entry with choices opens a box floating over the list's corner, sized to
+  an entry with choices opens a box floating centered over the list, sized to
   its rows, the list still visible around it (amended 2026-08-23 after live
   use, user-chosen: the picker configures the entry the cursor is on, and
   standing in the list's pane read as leaving the list rather than configuring

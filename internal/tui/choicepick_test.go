@@ -38,7 +38,7 @@ func pickingFrame(t *testing.T) model {
 // rendered through the real path and stripped of its frame. capacity is the
 // axis lines the screen would have room for (pickerBox's own arithmetic).
 func pickerLines(frame model, capacity int) []string {
-	rows := strings.Split(frame.pickerBox(200, capacity+overlayY+2), "\n")
+	rows := strings.Split(frame.pickerBox(200, capacity+2), "\n")
 	var lines []string
 	for _, row := range rows[1 : len(rows)-1] {
 		text := strings.TrimSuffix(strings.TrimRight(plain(row), " "), "│")
