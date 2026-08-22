@@ -421,11 +421,14 @@ func choiceRows(entry config.Entry, selection config.Selection, inner int) []str
 	for _, choice := range entry.Choices {
 		pieces := []string{quietStyle.Render(choice.Name + ":")}
 		for _, option := range choice.Options {
+			// The chip's footprint on every option, picked or not: a pick made
+			// in the picker moves the lit background here too, and the block
+			// must not reflow under it (choicepick.go, choiceRow).
 			if option.Name == selection[choice.Name] {
 				pieces = append(pieces, pickedStyle.Render(option.Name))
 				continue
 			}
-			pieces = append(pieces, quietStyle.Render(option.Name))
+			pieces = append(pieces, quietStyle.Render(" "+option.Name+" "))
 		}
 		values = append(values, laidOut(pieces, room)...)
 	}

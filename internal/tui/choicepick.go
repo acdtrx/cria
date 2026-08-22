@@ -32,6 +32,12 @@ import (
 // the word the store, the CLI and the bar all use for the same thing.
 const picksTitle = "picks"
 
+// pickerFloor is the narrowest the floating box gets: a dialog sized purely to
+// two short axes reads as clutter stuck to the list, and air is what says
+// "this is a dialog" (user-chosen 2026-08-23). The pane it floats over can
+// still be narrower — the pane's own width wins (pickerBox).
+const pickerFloor = 40
+
 // picker is one entry's axes being picked over: which entry, and which axis the
 // cursor stands on. There is nothing else to keep — by the time the next key
 // arrives, whatever the last one picked is already on disk.
@@ -243,7 +249,7 @@ func (m model) pickerBox(width, rows int) string {
 		rows2 = append(rows2, row)
 	}
 
-	boxWidth := min(max(widest+4, lipgloss.Width(title)+6, minWidth), width-2)
+	boxWidth := min(max(widest+4, lipgloss.Width(title)+6, pickerFloor), width-2)
 	lines := make([]string, len(rows2))
 	for i, row := range rows2 {
 		lines[i] = paints[i].fill(row, boxWidth-4)
@@ -274,6 +280,11 @@ func choiceLabel(choice config.Choice) string { return choice.Name + ":" }
 // The chip keeps its own background on the cursor's band: the chip is what the
 // axis is set to, the band is where the cursor is.
 //
+// Every option wears the chip's footprint — a cell of padding either side —
+// whether or not it is the pick: rolling ←/→ must move the lit background along
+// a row that stands still, never reflow the row under the eye that is reading
+// it.
+//
 // A row wider than the box loses its tail rather than wrapping: a picker's row
 // is one axis, and ←/→ walk it whether or not every option fits on screen.
 func choiceRow(choice config.Choice, selection config.Selection, cursor bool, column int) (rowPaint, string) {
@@ -284,7 +295,7 @@ func choiceRow(choice config.Choice, selection config.Selection, cursor bool, co
 			pieces = append(pieces, pickedStyle.Render(option.Name))
 			continue
 		}
-		pieces = append(pieces, paint.quiet().Render(option.Name))
+		pieces = append(pieces, paint.quiet().Render(" "+option.Name+" "))
 	}
 	return paint, paint.marker() + paint.join(pieces...)
 }

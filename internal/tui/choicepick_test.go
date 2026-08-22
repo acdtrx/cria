@@ -96,7 +96,7 @@ func TestThePicksKeyOpensThePickerOverTheList(t *testing.T) {
 	}
 	assertNoPicksWritten(t, frame)
 
-	want := []string{"▸ quant:    q4   q6  q8", "  layout:   coding   chat"}
+	want := []string{"▸ quant:    q4    q6    q8", "  layout:   coding    chat"}
 	if got := pickerLines(frame, 12); !reflect.DeepEqual(got, want) {
 		t.Errorf("the picker draws\n%q\nwant\n%q", got, want)
 	}
@@ -261,7 +261,7 @@ func TestEveryPickIsWrittenAtTheKeypress(t *testing.T) {
 	}
 
 	// The row shows what was written, and only the axis that moved changed.
-	if got, want := pickerLines(frame, 12), "▸ quant:   q4   q6   q8"; got[0] != want {
+	if got, want := pickerLines(frame, 12), "▸ quant:    q4    q6    q8"; got[0] != want {
 		t.Errorf("the picked row reads %q, want %q", got[0], want)
 	}
 	pickedOn(t, frame, []string{"q6"}, []string{"q4", "q8"})
@@ -290,7 +290,7 @@ func TestAFailedWriteKeepsThePickerUpAndSaysSo(t *testing.T) {
 	if got := frame.stored["qwen"]["quant"]; got != "q6" {
 		t.Errorf("the session forgot the pick as well: %q", got)
 	}
-	if got, want := pickerLines(frame, 12)[0], "▸ quant:   q4   q6   q8"; got != want {
+	if got, want := pickerLines(frame, 12)[0], "▸ quant:    q4    q6    q8"; got != want {
 		t.Errorf("the row reads %q, want %q — the pick is still shown", got, want)
 	}
 	pickedOn(t, frame, []string{"q6"}, []string{"q4"})
