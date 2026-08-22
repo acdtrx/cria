@@ -1,6 +1,6 @@
 # Step 4 — the picks store
 
-Status: not started
+Status: done
 
 ## Intent
 
@@ -37,3 +37,29 @@ picks are lifecycle defaults, not TUI preferences, so they cannot live in
   (default < stored < explicit); stale stored pick skipped, bad explicit pick
   refused; pruning incl. nil tree.
 - Phase 2 ends here: full suite green, gofmt silent, vet clean.
+
+## Result
+
+- `internal/picks`: `Picks` (entry id → `config.Selection`), `Load`, `Save`,
+  `Merge`, `Prune` — the ui.json doctrine throughout (missing file = empty
+  silently; broken file = loud error alongside usable empty picks; atomic
+  temp+rename write; the next write repairs). 11 tests / 22 subtests on
+  `t.TempDir()`.
+- Decided while implementing: strictness for a map file is *shape*, not unknown
+  fields (exactly one JSON object of objects of strings, non-null, no empty
+  names — an empty name is junk, a name the tree lacks is staleness); `Merge`
+  refuses through `config.Resolve` after layering (one wording everywhere;
+  stale stored picks are dropped by `holdsOption` before Resolve looks, and
+  defaults make the selection total, so only explicit picks can be refused);
+  broken entry files keep every pick (cria knows the syntax broke, nothing
+  about the axes — the entry-groups membership ruling); an entry left with no
+  picks is dropped from the store (absent and empty say the same thing, one
+  spelling); `Prune` deep-copies always, nil tree included; sorted validation
+  and `MarshalIndent`'s sorted keys keep both errors and file bytes stable.
+- Callers arrive later by design: step 5 asserts no-write by the absence of
+  `choices.json` in a temp root (plain functions, no store interface — one was
+  deliberately not added); step 6's call is `picks.Merge(entry,
+  stored[entry.ID], nil)` — indexing the store already yields a usable nil
+  selection.
+- Phase 2 ends here: `go test -count=1 ./...` fully green, gofmt silent, vet
+  clean — verified independently in review.
