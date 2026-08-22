@@ -48,7 +48,7 @@ const refreshInterval = 2 * time.Second
 type servers interface {
 	Snapshots() (serve.StatusListing, error)
 	Running(entryID string) (serve.Server, bool, error)
-	Start(entry config.Entry, report tools.Report) (serve.Record, error)
+	Start(entry config.Entry, selection config.Selection, report tools.Report) (serve.Record, error)
 	Stop(record serve.Record) error
 	Kill(record serve.Record) error
 	Dismiss(record serve.Record) error

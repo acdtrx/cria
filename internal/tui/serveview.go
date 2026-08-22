@@ -366,7 +366,13 @@ func (m model) composedCommand(entry config.Entry) (string, bool) {
 	if !m.reported {
 		return "reading the host's tools…", false
 	}
-	command, err := serve.ComposedCommand(entry, m.report)
+	// The picks a start off this frame would use, so the line shown is the line
+	// spawned rather than one composed from another combination.
+	launch, err := config.Resolve(entry, m.picks(entry))
+	if err != nil {
+		return err.Error(), true
+	}
+	command, err := serve.ComposedCommand(entry, launch, m.report)
 	if err != nil {
 		return err.Error(), true
 	}

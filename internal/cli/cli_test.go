@@ -34,10 +34,11 @@ type fakeServers struct {
 	listeners    []int
 	listenersSet bool
 
-	started  []config.Entry // the entries Start was called with, in order
-	stopped  []string       // the entries Stop was called for, in order
-	warmed   []string       // the servers Warm was asked to load, in order
-	benched  []string       // the servers Bench was asked to measure, in order
+	started  []config.Entry     // the entries Start was called with, in order
+	picked   []config.Selection // the selection each of those starts carried
+	stopped  []string           // the entries Stop was called for, in order
+	warmed   []string           // the servers Warm was asked to load, in order
+	benched  []string           // the servers Bench was asked to measure, in order
 	specs    []serve.BenchSpec
 	asked    []int // the ports PortUse was asked about, in order
 	observed int   // how many snapshots the wait took
@@ -60,8 +61,9 @@ type fakeServers struct {
 	warmErr      error
 }
 
-func (f *fakeServers) Start(entry config.Entry, _ tools.Report) (serve.Record, error) {
+func (f *fakeServers) Start(entry config.Entry, selection config.Selection, _ tools.Report) (serve.Record, error) {
 	f.started = append(f.started, entry)
+	f.picked = append(f.picked, selection)
 	if f.startErr != nil {
 		return serve.Record{}, f.startErr
 	}
@@ -214,6 +216,23 @@ func testTree() *config.Tree {
 			Name:    "Qwen3 30B",
 			Args:    []string{"--ctx-size", "16384"},
 		}},
+	}
+}
+
+// choicesEntry is an entry with one axis, for the starts that are about picks.
+func choicesEntry() config.Entry {
+	return config.Entry{
+		ID:      "qwen-choices",
+		Path:    "/home/u/.config/cria/models/qwen-choices.toml",
+		Backend: config.BackendLlama,
+		Repo:    "unsloth/Qwen3-30B-A3B-GGUF",
+		Host:    "0.0.0.0",
+		Port:    8080,
+		Name:    "Qwen3 30B",
+		Choices: []config.Choice{{Name: "quant", Options: []config.ChoiceOption{
+			{Name: "q4", Quant: "UD-Q4_K_XL"},
+			{Name: "q6", Quant: "UD-Q6_K_XL"},
+		}}},
 	}
 }
 

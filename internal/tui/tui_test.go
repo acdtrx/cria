@@ -43,6 +43,7 @@ type fakeServers struct {
 	benchAt    time.Time
 
 	started   []string
+	picked    []config.Selection // the selection each start carried
 	stopped   []string
 	killed    []string
 	dismissed []string
@@ -77,8 +78,9 @@ func (f *fakeServers) Running(entryID string) (serve.Server, bool, error) {
 	return serve.Server{}, false, nil
 }
 
-func (f *fakeServers) Start(entry config.Entry, _ tools.Report) (serve.Record, error) {
+func (f *fakeServers) Start(entry config.Entry, selection config.Selection, _ tools.Report) (serve.Record, error) {
 	f.started = append(f.started, entry.ID)
+	f.picked = append(f.picked, selection)
 	if f.startErr != nil {
 		return serve.Record{}, f.startErr
 	}

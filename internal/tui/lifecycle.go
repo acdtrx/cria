@@ -137,13 +137,20 @@ func (m model) startSelected() (tea.Model, tea.Cmd) {
 // the port check — a host without llama-server has to hear about llama-server,
 // not about a busy port — and the port before anything is spawned.
 func (m model) launch(entry config.Entry) tea.Cmd {
-	settings := m.settings()
+	settings, selection := m.settings(), m.picks(entry)
 	check, servers := m.host.tools, m.host.servers
-	return func() tea.Msg { return startEntry(entry, settings, check, servers) }
+	return func() tea.Msg { return startEntry(entry, selection, settings, check, servers) }
+}
+
+// picks is what a start off this frame composes with: the entry's config
+// defaults — its first option per choice, and nothing at all for a flat entry
+// (docs/specs/CONFIG.md).
+func (m model) picks(entry config.Entry) config.Selection {
+	return config.DefaultSelection(entry)
 }
 
 // startEntry runs that sequence off the UI thread.
-func startEntry(entry config.Entry, settings config.Settings, check func(config.Settings) tools.Report, servers servers) startedMsg {
+func startEntry(entry config.Entry, selection config.Selection, settings config.Settings, check func(config.Settings) tools.Report, servers servers) startedMsg {
 	// Already running comes first (docs/specs/SERVE.md): it costs a record
 	// read, where the gates behind it exec programs — pressing ⏎ on the server
 	// that is already up must answer instantly and run nothing.
@@ -169,7 +176,7 @@ func startEntry(entry config.Entry, settings config.Settings, check func(config.
 		return startedMsg{entry: entry, holders: use.Holders}
 	}
 
-	record, err := servers.Start(entry, report)
+	record, err := servers.Start(entry, selection, report)
 	if err != nil {
 		return startedMsg{entry: entry, err: err}
 	}
@@ -321,13 +328,13 @@ func (m model) restartServer(record serve.Record) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	settings := m.settings()
+	settings, selection := m.settings(), m.picks(entry)
 	check, servers := m.host.tools, m.host.servers
 	return m.pend(entry.ID, verbRestarting), func() tea.Msg {
 		if err := servers.Stop(record); err != nil {
 			return startedMsg{entry: entry, err: err}
 		}
-		return startEntry(entry, settings, check, servers)
+		return startEntry(entry, selection, settings, check, servers)
 	}
 }
 

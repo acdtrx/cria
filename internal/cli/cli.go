@@ -81,7 +81,7 @@ const (
 // stop's three no-argument cases and a whole --wait without a state directory,
 // a listening port or a process on the host.
 type servers interface {
-	Start(entry config.Entry, report tools.Report) (serve.Record, error)
+	Start(entry config.Entry, selection config.Selection, report tools.Report) (serve.Record, error)
 	Stop(record serve.Record) error
 	List() (serve.Listing, error)
 	Running(entryID string) (serve.Server, bool, error)

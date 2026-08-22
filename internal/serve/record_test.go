@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -183,6 +184,70 @@ func TestListingKeepsTheGoodRecords(t *testing.T) {
 	}
 	if len(listing.Broken) != 1 || listing.Broken[0].EntryID != "broken" {
 		t.Fatalf("the listing reports %+v as broken, want the one broken record", listing.Broken)
+	}
+}
+
+// A record of an entry with axes carries the picks it was composed from, and the
+// strict read takes them back exactly as written (docs/specs/SERVE.md).
+func TestARecordCarriesThePicksItWasComposedFrom(t *testing.T) {
+	host := &fakeHost{}
+	manager := newManager(t, host)
+	entry := choicesEntry()
+	selection := config.Selection{"quant": "q6", "context": "short"}
+	written, _ := startPicked(t, manager, host, entry, selection, 4242)
+
+	loaded, found, err := manager.loadRecord(entry.ID)
+	if err != nil || !found {
+		t.Fatalf("loading the record of %s: found=%v, err=%v", entry.ID, found, err)
+	}
+	loaded.LaunchedAt = written.LaunchedAt
+	if !reflect.DeepEqual(loaded, written) {
+		t.Errorf("the record came back as\n  %+v\nwant\n  %+v", loaded, written)
+	}
+
+	// The picks a record holds are the launch's, not the entry's current
+	// defaults: a picker that moves on afterwards never rewrites what is running.
+	if !maps.Equal(loaded.Selection, selection) {
+		t.Errorf("the record's picks are %v, want %v", loaded.Selection, selection)
+	}
+}
+
+// The selection is read off the record file itself, both ways: a file that
+// carries picks hands them over, and a file without the key reads as a flat
+// entry's rather than as a broken record — records are transient, and nothing
+// migrates them (CLAUDE.md, feature-building mode).
+func TestASelectionIsReadOffTheRecordFile(t *testing.T) {
+	withPicks := strings.Replace(validRecord, `"quant": "UD-Q4_K_XL",`,
+		`"quant": "UD-Q4_K_XL",`+"\n  "+`"selection": {"quant": "q4", "context": "long"},`, 1)
+
+	cases := map[string]struct {
+		content string
+		want    config.Selection
+	}{
+		"a record that names its picks":  {content: withPicks, want: config.Selection{"quant": "q4", "context": "long"}},
+		"a record with no selection key": {content: validRecord, want: nil},
+		"a record whose selection is {}": {content: strings.Replace(validRecord, `"quant": "UD-Q4_K_XL",`, `"quant": "UD-Q4_K_XL",`+"\n  "+`"selection": {},`, 1), want: config.Selection{}},
+	}
+
+	for name, test := range cases {
+		t.Run(name, func(t *testing.T) {
+			manager := newManager(t, &fakeHost{})
+			writeRecordFile(t, manager, "qwen", test.content)
+
+			listing, err := manager.List()
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if len(listing.Broken) != 0 {
+				t.Fatalf("the record was refused: %v", listing.Broken[0].Err)
+			}
+			if len(listing.Servers) != 1 {
+				t.Fatalf("the listing holds %+v, want the one record", listing.Servers)
+			}
+			if !maps.Equal(listing.Servers[0].Selection, test.want) {
+				t.Errorf("the record's picks read as %v, want %v", listing.Servers[0].Selection, test.want)
+			}
+		})
 	}
 }
 

@@ -28,14 +28,27 @@ type launch struct {
 // log, the record — is then exercised with no server on the host.
 type spawner func(launch) (int, error)
 
-// Start launches one entry and records it. It returns once the record is
-// written: the server is spawned, not yet answering — deciding when it is
-// actually serving is a separate observation (docs/specs/SERVE.md).
+// Start launches one entry under one selection and records it. It returns once
+// the record is written: the server is spawned, not yet answering — deciding when
+// it is actually serving is a separate observation (docs/specs/SERVE.md).
+//
+// The selection is one pick per choice, already settled by whoever holds the
+// explicit, the stored and the default picks. Resolving it is the first thing a
+// start does (docs/specs/SERVE.md, Start 1): a pick naming nothing is answered
+// with the valid names, before the tool gate and before anything on the host is
+// asked a question. Resolution lives here rather than in each frontend so the CLI,
+// the TUI and anything later refuse identically.
 //
 // An entry runs once at a time. A live record refuses the start; a record whose
 // process is gone is replaced by this launch.
-func (m *Manager) Start(entry config.Entry, report tools.Report) (Record, error) {
-	command, err := ComposedCommand(entry, report)
+func (m *Manager) Start(entry config.Entry, selection config.Selection, report tools.Report) (Record, error) {
+	// The refusal already names the entry, the choice and what could have been
+	// picked instead — everything a caller would add.
+	resolved, err := config.Resolve(entry, selection)
+	if err != nil {
+		return Record{}, err
+	}
+	command, err := ComposedCommand(entry, resolved, report)
 	if err != nil {
 		return Record{}, fmt.Errorf("cannot start %s: %w", entry.ID, err)
 	}
@@ -74,10 +87,14 @@ func (m *Manager) Start(entry config.Entry, report tools.Report) (Record, error)
 
 	identity, captureErr := m.captureIdentity(pid, command[0])
 	record := Record{
-		EntryID:    entry.ID,
-		Backend:    entry.Backend,
-		Repo:       entry.Repo,
-		Quant:      entry.Quant,
+		EntryID: entry.ID,
+		Backend: entry.Backend,
+		// The resolved model, not the entry's: what runs is the combination, and
+		// the record is what every later observation reads it from
+		// (docs/specs/SERVE.md).
+		Repo:       resolved.Repo,
+		Quant:      resolved.Quant,
+		Selection:  picksOf(selection),
 		Host:       entry.Host,
 		Port:       entry.Port,
 		PID:        pid,

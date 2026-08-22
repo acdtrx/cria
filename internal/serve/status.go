@@ -321,7 +321,9 @@ func (m *Manager) modelTotal(record Record) hubapi.Total {
 
 // entry is the record as the cache and the Hub take it. Both read exactly what
 // identifies the model, which is why a record — self-contained by design — can
-// answer for an entry whose config file has since changed or gone.
+// answer for an entry whose config file has since changed or gone. The repo and
+// quant it carries are this launch's own, picks already applied, so there is
+// nothing here to resolve.
 func (r Record) entry() config.Entry {
 	return config.Entry{ID: r.EntryID, Backend: r.Backend, Repo: r.Repo, Quant: r.Quant}
 }

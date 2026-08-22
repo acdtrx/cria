@@ -161,27 +161,64 @@ func llamaEntry() config.Entry {
 	}
 }
 
-// startOne starts an entry through a fake spawner that reports pid, and leaves
-// the process table holding it. It returns the record and the spawner, which is
-// what the tests inspect.
+// choicesEntry is a llama entry with two axes: one that replaces the quant and
+// one that only adds args, so composition order and the effective model are both
+// visible in what it launches.
+func choicesEntry() config.Entry {
+	entry := llamaEntry()
+	entry.ID = "qwen-choices"
+	entry.Choices = []config.Choice{
+		{Name: "quant", Options: []config.ChoiceOption{
+			{Name: "q4", Quant: "UD-Q4_K_XL"},
+			{Name: "q6", Quant: "UD-Q6_K_XL", Args: []string{"--n-cpu-moe", "12"}},
+		}},
+		{Name: "context", Options: []config.ChoiceOption{
+			{Name: "short", Args: []string{"--cache-type-k", "q8_0"}},
+			{Name: "long", Args: []string{"--cache-type-k", "f16"}},
+		}},
+	}
+	return entry
+}
+
+// startOne starts an entry under its config defaults — the picks every start made
+// nothing else — through a fake spawner that reports pid.
 func startOne(t *testing.T, manager *Manager, host *fakeHost, entry config.Entry, pid int) (Record, *fakeSpawner) {
+	t.Helper()
+	return startPicked(t, manager, host, entry, config.DefaultSelection(entry), pid)
+}
+
+// startPicked starts an entry under one selection and leaves the process table
+// holding the pid it reports. It returns the record and the spawner, which is
+// what the tests inspect.
+func startPicked(t *testing.T, manager *Manager, host *fakeHost, entry config.Entry, selection config.Selection, pid int) (Record, *fakeSpawner) {
 	t.Helper()
 	spawner := &fakeSpawner{pid: pid}
 	manager.spawn = spawner.launch
-	command, err := ComposedCommand(entry, usableReport())
-	if err != nil {
-		t.Fatalf("composing the command of %s: %v", entry.ID, err)
-	}
 	if host.alive == nil {
 		host.alive = map[int]procs.Identity{}
 	}
-	host.alive[pid] = identityOf(strings.Join(command, " "))
+	host.alive[pid] = identityOf(strings.Join(composedFor(t, entry, selection), " "))
 
-	record, err := manager.Start(entry, usableReport())
+	record, err := manager.Start(entry, selection, usableReport())
 	if err != nil {
 		t.Fatalf("starting %s: %v", entry.ID, err)
 	}
 	return record, spawner
+}
+
+// composedFor is the argv one entry is launched with under one selection — what
+// a test compares a spawn against, composed the way Start composes it.
+func composedFor(t *testing.T, entry config.Entry, selection config.Selection) []string {
+	t.Helper()
+	launch, err := config.Resolve(entry, selection)
+	if err != nil {
+		t.Fatalf("resolving the picks of %s: %v", entry.ID, err)
+	}
+	command, err := ComposedCommand(entry, launch, usableReport())
+	if err != nil {
+		t.Fatalf("composing the command of %s: %v", entry.ID, err)
+	}
+	return command
 }
 
 // records lists the record files under a manager's state root.

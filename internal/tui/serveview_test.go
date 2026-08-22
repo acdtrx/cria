@@ -451,7 +451,11 @@ func TestDetailCommandIsTheOneStartWouldRun(t *testing.T) {
 	frame = frame.reselect(1)
 
 	entry := frame.tree.Entries[2]
-	want, err := serve.ComposedCommand(entry, world.report)
+	launch, err := config.Resolve(entry, config.DefaultSelection(entry))
+	if err != nil {
+		t.Fatalf("resolving the entry's picks: %v", err)
+	}
+	want, err := serve.ComposedCommand(entry, launch, world.report)
 	if err != nil {
 		t.Fatalf("composing the entry's command: %v", err)
 	}

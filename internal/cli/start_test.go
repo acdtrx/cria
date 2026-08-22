@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,62 @@ func TestStartSpawnsAndReportsTheLaunch(t *testing.T) {
 		if !strings.Contains(printed, want) {
 			t.Errorf("cria printed %q, want it to contain %q", printed, want)
 		}
+	}
+}
+
+// A start launches an entry under picks: the config defaults, which is what a
+// bare `cria start` composes with (docs/specs/CONFIG.md).
+func TestStartCarriesTheEntrysDefaultPicks(t *testing.T) {
+	tree := testTree()
+	tree.Entries = append(tree.Entries, choicesEntry())
+	fake := &fakeServers{record: testRecord()}
+	app, _, errOut := newTestApp(tree, fake)
+
+	if code := app.start([]string{"qwen-choices"}); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if len(fake.picked) != 1 || !maps.Equal(fake.picked[0], config.Selection{"quant": "q4"}) {
+		t.Errorf("the start carried the picks %v, want the entry's first option per axis", fake.picked)
+	}
+
+	// A flat entry carries none, which is what makes its launch what it always was.
+	fake = &fakeServers{record: testRecord()}
+	app, _, errOut = newTestApp(tree, fake)
+	if code := app.start([]string{"qwen"}); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if len(fake.picked) != 1 || len(fake.picked[0]) != 0 {
+		t.Errorf("a flat entry's start carried the picks %v, want none", fake.picked)
+	}
+}
+
+// A pick that names nothing is refused with entry validation, ahead of both
+// gates (docs/specs/SERVE.md, Start 1): the answer names the valid options, and
+// no tool was execed and no port asked to produce it.
+func TestStartRefusesAnUnresolvableSelectionBeforeTheGates(t *testing.T) {
+	tree := testTree()
+	entry := choicesEntry()
+	tree.Entries = append(tree.Entries, entry)
+	fake := &fakeServers{record: testRecord()}
+	app, _, errOut := newTestApp(tree, fake)
+
+	checked := 0
+	app.tools = func(settings config.Settings) tools.Report {
+		checked++
+		return usableReport()
+	}
+
+	if code := app.startEntry(tree, entry, config.Selection{"quant": "q8"}, false); code != exitFailure {
+		t.Fatalf("exit code %d, want %d", code, exitFailure)
+	}
+	for _, want := range []string{`has no option named "q8"`, "q4, q6"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("cria printed %q, want it to contain %q", errOut, want)
+		}
+	}
+	if checked != 0 || len(fake.asked) != 0 || len(fake.started) != 0 {
+		t.Errorf("cria checked the tools %d times, asked about ports %v and started %+v before resolving the picks",
+			checked, fake.asked, fake.started)
 	}
 }
 

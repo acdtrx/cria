@@ -1,6 +1,6 @@
 # Step 3 — serve carries a selection
 
-Status: not started
+Status: done
 
 ## Intent
 
@@ -39,3 +39,32 @@ for now — behavior is unchanged until the CLI and TUI steps.
 - Existing start/stop/status tests still pass with the default selection
   threaded through.
 - Suite green or expected reds named (mid-phase step).
+
+## Result
+
+- `Manager.Start(entry, selection, report)` resolves via `config.Resolve` first —
+  before the tool gate (inside `ComposedCommand`) and the live-record check — so
+  every frontend refuses a bad pick identically, with the valid names.
+  `ComposedCommand(entry, launch, report)` composes from the resolved facts and
+  stays choice-blind; `hubReference` reads the launch.
+- `Record.Selection config.Selection` (`omitempty`), and `Repo`/`Quant` store
+  the **resolved** values — the record says which combination runs, and
+  `Record.entry()` needed no change: cache presence and Hub totals follow the
+  picked model through the fields they already read. `picksOf` clones and
+  normalises empty → nil so a flat entry's record carries no key.
+- CLI: `a.start` split into parsing and `a.startEntry(tree, entry, selection,
+  wait)` — the gate sequence with resolution up front, ahead of already-running
+  (pure map reads exec nothing, so the "record read before gates that exec"
+  reasoning holds); `a.start` passes `config.DefaultSelection`. The split is the
+  seam step 5's `choice=option` parsing lands in, and the seam the ordering test
+  drives a bad selection through. TUI: threading only, plus `m.picks(entry)` as
+  the one place a frame answers "which picks does a start use" — the detail pane
+  resolves through it before composing, so the shown line is the spawned line.
+- Decided while implementing: the CLI resolves twice (up front for ordering,
+  serve again for composition) — `Resolve` is pure, and moving the refusal out
+  of serve would fork the message; resolution errors return unwrapped from
+  `Start` (they already name the entry); `Record.validate` gets no selection
+  rule — nothing in serve acts on the field, and replaying it through `Resolve`
+  refuses loudly on its own.
+- Suite fully green (`go test -count=1 ./...`), gofmt silent, vet clean —
+  verified independently in review. Mid-phase step, no expected reds.

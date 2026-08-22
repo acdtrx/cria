@@ -21,11 +21,17 @@ const hfTokenVar = "HF_TOKEN"
 // (docs/specs/CONFIG.md); the entry loader has already refused an args list that
 // restates one of them.
 //
+// What varies between launches of one entry arrives resolved, in the launch: the
+// repo, the quant and the args a selection composed (config.Resolve). This
+// composition knows nothing about choices — it spells a command line out of facts
+// that are already settled, so an entry with axes and a flat one reach it the same
+// way.
+//
 // It is exported because the composed line is the entry's documentation: the TUI's
 // detail pane shows exactly what a start would run (docs/specs/CONFIG.md), and it
 // shows it by asking for the same composition Start spawns, so the two can never
 // drift apart.
-func ComposedCommand(entry config.Entry, report tools.Report) ([]string, error) {
+func ComposedCommand(entry config.Entry, launch config.Launch, report tools.Report) ([]string, error) {
 	tool, err := LaunchTool(entry.Backend, report)
 	if err != nil {
 		return nil, err
@@ -37,27 +43,27 @@ func ComposedCommand(entry config.Entry, report tools.Report) ([]string, error) 
 		// Launch by Hub reference: llama-server fetches what it needs into the
 		// Hugging Face cache itself, which is why the tool check refuses a build
 		// old enough to keep a private one (docs/specs/TOOLS.md).
-		command = []string{tool.Path, "-hf", hubReference(entry)}
+		command = []string{tool.Path, "-hf", hubReference(launch)}
 	case config.BackendMLX:
 		// An mlx quantization is its own repo, so there is nothing to qualify the
 		// reference with.
-		command = []string{tool.Path, "--model", entry.Repo}
+		command = []string{tool.Path, "--model", launch.Repo}
 	default:
 		return nil, fmt.Errorf("entry %s names backend %q, which cria cannot launch", entry.ID, entry.Backend)
 	}
 
 	command = append(command, "--host", entry.Host, "--port", strconv.Itoa(entry.Port))
-	return append(command, entry.Args...), nil
+	return append(command, launch.Args...), nil
 }
 
-// hubReference spells the model a llama entry serves the way llama-server takes
-// it: the repo, qualified by the quantization when the entry names one. Without
-// a quant the server picks the repo's default (docs/specs/CONFIG.md).
-func hubReference(entry config.Entry) string {
-	if entry.Quant == "" {
-		return entry.Repo
+// hubReference spells the model a llama launch serves the way llama-server takes
+// it: the repo, qualified by the quantization when there is one. Without a quant
+// the server picks the repo's default (docs/specs/CONFIG.md).
+func hubReference(launch config.Launch) string {
+	if launch.Quant == "" {
+		return launch.Repo
 	}
-	return entry.Repo + ":" + entry.Quant
+	return launch.Repo + ":" + launch.Quant
 }
 
 // LaunchTool is the start gate: an entry can only be launched by a tool the host

@@ -11,12 +11,8 @@ import (
 	"cria/internal/serve"
 )
 
-// start runs `cria start <id> [--wait]`.
-//
-// The order is the one docs/specs/SERVE.md settles, and every step of it refuses
-// before anything is spawned: the entry has to exist and parse, its backend's
-// tool has to be usable, and its port has to be free. Only then is a server
-// started — and only then can --wait have something to watch.
+// start runs `cria start <id> [--wait]`: the command line, down to the entry it
+// names and the picks it launches under.
 func (a *app) start(args []string) int {
 	ids, wait, unknown := splitFlag(args, waitFlag)
 	if unknown != "" {
@@ -38,6 +34,31 @@ func (a *app) start(args []string) int {
 	entry, found := entryNamed(tree, id)
 	if !found {
 		return a.refuseUnknownEntry(tree, id)
+	}
+	// The picks this start composes with: the entry's config defaults — its
+	// first option per choice, and nothing at all for a flat entry
+	// (docs/specs/CONFIG.md).
+	return a.startEntry(tree, entry, config.DefaultSelection(entry), wait)
+}
+
+// startEntry is the start sequence itself, from a named entry and a settled
+// selection.
+//
+// The order is the one docs/specs/SERVE.md settles, and every step of it refuses
+// before anything is spawned: the picks have to resolve, the entry must not
+// already be running, its backend's tool has to be usable, and its port has to be
+// free. Only then is a server started — and only then can --wait have something to
+// watch.
+func (a *app) startEntry(tree *config.Tree, entry config.Entry, selection config.Selection, wait bool) int {
+	id := entry.ID
+
+	// Resolution sits with entry validation, ahead of both gates
+	// (docs/specs/SERVE.md, Start 1): a pick that names nothing has to be
+	// answered with the valid names rather than with a busy port or a missing
+	// tool. serve resolves again when it composes the command — the read is pure,
+	// and having it there is what makes every frontend refuse identically.
+	if _, err := config.Resolve(entry, selection); err != nil {
+		return a.fail("start %s: %v", id, err)
 	}
 
 	manager, err := a.servers()
@@ -71,7 +92,7 @@ func (a *app) start(args []string) int {
 		return a.fail("start %s: %s", id, refusal)
 	}
 
-	record, err := manager.Start(entry, report)
+	record, err := manager.Start(entry, selection, report)
 	if err != nil {
 		return a.fail("start %s: %v", id, err)
 	}

@@ -84,7 +84,7 @@ func runLauncher() {
 	}
 	report := tools.Report{LlamaServer: tools.Tool{Name: tools.LlamaServer, Status: tools.StatusFound, Path: program}}
 
-	record, err := manager.Start(entry, report)
+	record, err := manager.Start(entry, nil, report)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "starting:", err)
 		os.Exit(1)

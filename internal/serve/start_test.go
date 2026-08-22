@@ -2,6 +2,7 @@ package serve
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"cria/internal/config"
 	"cria/internal/procs"
+	"cria/internal/tools"
 )
 
 // The liveness rule, in every combination that can reach it: the pid has to
@@ -78,6 +81,134 @@ func TestAnUnreadableProcessTableFailsTheListing(t *testing.T) {
 	}
 }
 
+// A start is (entry, selection): the picked options reach the command line, the
+// effective model is what the picks resolved to, and the record says which
+// combination is running (docs/specs/SERVE.md).
+func TestAStartComposesAndRecordsItsPicks(t *testing.T) {
+	host := &fakeHost{}
+	manager := newManager(t, host)
+	entry := choicesEntry()
+	selection := config.Selection{"quant": "q6", "context": "long"}
+
+	record, spawner := startPicked(t, manager, host, entry, selection, 4242)
+
+	want := []string{
+		"/opt/homebrew/bin/llama-server",
+		"-hf", "unsloth/Qwen3-30B-A3B-GGUF:UD-Q6_K_XL",
+		"--host", "0.0.0.0",
+		"--port", "8080",
+		"--ctx-size", "16384",
+		"--n-cpu-moe", "12",
+		"--cache-type-k", "f16",
+	}
+	if !slices.Equal(spawner.last().Command, want) {
+		t.Errorf("the launch ran\n  %v\nwant\n  %v", spawner.last().Command, want)
+	}
+	if !slices.Equal(record.Command, want) {
+		t.Errorf("the record holds\n  %v\nwant the argv that was spawned", record.Command)
+	}
+	if record.Quant != "UD-Q6_K_XL" || record.Repo != entry.Repo {
+		t.Errorf("the record serves %s:%s, want the picked quantization", record.Repo, record.Quant)
+	}
+	if !maps.Equal(record.Selection, selection) {
+		t.Errorf("the record's picks are %v, want %v", record.Selection, selection)
+	}
+
+	// And they survive the round trip through the state file, which is where a
+	// later invocation reads the combination from.
+	loaded, found, err := manager.loadRecord(entry.ID)
+	if err != nil || !found {
+		t.Fatalf("loading the record: found=%v, err=%v", found, err)
+	}
+	if !maps.Equal(loaded.Selection, selection) {
+		t.Errorf("the record came back with the picks %v, want %v", loaded.Selection, selection)
+	}
+}
+
+// A flat entry picks nothing, and its record says nothing: the field is absent
+// from the file, and what comes back is a record with no selection at all.
+func TestAFlatEntryRecordsNoSelection(t *testing.T) {
+	host := &fakeHost{}
+	manager := newManager(t, host)
+	record, _ := startOne(t, manager, host, llamaEntry(), 4242)
+
+	if record.Selection != nil {
+		t.Errorf("a flat entry recorded the picks %v", record.Selection)
+	}
+	written, err := os.ReadFile(manager.recordPath("qwen"))
+	if err != nil {
+		t.Fatalf("reading the record file: %v", err)
+	}
+	if strings.Contains(string(written), "selection") {
+		t.Errorf("a flat entry's record file carries a selection key:\n%s", written)
+	}
+}
+
+// A pick that names nothing is refused with entry validation, before the tool
+// gate (docs/specs/SERVE.md, Start 1): the answer names the choice and the
+// options it has, not the tool this host is missing.
+func TestAnUnresolvableSelectionRefusesBeforeTheToolGate(t *testing.T) {
+	unusable := tools.Report{LlamaServer: tools.Tool{
+		Name: tools.LlamaServer, Status: tools.StatusMissing,
+		Disables: "starting llama entries; they stay listed, marked unstartable",
+		Fix:      "install llama.cpp so llama-server is on PATH",
+	}}
+
+	cases := map[string]struct {
+		entry     config.Entry
+		selection config.Selection
+		want      []string
+	}{
+		"an option that does not exist": {
+			entry:     choicesEntry(),
+			selection: config.Selection{"quant": "q2", "context": "long"},
+			want:      []string{`choice "quant" has no option named "q2"`, "q4, q6"},
+		},
+		"a choice that does not exist": {
+			entry:     choicesEntry(),
+			selection: config.Selection{"qunt": "q6", "context": "long"},
+			want:      []string{`no choice named "qunt"`, "quant, context"},
+		},
+		"a choice nobody picked": {
+			entry:     choicesEntry(),
+			selection: config.Selection{"quant": "q6"},
+			want:      []string{`nothing picked for choice "context"`, "short, long"},
+		},
+		"picks against an entry that has no axes": {
+			entry:     llamaEntry(),
+			selection: config.Selection{"quant": "q6"},
+			want:      []string{"has no choices"},
+		},
+	}
+
+	for name, test := range cases {
+		t.Run(name, func(t *testing.T) {
+			manager := newManager(t, &fakeHost{})
+			spawner := &fakeSpawner{pid: 4242}
+			manager.spawn = spawner.launch
+
+			_, err := manager.Start(test.entry, test.selection, unusable)
+			if err == nil {
+				t.Fatal("a start resolved a selection the entry does not have")
+			}
+			for _, want := range test.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal does not mention %q: %v", want, err)
+				}
+			}
+			if strings.Contains(err.Error(), "llama-server") {
+				t.Errorf("the tool gate answered before the picks were resolved: %v", err)
+			}
+			if len(spawner.launches) != 0 {
+				t.Errorf("the refused start spawned %d processes", len(spawner.launches))
+			}
+			if _, found, err := manager.loadRecord(test.entry.ID); found || err != nil {
+				t.Errorf("the refused start left a record: found=%v, err=%v", found, err)
+			}
+		})
+	}
+}
+
 // An entry runs once at a time (docs/specs/SERVE.md): its live record refuses
 // the second start, and nothing is spawned.
 func TestAnEntryRunsOnceAtATime(t *testing.T) {
@@ -88,7 +219,7 @@ func TestAnEntryRunsOnceAtATime(t *testing.T) {
 
 	spawner := &fakeSpawner{pid: 5150}
 	manager.spawn = spawner.launch
-	_, err := manager.Start(entry, usableReport())
+	_, err := manager.Start(entry, nil, usableReport())
 	if err == nil {
 		t.Fatal("an entry started twice")
 	}
@@ -154,7 +285,7 @@ func TestABrokenRecordRefusesAStart(t *testing.T) {
 	spawner := &fakeSpawner{pid: 4242}
 	manager.spawn = spawner.launch
 
-	_, err := manager.Start(llamaEntry(), usableReport())
+	_, err := manager.Start(llamaEntry(), nil, usableReport())
 	if err == nil {
 		t.Fatal("an entry with an unreadable record started")
 	}
@@ -176,13 +307,10 @@ func TestTheLaunchWritesToItsOwnLog(t *testing.T) {
 	host.alive = map[int]procs.Identity{}
 
 	entry := llamaEntry()
-	command, err := ComposedCommand(entry, usableReport())
-	if err != nil {
-		t.Fatalf("composing: %v", err)
-	}
+	command := composedFor(t, entry, nil)
 	host.alive[4242] = procs.Identity{Command: strings.Join(command, " "), StartedAt: "Tue Aug 18 14:57:30 2026"}
 
-	record, err := manager.Start(entry, usableReport())
+	record, err := manager.Start(entry, nil, usableReport())
 	if err != nil {
 		t.Fatalf("starting: %v", err)
 	}
@@ -247,7 +375,7 @@ func TestAFailedSpawnLeavesNothingBehind(t *testing.T) {
 	spawner := &fakeSpawner{failWith: errors.New("fork/exec: permission denied")}
 	manager.spawn = spawner.launch
 
-	if _, err := manager.Start(llamaEntry(), usableReport()); err == nil {
+	if _, err := manager.Start(llamaEntry(), nil, usableReport()); err == nil {
 		t.Fatal("a start reported success after the spawn failed")
 	}
 	if _, found, err := manager.loadRecord("qwen"); found || err != nil {
@@ -280,7 +408,7 @@ func TestAServerThatDiedImmediatelyRecordsNoIdentity(t *testing.T) {
 			spawner := &fakeSpawner{pid: 4242, output: "error: unknown argument\n"}
 			manager.spawn = spawner.launch
 
-			record, err := manager.Start(llamaEntry(), usableReport())
+			record, err := manager.Start(llamaEntry(), nil, usableReport())
 			if err != nil {
 				t.Fatalf("starting: %v", err)
 			}
@@ -355,7 +483,7 @@ func TestIdentityCaptureStopsWhenThePIDIsGone(t *testing.T) {
 	spawner := &fakeSpawner{pid: 4242, output: "error: unknown argument\n"}
 	manager.spawn = spawner.launch
 
-	record, err := manager.Start(llamaEntry(), usableReport())
+	record, err := manager.Start(llamaEntry(), nil, usableReport())
 	if err != nil {
 		t.Fatalf("starting: %v", err)
 	}
@@ -375,7 +503,7 @@ func TestAnUnreadableProcessTableIsReportedAfterTheSpawn(t *testing.T) {
 	spawner := &fakeSpawner{pid: 4242}
 	manager.spawn = spawner.launch
 
-	record, err := manager.Start(llamaEntry(), usableReport())
+	record, err := manager.Start(llamaEntry(), nil, usableReport())
 	if err == nil {
 		t.Fatal("a start whose pid could not be identified reported success")
 	}

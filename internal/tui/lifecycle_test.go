@@ -3,11 +3,13 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"cria/internal/config"
 	"cria/internal/serve"
 	"cria/internal/tools"
 )
@@ -124,6 +126,40 @@ func TestStartLaunchesTheSelectedEntry(t *testing.T) {
 	}
 	if saved.LastStarted != "qwen" {
 		t.Errorf("the next launch would restart %q, want qwen", saved.LastStarted)
+	}
+}
+
+// A start off the frame launches the entry under picks: the config defaults —
+// the first option of each axis, and nothing at all for a flat entry
+// (docs/specs/CONFIG.md).
+func TestStartCarriesTheEntrysDefaultPicks(t *testing.T) {
+	fake := &fakeServers{}
+	frame, world, _ := testFrameOn(t, newTestHost(fake))
+	tree := testTree()
+	// The same qwen, written as one entry with an axis instead of one file per
+	// quantization.
+	qwen := &tree.Entries[2]
+	qwen.Quant = ""
+	qwen.Choices = []config.Choice{{Name: "quant", Options: []config.ChoiceOption{
+		{Name: "q4", Quant: "UD-Q4_K_XL"},
+		{Name: "q6", Quant: "UD-Q6_K_XL"},
+	}}}
+	world.tree, world.cache = tree, cachedQwen()
+	frame = load(t, frame).reselect(1)
+
+	frame, cmd := press(t, frame, enter)
+	frame = answer(t, frame, cmd)
+
+	if len(fake.started) != 1 || fake.started[0] != "qwen" {
+		t.Fatalf("the start launched %q, want qwen once", fake.started)
+	}
+	if !maps.Equal(fake.picked[0], config.Selection{"quant": "q4"}) {
+		t.Errorf("the start carried the picks %v, want the entry's first option per axis", fake.picked[0])
+	}
+	// And the pane shows the line that start would run, composed from the same
+	// picks (serveview.go).
+	if shown, refused := frame.composedCommand(*qwen); refused || !strings.Contains(shown, "-hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL") {
+		t.Errorf("the detail pane shows %q, want the command the default picks compose", shown)
 	}
 }
 

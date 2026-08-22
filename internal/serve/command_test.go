@@ -11,13 +11,15 @@ import (
 
 // The composed command line is the contract between a config entry and the
 // server it launches (docs/specs/CONFIG.md): cria's four flags in a fixed order,
-// then the entry's own args verbatim.
+// then the args the launch composed — the entry's own, then the picked options',
+// in the entry's choice order.
 func TestComposedCommand(t *testing.T) {
 	report := usableReport()
 	cases := []struct {
-		name  string
-		entry config.Entry
-		want  []string
+		name      string
+		entry     config.Entry
+		selection config.Selection
+		want      []string
 	}{
 		{
 			name:  "llama names its quantization on the hub reference",
@@ -58,11 +60,45 @@ func TestComposedCommand(t *testing.T) {
 				"--max-tokens", "4096",
 			},
 		},
+		{
+			name:      "an entry with axes composes the picked options after its own args",
+			entry:     choicesEntry(),
+			selection: config.Selection{"quant": "q6", "context": "long"},
+			want: []string{
+				"/opt/homebrew/bin/llama-server",
+				"-hf", "unsloth/Qwen3-30B-A3B-GGUF:UD-Q6_K_XL",
+				"--host", "0.0.0.0",
+				"--port", "8080",
+				"--ctx-size", "16384",
+				"--n-cpu-moe", "12",
+				"--cache-type-k", "f16",
+			},
+		},
+		{
+			name:  "the config defaults are the first option of each axis",
+			entry: choicesEntry(),
+			want: []string{
+				"/opt/homebrew/bin/llama-server",
+				"-hf", "unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL",
+				"--host", "0.0.0.0",
+				"--port", "8080",
+				"--ctx-size", "16384",
+				"--cache-type-k", "q8_0",
+			},
+		},
 	}
 
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := ComposedCommand(test.entry, report)
+			selection := test.selection
+			if selection == nil {
+				selection = config.DefaultSelection(test.entry)
+			}
+			launch, err := config.Resolve(test.entry, selection)
+			if err != nil {
+				t.Fatalf("resolving: %v", err)
+			}
+			got, err := ComposedCommand(test.entry, launch, report)
 			if err != nil {
 				t.Fatalf("composing: %v", err)
 			}
@@ -118,7 +154,8 @@ func TestStartGateRefusesAnUnusableTool(t *testing.T) {
 
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := ComposedCommand(test.entry, test.report)
+			launch := config.Launch{Repo: test.entry.Repo, Quant: test.entry.Quant, Args: test.entry.Args}
+			_, err := ComposedCommand(test.entry, launch, test.report)
 			if err == nil {
 				t.Fatal("an unusable tool composed a command line")
 			}
@@ -132,7 +169,7 @@ func TestStartGateRefusesAnUnusableTool(t *testing.T) {
 			manager := newManager(t, &fakeHost{})
 			spawner := &fakeSpawner{pid: 4242}
 			manager.spawn = spawner.launch
-			if _, err := manager.Start(test.entry, test.report); err == nil {
+			if _, err := manager.Start(test.entry, config.DefaultSelection(test.entry), test.report); err == nil {
 				t.Fatal("an entry started on a tool cria refuses")
 			}
 			if len(spawner.launches) != 0 {

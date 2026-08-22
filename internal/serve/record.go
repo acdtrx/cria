@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,18 +26,35 @@ import (
 // one field that may be absent: a server that was already gone by the time cria
 // looked has no identity to record, and a record with none matches nothing —
 // which is the truth about it.
+//
+// Repo and Quant are the resolved ones — what this launch actually serves after
+// its picks were applied — and Selection is the picks themselves, so a record can
+// say which combination is running and a restart can replay it. A flat entry picks
+// nothing and records nothing.
 type Record struct {
-	EntryID    string         `json:"entry_id"`
-	Backend    config.Backend `json:"backend"`
-	Repo       string         `json:"repo"`
-	Quant      string         `json:"quant,omitempty"`
-	Host       string         `json:"host"`
-	Port       int            `json:"port"`
-	PID        int            `json:"pid"`
-	Identity   procs.Identity `json:"identity"`
-	Command    []string       `json:"command"` // the composed argv, program first
-	LogPath    string         `json:"log_path"`
-	LaunchedAt time.Time      `json:"launched_at"`
+	EntryID    string           `json:"entry_id"`
+	Backend    config.Backend   `json:"backend"`
+	Repo       string           `json:"repo"`
+	Quant      string           `json:"quant,omitempty"`
+	Selection  config.Selection `json:"selection,omitempty"` // choice → picked option; absent for a flat entry
+	Host       string           `json:"host"`
+	Port       int              `json:"port"`
+	PID        int              `json:"pid"`
+	Identity   procs.Identity   `json:"identity"`
+	Command    []string         `json:"command"` // the composed argv, program first
+	LogPath    string           `json:"log_path"`
+	LaunchedAt time.Time        `json:"launched_at"`
+}
+
+// picksOf is the selection as a record holds it: a copy, so nothing a caller does
+// to its map afterwards rewrites what cria wrote down, and nothing at all when
+// there was nothing to pick — a flat entry's record carries no selection key, and
+// a record without one is a flat entry's.
+func picksOf(selection config.Selection) config.Selection {
+	if len(selection) == 0 {
+		return nil
+	}
+	return maps.Clone(selection)
 }
 
 // Server is one record next to what the process table says about its pid right
