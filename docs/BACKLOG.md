@@ -11,11 +11,6 @@ Group entries under headings as themes emerge.
 
 ## Dropped from v1
 
-- **Profile layer over entries.** Multiple named param-sets per model with a
-  "current" one, instead of flat launchable entries. (ruled 2026-08-18: reality is
-  one param-set per model; a variant is just another entry file.) Revisit trigger:
-  same-repo entries duplicating args becomes felt friction — e.g. a param change
-  that has to touch many files.
 - **Cache-view growth.** Initiating downloads from the view, scaffolding a config
   entry from a cached model, richer model details (GGUF header metadata, Hub-API
   info). (ruled 2026-08-18: the v1 cache view is visibility and cleaning only,

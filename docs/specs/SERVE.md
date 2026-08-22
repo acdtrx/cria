@@ -25,7 +25,9 @@ observe, stop, re-attach — and the runtime state records behind it.
 - One JSON record per running server at
   `~/.local/state/cria/servers/<entry-id>.json`, written at spawn: entry id,
   backend, repo (and quant), pid, the pid's own start time, port, host, the full
-  composed command line, log path, launch timestamp.
+  composed command line, log path, launch timestamp — and, for an entry with
+  choices, the picks the launch composed (settled 2026-08-22): what runs is a
+  combination, and the record is where a combination's identity lives.
 - Records are **self-contained**: status and stop never need the config tree, so
   editing or deleting an entry never confuses its already-running server.
 - An entry runs once at a time; its record is replaced on the next start.
@@ -76,8 +78,11 @@ failure states.
 
 ## Start
 
-1. Validate the entry; refuse if its tool is missing (naming the tool and what its
-   absence disables) or the entry is already running.
+1. Validate the entry and resolve its picks (settled 2026-08-22): explicit
+   one-shot picks over stored picks over config defaults, per choice; an unknown
+   choice or option refuses up front, naming the valid ones. Refuse if the
+   entry's tool is missing (naming the tool and what its absence disables) or
+   the entry is already running.
 2. Check the port. Held by a live record → refuse: stop that entry first. Held by
    anything else → refuse with the holder's pid, command line and working
    directory (`lsof` + `ps`); the TUI offers the kill.
@@ -129,9 +134,10 @@ failure states.
 ## `cria status`
 
 - Human output mirrors the TUI status box: entry, backend, repo:quant, pid, port,
-  phase, uptime, memory (RSS) and CPU, health, log path. `--json` emits the same
-  facts as one JSON document — the machine contract for agents. Exits zero when at
-  least one server is live, non-zero when none is.
+  phase, uptime, memory (RSS) and CPU, health, log path — and the picks the
+  server was composed from, when its entry declares choices. `--json` emits the
+  same facts as one JSON document — the machine contract for agents. Exits zero
+  when at least one server is live, non-zero when none is.
 
 ## Benchmarking (settled 2026-08-19)
 

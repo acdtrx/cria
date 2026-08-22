@@ -29,11 +29,12 @@ construction.
 ## The entry contract (settled 2026-08-18)
 
 One TOML file = one launchable thing: backend + Hub reference + params + port. There
-is no model/profile hierarchy — a quant is its own entry, which keeps both backends
-symmetric (an MLX quant is its own repo already), and a param variant is simply
-another entry file. Rejected: folder-per-model with `model.toml` + profile files —
-two files of ceremony for a one-param-set-per-model reality; a profile layer returns
-only if entry duplication becomes felt friction (`docs/BACKLOG.md`).
+is no model/profile *file* hierarchy — a model run in variations declares them as
+`[[choice]]` axes inside its one file (settled 2026-08-22, below; the 2026-08-18
+"a variant is just another entry file" ruling grew to 31 flat files, one model
+spanning 11 — the backlog trigger fired). Rejected: folder-per-model with
+`model.toml` + profile files — two files of ceremony where one file with axes
+carries the reality.
 
 | key       | type     | rules                                                                    |
 | --------- | -------- | ------------------------------------------------------------------------ |
@@ -63,6 +64,51 @@ unknown-key-is-error would make new upstream flags unusable until then.
   loopback when the bind is `0.0.0.0`, on the bound address otherwise.
 - Display follows the same rule: the TUI shows `args` and the full composed command
   line verbatim — that *is* the entry's documentation.
+
+## Choices — variations inside one entry (settled 2026-08-22)
+
+An entry run in variations — quants, context sizes, slot layouts, feature toggles —
+declares them as `[[choice]]` axes instead of duplicating files. Each choice is a
+named pick-one axis of options; cria composes the picked options into the launch
+and never interprets what their flags mean. Coupling between flags is expressed by
+factoring, not by rules: flags that must vary together live inside the same
+choice's options (a context size folded into each quant option, say), and cria
+knows nothing about which combinations are valid — the author does, in comments
+next to the options, where fit measurements already live.
+
+| key                          | type     | rules                                                        |
+| ---------------------------- | -------- | ------------------------------------------------------------ |
+| `[[choice]]` `name`          | string   | required; unique within the entry; id charset                 |
+| `[[choice.option]]` `name`   | string   | required; unique within its choice; id charset                |
+| `[[choice.option]]` `quant`  | string   | optional; replaces the entry's `quant`; llama entries only    |
+| `[[choice.option]]` `repo`   | string   | optional; replaces the entry's `repo` (an MLX quant is its own repo) |
+| `[[choice.option]]` `args`   | string[] | optional; appended to the composed args when the option is picked |
+
+- A choice needs at least one option, and the **first option is the config
+  default**. A one-option choice is legal: a named, always-on block of args.
+- **Composition**: the entry's `args`, then each choice's picked option's `args`,
+  in the file's choice order. The effective `repo`/`quant` are the entry's unless
+  a picked option replaces them.
+- **Collisions are loud, at load** (settled 2026-08-22): a flag token (leading
+  `-`) appearing in two parts that could ever compose together — the entry's
+  `args` and any option, or options of two *different* choices — is an error;
+  options of the same choice share tokens freely (they are alternatives, and
+  forcing the overlap apart is what keeps the axes orthogonal). The comparison is
+  by token, values ignored — the same flag twice with equal values is still an
+  error. For the same reason `quant` may be set by only one choice's options, and
+  likewise `repo`. An option restating a cria-owned flag is refused exactly as
+  entry `args` are.
+- **Picks are state, not config** (settled 2026-08-22): the current pick per
+  entry per choice lives in `~/.local/state/cria/choices.json` — cria-owned,
+  strict-decoded; a broken file is reported and the config defaults used; a pick
+  naming a gone choice or option is skipped on read and pruned on the next
+  write. The config tree stays human-owned. The TUI picker is what writes picks;
+  `cria start <id> choice=option` overrides for that one start and writes
+  nothing — one-shot, so an agent's experiment never silently changes what a
+  bare start launches next.
+- An entry with no choices behaves exactly as today. A running server is never
+  confused by choice edits: its record carries the picks it composed and the
+  full command line (`docs/specs/SERVE.md`).
 
 ## config.toml
 

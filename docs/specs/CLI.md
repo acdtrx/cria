@@ -8,7 +8,12 @@ its subsystem.
 ## The whole v1 surface (settled 2026-08-18)
 
 - `cria` — the TUI.
-- `cria start <id> [--wait]` — `docs/specs/SERVE.md`.
+- `cria start <id> [choice=option ...] [--wait]` — `docs/specs/SERVE.md`. Picks
+  (settled 2026-08-22): a `choice=option` argument overrides that choice for this
+  start only — one-shot, never persisted; unnamed choices use the stored picks,
+  else the config defaults (`docs/specs/CONFIG.md`, Choices). `=` is what tells a
+  pick from the id (ids cannot contain it); unknown choices or options refuse
+  naming the valid ones.
 - `cria stop [<id>]` — `docs/specs/SERVE.md`.
 - `cria status [--json]` — `docs/specs/SERVE.md`.
 - `cria docs` — prints the config schema and full examples; `docs/specs/CONFIG.md`.
@@ -22,6 +27,9 @@ its subsystem.
   backend, repo:quant, port; `--paths` appends the entry's file — how an agent
   locates a profile), refused files listed after with their key errors; an
   empty tree points at `cria docs` and exits 0 (an empty list is a true answer).
+  An entry with choices lists them with their current picks (amended
+  2026-08-22) — how an agent learns what `cria start <id> choice=option` may
+  name, and what a bare start would launch.
 - `cria edit <id>` (settled 2026-08-18) — opens `$VISUAL`, else `$EDITOR`, on
   the entry's file (broken entries included — that is the point) and waits;
   the user's editor writes, cria still never does. Neither variable set, an

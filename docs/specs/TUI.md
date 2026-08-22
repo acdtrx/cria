@@ -10,10 +10,13 @@ keybinds get detailed as they are built.
 - **Backends are separate lists, never one mixed list.** One backend is active in the
   UI at a time; a keybind toggles. The active backend persists across launches —
   running llama vs mlx is a deliberate, sticky choice, not a per-session question.
-- **The entry list is the picker.** It shows the active backend's entries at quant
-  granularity — picking an entry picks model, quant and params in one gesture. A
-  detail pane shows the highlighted entry's full contents and the exact command line
-  cria would launch; names don't need to be memorable, the pane carries the truth.
+- **The entry list is the picker.** It shows the active backend's entries —
+  picking an entry picks everything in one gesture: for a flat entry that is
+  model, quant and params directly; for an entry with choices its current picks
+  complete the gesture (amended 2026-08-22, variations moved inside entries). A
+  detail pane shows the highlighted entry's full contents, its current picks, and
+  the exact command line cria would launch; names don't need to be memorable, the
+  pane carries the truth.
 - **A persistent status box shows the running server**, regardless of list
   selection: entry, backend, repo:quant, pid, port, phase (starting / downloading
   with progress / running / unhealthy), uptime, memory (RSS) and CPU via `ps`, plus
@@ -122,6 +125,21 @@ keybinds get detailed as they are built.
     esc cancels; empty, duplicate and `ungrouped` names are refused there, in
     place, with the typed name left to correct. Rejected: a confirm-style panel
     — heavier than a one-line name needs.
+- **The choice picker** (settled 2026-08-22, user-designed): a selection key on
+  an entry with choices opens a small modal over the list — one row per choice,
+  the options laid along it; ↑/↓ moves between rows, ←/→ picks along one; ⏎ or
+  esc closes. Contracts:
+  - Every change writes the pick to `choices.json` at the keypress — picks are
+    the entry's new defaults "until I change them", so leaving the modal is a
+    way out and never a discard (same doctrine as group management). One-shot
+    launches are CLI territory; the picker only sets defaults.
+  - The detail pane keeps showing the composed command for the current picks —
+    picking and seeing the resulting command line are one loop.
+  - Start launches the stored picks; restart-last replays the *record's* picks,
+    not the current defaults — a swap-back reproduces what ran, records being
+    self-contained (`docs/specs/SERVE.md`). The status box names the running
+    combination.
+  - A flat entry offers no picker; the key does nothing there.
 - **Every text color clears WCAG AA (≥4.5:1) against a dark terminal ground,
   enforced by a palette test** (settled 2026-08-18, after first real use found
   the dim tones illegible): muted tones are muted by hue and saturation, never

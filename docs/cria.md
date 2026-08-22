@@ -32,11 +32,11 @@ don't own.
    servers detached, records them in runtime state, and re-attaches on next launch.
    The TUI exists to start, check and stop — closing it stops nothing.
 4. **The config tree is the interface** (settled 2026-08-18). One TOML file per
-   launchable entry — backend, Hub reference, port, passthrough args; a quant is its
-   own entry, which keeps the backends symmetric, since an MLX quant is its own repo
-   anyway (resettled 2026-08-18 from folder-per-model with profiles: two files of
-   ceremony for a one-param-set-per-model reality; `docs/specs/CONFIG.md` owns the
-   contract, a profile layer waits in `docs/BACKLOG.md`). The TUI drives what the
+   launchable entry — backend, Hub reference, port, passthrough args; a model run
+   in variations declares them as `[[choice]]` axes inside its one file, picked in
+   the UI or per start (settled 2026-08-22, when 31 flat files — one model spanning
+   11 — fired the backlog trigger; resettled 2026-08-18 from folder-per-model with
+   profiles: two files of ceremony; `docs/specs/CONFIG.md` owns the contract). The TUI drives what the
    tree declares and invents no serving state of its own; UI preferences live in the
    state dir, never the tree. Editing config is a text-editor or coding-agent
    activity: files are written against `cria docs`, or seeded by `cria new` from
