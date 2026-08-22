@@ -1,6 +1,6 @@
 # Step 2 — resolution
 
-Status: not started
+Status: done
 
 ## Intent
 
@@ -38,3 +38,24 @@ yet.
   entry cases.
 - Phase 1 ends here: full suite green, `gofmt -l .` silent, `go vet ./...`
   clean.
+
+## Result
+
+- `internal/config/resolve.go` adds `Selection` (choice → option),
+  `Launch{Repo, Quant, Args}` — only what a pick can change; backend/port/host
+  stay on the entry — `DefaultSelection` and `Resolve`, with refusals that name
+  the valid names in file order. 24 subtests in `resolve_test.go`, incl. an
+  aliasing test pinning that composition clones the entry's args (appending
+  into their spare capacity would write one launch's picks into the loaded
+  tree).
+- Decided while implementing: refusal errors are plain errors, not `KeyError` —
+  a bad pick comes from the CLI or the picker, not from a config file;
+  `DefaultSelection` returns a non-nil empty map for a flat entry so callers
+  layer picks over it without a nil check; unknown choice names are reported
+  before unpicked choices (a misspelled `qunt=q4` must read as the misspelling,
+  not as "nothing picked for quant"), sorted so two mistakes always report the
+  same one.
+- Phase 1 ends here: `go test -count=1 ./...` fully green, `gofmt -l .` silent,
+  `go vet ./...` clean — verified independently in review. Step 3 will meet the
+  two call sites that read `entry.Repo/Quant/Args` directly
+  (`serve/command.go`, `serve/status.go`), both already in the plan.
