@@ -198,8 +198,10 @@ var (
 // The picked chip: only an option's own name ever rides it, so it needs no
 // other pairs. It keeps its background on the cursor's band too — the chip is
 // what the row is *set to*, and the band is where the cursor *is*, and the two
-// must stay readable through each other (choicepick.go, serveview.go).
-var pickedStyle = lipgloss.NewStyle().Foreground(pickedInk).Background(pickedBand)
+// must stay readable through each other (choicepick.go, serveview.go). The
+// cell of padding either side is part of the chip: the band has to be seen
+// holding the name, not just tinting its letters (user-chosen 2026-08-23).
+var pickedStyle = lipgloss.NewStyle().Foreground(pickedInk).Background(pickedBand).Padding(0, 1)
 
 // rowPaint is how one row of a list is drawn: in the palette as it stands, or on
 // the cursor's band. Both lists ask for it the same way, so the highlight is one

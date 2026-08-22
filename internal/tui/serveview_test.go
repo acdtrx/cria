@@ -476,8 +476,8 @@ func TestDetailPaneMarksTheCurrentPicks(t *testing.T) {
 	detail := plain(strings.Join(frame.detailLines(200, 30), "\n"))
 	for _, fact := range []string{
 		"choices",
-		"quant: q4 q6 q8",
-		"layout: coding chat",
+		"quant:  q4  q6 q8",
+		"layout:  coding  chat",
 		"-hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL --host 0.0.0.0 --port 8080 --ctx-size 16384 --jinja --parallel 2",
 	} {
 		if !strings.Contains(detail, fact) {
@@ -500,7 +500,7 @@ func TestDetailPaneMarksTheCurrentPicks(t *testing.T) {
 	// never cuts an option in half: the options and their mark are what the
 	// block is read for.
 	narrow := plain(strings.Join(frame.detailLines(22, 30), "\n"))
-	if want := "choices  quant: q4 q6\n         q8\n         layout:\n         coding chat"; !strings.Contains(narrow, want) {
+	if want := "choices  quant:  q4 \n         q6 q8\n         layout:\n          coding  chat"; !strings.Contains(narrow, want) {
 		t.Errorf("the narrow pane draws\n%s\nwant the axes wrapped into the indent:\n%s", narrow, want)
 	}
 }
@@ -514,7 +514,7 @@ func TestDetailPaneFollowsTheStoredPicks(t *testing.T) {
 	frame.stored = picks.Picks{"qwen": {"quant": "q6"}}
 
 	detail := plain(strings.Join(frame.detailLines(200, 30), "\n"))
-	for _, fact := range []string{"quant: q4 q6 q8", "layout: coding chat",
+	for _, fact := range []string{"quant: q4  q6  q8", "layout:  coding  chat",
 		"-hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q6_K_XL"} {
 		if !strings.Contains(detail, fact) {
 			t.Errorf("the detail pane does not carry %q:\n%s", fact, detail)
@@ -523,7 +523,7 @@ func TestDetailPaneFollowsTheStoredPicks(t *testing.T) {
 
 	frame.stored = picks.Picks{"qwen": {"quant": "q5"}}
 	stale := plain(strings.Join(frame.detailLines(200, 30), "\n"))
-	if !strings.Contains(stale, "quant: q4 q6 q8") || !strings.Contains(stale, "UD-Q4_K_XL") {
+	if !strings.Contains(stale, "quant:  q4  q6 q8") || !strings.Contains(stale, "UD-Q4_K_XL") {
 		t.Errorf("a pick the entry no longer holds did not fall back to the config default:\n%s", stale)
 	}
 }
