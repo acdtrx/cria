@@ -77,6 +77,14 @@ Group entries under headings as themes emerge.
 
 ## Cache view
 
+- **`entriesUsing` matches declared repo/quant, not picks.** The cache view's
+  "used by" attribution reads each entry's declared repo/quant; an entry whose
+  repo or quant lives in choice options is not matched under those options'
+  values (the empty-quant case widens to the whole repo, erring safe). Open
+  question first: does "which entries use this model" mean any option, or the
+  current pick? (noted 2026-08-23, found in entry-choices step 7.) Revisit
+  trigger: a cached quant shows unattributed, or a deletion plan misses a
+  choices entry, in real use.
 - **Aliased blobs show as one file.** The walker keys a repo's files by blob, so
   two different snapshot names pointing at the same blob collapse into a single
   row in the cache view; deletion handles the aliasing correctly (it re-scans

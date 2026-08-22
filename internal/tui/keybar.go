@@ -26,6 +26,7 @@ const (
 	namingScope    = "name"
 	moveScope      = "move where"
 	manageScope    = "groups"
+	picksScope     = "picks"
 )
 
 // How the bar reads: keys within a scope are separated by a thin dot, scopes by

@@ -104,13 +104,11 @@ func (m model) entryNamed(id string) (config.Entry, bool) {
 // Neither is dropped — a picker with no detail is a list of names cria has
 // already said are not worth memorising.
 func (m model) serveScreen(width, rows int) string {
-	title := m.serveTitle()
-
 	if width >= sideBySideWidth {
 		listWidth := width / 2
 		detailWidth := width - listWidth
 		return lipgloss.JoinHorizontal(lipgloss.Top,
-			pane(title, listWidth, m.listLines(listWidth-4, rows-2)),
+			m.listPane(listWidth, rows),
 			pane(paneTitle(detailTitle), detailWidth, m.detailLines(detailWidth-4, rows-2)))
 	}
 
@@ -119,10 +117,21 @@ func (m model) serveScreen(width, rows int) string {
 	if detailRows < minPaneRows || listRows < minPaneRows {
 		// Too short to stack: the list is the half that can be acted on, so it
 		// is the half that stays.
-		return pane(title, width, m.listLines(width-4, rows-2))
+		return m.listPane(width, rows)
 	}
-	return pane(title, width, m.listLines(width-4, listRows-2)) + "\n" +
+	return m.listPane(width, listRows) + "\n" +
 		pane(paneTitle(detailTitle), width, m.detailLines(width-4, detailRows-2))
+}
+
+// listPane is what stands in the serve view's list half: the entry list, or the
+// choice picker while one is open over it (choicepick.go). The detail pane is
+// never what a picker covers — watching the command line follow the picks is the
+// loop the picker exists for (docs/specs/TUI.md).
+func (m model) listPane(width, rows int) string {
+	if m.picker != nil {
+		return m.pickerPane(width, rows)
+	}
+	return pane(m.serveTitle(), width, m.listLines(width-4, rows-2))
 }
 
 // serveTitle names the list and says whose it is: the active backend in its own
@@ -266,12 +275,13 @@ func (m model) rowLine(listed row, selected bool, inner, column int) string {
 // presenceMark is the cached dot: starting this entry serves what is already on
 // disk, or fetches it first (docs/specs/TUI.md). The answer is the cache walk's
 // own — the same read the cache view lists (docs/specs/CACHE.md), asked one
-// entry at a time.
+// entry at a time, about the model the current picks would actually launch.
 func (m model) presenceMark(entry config.Entry, paint rowPaint) string {
+	launched, resolved := launchedModel(entry, m.picks(entry))
 	switch {
-	case m.cache == nil:
+	case m.cache == nil || !resolved:
 		return paint.quiet().Render(unknownMark)
-	case m.cache.Presence(entry).Cached:
+	case m.cache.Presence(launched).Cached:
 		// Green, the colour a server that answers is drawn in: this one would
 		// serve now. A dot that differed from the absent one only by glyph and
 		// by a shade of grey read as one dot that never changed.
@@ -316,6 +326,13 @@ func (m model) entryDetail(entry config.Entry, inner int) []string {
 		lines = append(lines, detailField(label, value, inner, style)...)
 	}
 
+	// One reading of the picks feeds everything the pane says about this launch:
+	// which model is on disk, which options are marked, and the command line
+	// under them. What the pane marks as current and what it says a start would
+	// run cannot be two different launches (docs/specs/TUI.md — picking and
+	// seeing the command are one loop).
+	selection := m.picks(entry)
+
 	// Every value is body text: the labels beside them carry the structure, in
 	// their own colour, so nothing here has to be dimmed to stay out of the way.
 	add("name", entry.Name, factStyle)
@@ -337,13 +354,7 @@ func (m model) entryDetail(entry config.Entry, inner int) []string {
 		}
 		add(label, arg, factStyle)
 	}
-	add("cached", m.cachedWord(entry), factStyle)
-
-	// One reading of the picks feeds both the axes and the command line under
-	// them: what the pane marks as current and what it says a start would run
-	// cannot be two different launches (docs/specs/TUI.md — picking and seeing
-	// the command are one loop).
-	selection := m.picks(entry)
+	add("cached", m.cachedWord(entry, selection), factStyle)
 	lines = append(lines, choiceRows(entry, selection, inner)...)
 
 	command, refused := m.composedCommand(entry, selection)
@@ -417,15 +428,37 @@ func laidOut(pieces []string, width int) []string {
 	return lines
 }
 
-// cachedWord is the dot spelled out, for the pane that has room for words.
-func (m model) cachedWord(entry config.Entry) string {
+// cachedWord is the dot spelled out, for the pane that has room for words. It
+// is asked about the same launch the dot is, so the two always agree.
+func (m model) cachedWord(entry config.Entry, selection config.Selection) string {
+	launched, resolved := launchedModel(entry, selection)
 	switch {
+	case !resolved:
+		return "unknown — the command line below says why"
 	case m.cache == nil:
 		return "not read yet"
-	case m.cache.Presence(entry).Cached:
+	case m.cache.Presence(launched).Cached:
 		return "yes — starting it serves what is on disk"
 	}
 	return "no — starting it downloads first"
+}
+
+// launchedModel is the entry as the cache is asked about it: the same entry
+// carrying the repo and quant this selection settles on, since an option may
+// replace either (docs/specs/CONFIG.md). Asking with the entry's declared pair
+// would answer for a model nobody is about to start — an entry whose quant lives
+// in its options would read as whatever else the repo holds.
+//
+// A selection that does not resolve names no model at all, and nothing here
+// guesses one: the pane's command line is where that refusal is spelled out
+// (composedCommand).
+func launchedModel(entry config.Entry, selection config.Selection) (config.Entry, bool) {
+	launch, err := config.Resolve(entry, selection)
+	if err != nil {
+		return config.Entry{}, false
+	}
+	entry.Repo, entry.Quant = launch.Repo, launch.Quant
+	return entry, true
 }
 
 // composedCommand is the argv a start would run under one selection, or why
