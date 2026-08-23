@@ -159,9 +159,19 @@ Group entries under headings as themes emerge.
   preset sections carry the full flag surface entries compose (`-ctk`,
   `--parallel`, `--spec-type`, …) — the README documents the flags, not the ini
   keys. A cria-managed router would compose the ini into the state dir the way
-  argv is composed today; the tree stays human-owned. (noted 2026-08-18:
-  documented and maintained upstream, so it clears the bar that log parsing
-  never did.)
+  argv is composed today; the tree stays human-owned. Direction (user-sketched
+  2026-08-23): a third backend alongside llama and mlx — it runs one router
+  process and shows the *same* llama entries as its source; which entries are
+  included, each with its own combination of choices independent of the llama
+  backend's picks, is router-scoped state edited like picks are (config
+  declares what can vary, state holds what is chosen — the choices doctrine,
+  one step further). One combo per included entry; section names = entry ids =
+  the `model` field clients send. The hard collision to verify first: argv vs
+  ini keys — entries carry passthrough tokens and cria refuses flag knowledge,
+  so the design stands only if ini keys are flag-spelled (mechanical strip) or
+  router-included entries are required to use long-form args; a short→long
+  mapping inside cria is off the table. (noted 2026-08-18: documented and
+  maintained upstream, so it clears the bar that log parsing never did.)
 
 ## Telemetry
 
