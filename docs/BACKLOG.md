@@ -147,10 +147,21 @@ Group entries under headings as themes emerge.
 
 - **llama-server router mode.** Recent llama-server hosts several models in one
   process — auto-discovery from the cache, `GET /models`, `POST /models/load` and
-  `/models/unload`, `--models-max`. Could replace process-per-entry on the llama
-  side. Revisit trigger: wanting several GGUF models resident at once, or per-entry
-  process management proving to be daily friction. (noted 2026-08-18: documented and
-  maintained upstream, so it clears the bar that log parsing never did.)
+  `/models/unload`, `--models-max`, per-model settings via a `--models-preset`
+  ini (`[*]` defaults, per-model overrides). Could replace process-per-entry on
+  the llama side. Revisit trigger: wanting several GGUF models resident at once,
+  or per-entry process management proving to be daily friction — and it half-fired
+  2026-08-23: pi's llama.cpp integration (pi-llama-cpp) *requires* router mode
+  (it manages models via `GET /models` + load/unload, which single-model servers
+  lack). Verify before designing: whether router discovery covers the HF hub
+  cache (the announcement names `LLAMA_CACHE`/`~/.cache/llama.cpp` — a private
+  cache would collide with the single-source-of-truth constraint), and whether
+  preset sections carry the full flag surface entries compose (`-ctk`,
+  `--parallel`, `--spec-type`, …) — the README documents the flags, not the ini
+  keys. A cria-managed router would compose the ini into the state dir the way
+  argv is composed today; the tree stays human-owned. (noted 2026-08-18:
+  documented and maintained upstream, so it clears the bar that log parsing
+  never did.)
 
 ## Telemetry
 
