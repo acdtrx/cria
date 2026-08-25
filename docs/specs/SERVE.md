@@ -139,6 +139,118 @@ failure states.
   same facts as one JSON document — the machine contract for agents. Exits zero
   when at least one server is live, non-zero when none is.
 
+## Validate (settled 2026-08-23, user-designed)
+
+`cria validate <id> [choice=option ...] [--ignore-busy]` answers one question and
+blocks until it can: does this entry, in this combination, serve on this machine?
+The expected caller is a coding agent that just wrote the entry and is thinking on
+the model this machine serves (`docs/cria.md`, principle 5) — so validation has to
+take the port away from that model and give it back. The agent infers before the
+command and after it; what it reads is an exit code and one reason line.
+
+The protocol, in order, from the first thing that changes the host:
+
+1. **Stop the server holding the target's port, keeping its record.** The stop is
+   the ordinary one, and it removes the record from disk — so the record is taken
+   as a value first, picks included: that held copy is the only thing that can put
+   the server back.
+2. **Start the target and wait for green** — the same wait `start --wait` performs
+   (health primary, listener attribution corroborating, the lazy backend's warm
+   included).
+3. **Prove it with one real completion**, carrying the record's own model
+   reference. A green health signal is a model that loaded, and a model that loaded
+   can still die on its first request (a speculative batch that does not fit, a
+   buffer the machine cannot allocate), so proof is an answer and nothing less.
+   Every backend is proved this way: this is fit-proofing, not the lazy-load warm
+   (Start 5) — the two share the request, never its backend gate.
+4. **Stop the target.**
+5. **Restore the displaced server** from the held record: the entry the tree
+   declares under that name today, launched with the picks that record carries, not
+   whatever the entry's stored picks say now.
+
+Nothing before step 1 has changed the host, and every refusal lives there. A port
+nobody holds means nothing to displace and nothing to restore — start, prove, stop:
+"left as found" includes leaving nothing running.
+
+- **Displacement is port-scoped** (settled 2026-08-25). The one server validate may
+  stop is the live record holding the target's *resolved* port (the entry's port,
+  else `default_port` — no pick can move it, an option replaces a quant, a repo or
+  flags). The target entry carries that fact by itself, so the caller needs to know
+  nothing about what else runs here, and a server on any other port is structurally
+  untouchable. On the shared-port machine the config doctrine describes — one
+  `default_port`, swap by stop-one-start-another — the port's holder *is* the
+  running server. Rejected: refusing when several servers run (the common machine
+  runs one); any flag naming a server to stop (knowledge the caller does not have);
+  validating on a second port with both models resident (the machine that needs
+  validate is the one without memory for two).
+- **Self-validation is the same path** (settled 2026-08-23). A target that already
+  holds its own port is displaced and started again like any other holder — the
+  point may be proving a new combination of it — and restore replays the held
+  record's picks either way. One code path, no special case.
+- **The busy gate reads is-processing, never open connections** (settled
+  2026-08-23). A holder answering somebody right now is a refusal, not a stop: the
+  signal is llama-server's documented `/slots` per-slot `is_processing` (verified
+  live 2026-08-25), asked once, at the health probe's address rule. Counting open
+  connections was rejected outright — the validating agent's own client holds an
+  idle keep-alive socket to that port, so a connection count refuses on the
+  caller's ghost.
+- **Unverifiable is a third answer, never a cautious idle.** A backend that
+  publishes no such signal is not asked at all (mlx_lm.server documents none); a
+  llama server whose `/slots` is unreachable, refuses, or answers something that is
+  not a slot listing — an empty listing included — is unverifiable too. That case
+  warns, naming what could not be checked and what a swap would cost, and proceeds:
+  the machine that needs validate runs one server on one port, usually the caller's
+  own, idle at the moment the tool call executes.
+- **Validate never queues and never waits for idle.** The caller's own turn is
+  running while cria blocks, so a wait would burn its clock invisibly; the honest
+  answer is the refusal, and the action it names is a human's — let the answer
+  finish, or stop that server.
+- **`--ignore-busy` lifts the busy gate and nothing else** (settled 2026-08-25).
+  It is the operator's word that a generation cut off mid-answer is acceptable; the
+  verdict is still asked for and reported as a warning, so the override never hides
+  a fact cria knows. The foreign-holder and already-running-elsewhere refusals stand
+  under it — neither is about anybody's patience. **The busy refusal deliberately
+  does not name the flag**: the agent reading that line is the one whose request
+  would be cut off, and a bypass printed on the line it reads is a bypass it will
+  take. The flag is documented in `cria --help`, where the person deciding reads,
+  and not in `cria docs` or `AGENTS.md` — the agent-facing surfaces stay
+  bypass-free.
+- **Restore is unconditional.** Whatever the target's verdict — it never started,
+  never went green, never answered, or the operator pressed Ctrl-C — the displaced
+  server goes back before validate says anything about the entry it was asked
+  about. An interrupt ends the stages, not the process: the current stage is
+  abandoned at its boundary, the restore runs, and the exit says what the machine
+  was left as. The one honest carve-out is a **target that will not stop**: it still
+  holds the port, so restoring would spawn the displaced server onto a port nothing
+  can bind. That exit names the two commands that undo the state instead
+  (`cria stop <target>`, then `cria start <displaced>`).
+
+**Exit codes.** Four outcomes an agent branches on, and nothing finer. Every
+non-zero exit prints one concise reason as its last line; with the code, that is the
+whole contract.
+
+- `0` — it served and answered; the machine is as validate found it.
+- `1` — it did not validate (it would not start, never went green, or did not
+  answer), and the machine is as validate found it: the displaced server is back on
+  its port. An interrupt whose restore succeeded exits here too — nothing was
+  proved, and that is what the reason line says.
+- `2` — validate refused and touched nothing: unknown entry, choice or option; the
+  backend's tool missing; a foreign process on the port (refused with pid, command
+  line and working directory, exactly as start refuses — validate cannot restore
+  what has no record); the target already running on a port other than the one it
+  launches on now (starting it again would leave that process with nothing naming
+  it); a busy holder. This is the same code an unroutable command line gets,
+  deliberately: both mean cria did nothing to the host, which is the only
+  distinction a caller can act on.
+- `3` — the machine is **not** as validate found it: the holder would not stop, the
+  target would not stop, or the restore failed. The reason line names what is
+  serving now and the command that ends the state — the one outcome a person has to
+  act on.
+
+**No `--json`** (settled 2026-08-23): the agent contract is the exit code plus a
+concise reason line, and validate reports no measurements. Structured output earns
+its place only if it ever grows some.
+
 ## Benchmarking (settled 2026-08-19)
 
 `cria bench` measures a running server's prefill and decode rates per prompt

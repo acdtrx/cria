@@ -56,42 +56,6 @@ Group entries under headings as themes emerge.
   detection.) Revisit trigger: a vision model's first start visibly sits in
   `starting` while gigabytes of projector download.
 
-- **`cria validate <id> [choice=option ...]` — swap, prove, restore.** An agent
-  running on the local model cannot validate a profile it just wrote: starting
-  it means stopping the model it thinks with. Validate makes that safe as one
-  blocking command — stop the server holding the target's port (keeping its
-  record; port-scoped, settled 2026-08-25: the target entry itself carries the
-  one fact the agent has no prior knowledge of, servers on other ports are
-  structurally untouchable, and on shared-port machines — the config doctrine —
-  the port holder *is* the running server; rejected: refusing when several
-  servers run, and any flag naming a server to stop), start the
-  target, wait green, send one real completion (fit-proofing: /health passes
-  while the first request can still die — the q8 speculative-batch death, the
-  mini's Metal limit), stop it, restart the previous server from its record's
-  own picks (replayOf's contract), exit with the target's verdict. The agent
-  only infers before and after the command, so its branch never burns. Restore
-  is unconditional — the machine is left as found even when validation fails —
-  and a failed restore is its own loud error naming what is serving now.
-  Rejected: validating on a second port with both models resident — the
-  machine that needs this is exactly the one without memory for two.
-  Settled 2026-08-23: target == the running entry follows the same protocol
-  (the point may be validating a new combination of it; restore replays the
-  record's picks either way, one code path); no `--json` — the agent's
-  contract is the exit code and a concise reason, and structured output earns
-  its place only if validate ever grows measurements; the busy gate refuses
-  when the running server is mid-generation, and the signal must be
-  is-processing, never open-connections — the validating agent's own client
-  holds an idle keep-alive socket to the port, so counting connections would
-  refuse on the caller's ghost. llama's documented `/slots` endpoint answers
-  it (verified 2026-08-25 against the live server: 200 on the 0.0.0.0 bind
-  with `--slot-save-path` alone, per-slot `is_processing` exposed; whether a
-  server with no slot flags at all needs `--slots` is the one enable-flag
-  case still to verify at build time); mlx documents no equivalent, so
-  mlx gets the honest degradation (a warning, or a coarse check that names
-  its false positive) plus an override flag. Revisit trigger: the next
-  agent-driven profile-writing session against a live server — build it
-  before that session; it is wanted.
-
 ## Cache view (orphans)
 
 - **Orphan blobs have no unit.** The real Qwen3.8 repo holds a complete 1.37 GB

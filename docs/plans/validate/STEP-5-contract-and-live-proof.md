@@ -1,6 +1,6 @@
 # STEP 5 — the contract in SERVE.md and the live proof
 
-Status: not started
+Status: docs half done (2026-08-25) — the live proof is pending the user's go
 
 ## Intent
 
@@ -44,3 +44,40 @@ and the protocol is proven on real metal without touching the main server.
   before/after pid check), reds-if-any named.
 - Phase 3 = plan end: full suite green, branch rebased onto main, ff-merged,
   worktree pruned.
+
+## What was written (docs half)
+
+- `docs/specs/SERVE.md` — a `## Validate` section between `cria status` and
+  Benchmarking: the five-stage protocol (displace keeping the record → start →
+  await green → prove with one real completion → stop → restore from the held
+  record's own picks), then the settled points as dated bullets — port-scoped
+  displacement (2026-08-25) with the three rejections, self-validation as the
+  same path (2026-08-23), the busy gate on is-processing and never open
+  connections (2026-08-23, `/slots` verified live 2026-08-25), unverifiable as a
+  third answer, never queueing or waiting for idle, `--ignore-busy` lifting that
+  one gate with the refusal deliberately not naming it (2026-08-25), restore
+  unconditional including on interrupt with the will-not-stop carve-out — and
+  the four exit codes with what each says about the machine. `no --json`
+  (2026-08-23) closes the section.
+- `docs/specs/CLI.md` — `cria validate <id> [choice=option ...]
+  [--ignore-busy]` in the v1 surface list after `status`, pointing at SERVE.md
+  for the protocol; the flags line gains `--ignore-busy` and drops its
+  now-false "nothing else speaks machine or takes options"; the Rules block
+  gains validate's extension of the exit-code rule (1 adds "machine as found",
+  2 = refused-touched-nothing = usage, 3 = machine left changed) and its
+  `--json` line is corrected to status **and bench** with validate's
+  no-document contract named.
+- `docs/BACKLOG.md` — the `cria validate` entry under `## Serve` removed; its
+  decisions now live in SERVE.md. The slots-stats entry that names the validate
+  plan as its trigger is left as it stands.
+
+Suite after the docs change: `go test -count=1 ./...` all packages ok,
+`gofmt -l .` empty, `go vet ./...` clean — no test reads the spec files, so
+nothing here could move; run for the record.
+
+## What remains
+
+The live e2e above, in full, with the user present (serving-machine care) —
+including step 7, the `~/.config/cria/AGENTS.md` refresh, since cria writes that
+file only when it is missing. Its outcomes get recorded in this file, and the
+plan is closed only then.

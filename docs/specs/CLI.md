@@ -16,6 +16,15 @@ its subsystem.
   naming the valid ones.
 - `cria stop [<id>]` — `docs/specs/SERVE.md`.
 - `cria status [--json]` — `docs/specs/SERVE.md`.
+- `cria validate <id> [choice=option ...] [--ignore-busy]` (settled 2026-08-23,
+  user-designed) —
+  the one blocking command that proves an entry serves on a machine already
+  serving something else: it displaces the cria-started server holding the entry's
+  port, starts the entry, waits green, asks it for one real completion, stops it,
+  and puts the displaced server back from its own record. Picks are start's, with
+  start's one-shot meaning — the combination being proved. `docs/specs/SERVE.md`,
+  Validate, owns the protocol, the port scoping, the busy gate and the four exit
+  codes; `--ignore-busy` is the only override and it lifts the busy gate alone.
 - `cria docs` — prints the config schema and full examples; `docs/specs/CONFIG.md`.
 - `cria new <id> [--llama|--mlx]` (settled 2026-08-18, reinstated from the
   backlog) — scaffolds `models/<id>.toml` from the schema-rendered example
@@ -35,7 +44,7 @@ its subsystem.
   the user's editor writes, cria still never does. Neither variable set, an
   unknown id, or a non-zero editor exit refuse with exit 1.
 - `cria --help` / `-h` / `help` — one page: the subcommands, the flags, the
-  exit-code rule, and the pointers agents need (`cria docs`, the validate loop).
+  exit-code rule, and the pointers agents need (`cria docs`, `cria validate`).
 - `cria bench [<id>] [--sizes 16,4096,16384] [--runs N] [--gen N] [--json]`
   (settled 2026-08-19) — measures a running server's prefill and decode rates
   per prompt size (`docs/specs/SERVE.md` owns the measurement contract). No id
@@ -63,9 +72,10 @@ its subsystem.
 
 Nothing else: no cache operations from the CLI (`docs/BACKLOG.md`).
 
-Flags: `--wait` on start, `--json` on status and bench, `--paths` on list,
-`--llama`/`--mlx` on new, `--sizes`/`--runs`/`--gen` on bench, `--version` and
-`--help` on the bare binary — nothing else speaks machine or takes options.
+Flags: `--wait` on start, `--json` on status and bench, `--ignore-busy` on
+validate, `--paths` on list, `--llama`/`--mlx` on new, `--sizes`/`--runs`/`--gen`
+on bench, `--version` and `--help` on the bare binary — nothing else takes options,
+and nothing outside `--json` speaks machine.
 
 ## Rules
 
@@ -73,5 +83,13 @@ Flags: `--wait` on start, `--json` on status and bench, `--paths` on list,
   (started and healthy with `--wait`, stopped, at least one live server for
   `status`); non-zero otherwise. Errors name the failing thing and its fix —
   never a silent failure.
-- `--json` exists on `status` only in v1; the other subcommands speak
-  human-readable output.
+- `validate` extends that rule with a code of its own (settled 2026-08-25),
+  because it is the one subcommand that changes the host and has to change it
+  back: `1` keeps its meaning (the entry does not serve) and adds the promise that
+  the machine is as validate found it; `2` is a refusal that touched nothing —
+  the same code an unroutable command line gets, deliberately, since both mean
+  cria did nothing to the host; `3` says the machine was left changed and names
+  what is serving now. The full contract is `docs/specs/SERVE.md`, Validate.
+- `--json` exists on `status` and `bench` in v1; the other subcommands speak
+  human-readable output — `validate`'s machine contract is its exit code and one
+  reason line (settled 2026-08-23), not a document.
