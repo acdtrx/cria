@@ -106,6 +106,27 @@ func (e *KeyError) Error() string {
 	return fmt.Sprintf("key %q: %s", e.Key, e.Reason)
 }
 
+// Entry finds the entry an id names among the ones that loaded — the lookup
+// every caller acting on a named entry makes, wherever the name came from: a
+// command line, a keypress, or a state record being started again
+// (serve.Replay).
+//
+// A tree nobody has read yet declares nothing. That is the honest answer for a
+// caller holding one — a frame drawn before the first load — rather than a
+// panic, and it is the same answer as an id the tree does not have: there is no
+// such entry to act on.
+func (t *Tree) Entry(id string) (Entry, bool) {
+	if t == nil {
+		return Entry{}, false
+	}
+	for _, entry := range t.Entries {
+		if entry.ID == id {
+			return entry, true
+		}
+	}
+	return Entry{}, false
+}
+
 // Root is the config tree's one location — the same path on macOS and Linux
 // (docs/TECH-STACK.md). Load takes its root as an argument so tests can point it
 // elsewhere; production callers pass this.

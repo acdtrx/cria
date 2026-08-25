@@ -393,20 +393,14 @@ func (m model) restartShownEntry() (tea.Model, tea.Cmd) {
 // stored ones. The box shows what ran, so a swap-back reproduces it, records
 // being self-contained (docs/specs/TUI.md, docs/specs/SERVE.md).
 //
-// A selection the entry can no longer resolve — its choices edited since the
-// launch — refuses here, with Resolve's own message, and refuses *before* the
-// stop: falling back to the config defaults would swap the model under a
-// swap-back, and stopping first would leave nothing running for the refusal to
-// have protected. A record with no picks is a flat entry's and resolves as one.
+// The resolution is serve's, so this key and the restore a `cria validate` owes
+// a displaced server refuse the same combinations for the same reasons
+// (serve.Replay, CODING-RULES §2). What is the frame's own is *when* it asks:
+// before the stop, because falling back to the config defaults would swap the
+// model under a swap-back, and stopping first would leave nothing running for
+// the refusal to have protected.
 func (m model) replayOf(record serve.Record) (config.Entry, config.Selection, error) {
-	entry, found := m.entryNamed(record.EntryID)
-	if !found {
-		return config.Entry{}, nil, errors.New(restartsNothing(record.EntryID))
-	}
-	if _, err := config.Resolve(entry, record.Selection); err != nil {
-		return config.Entry{}, nil, err
-	}
-	return entry, record.Selection, nil
+	return serve.Replay(m.tree, record)
 }
 
 // restartsNothing is an entry the config tree no longer declares: a record is

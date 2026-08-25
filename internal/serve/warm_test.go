@@ -41,7 +41,7 @@ func TestWarmURL(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := warmURL(test.record); got != test.want {
+			if got := completionURL(test.record); got != test.want {
 				t.Errorf("the warm goes to %q, want %q", got, test.want)
 			}
 		})
@@ -54,7 +54,7 @@ func TestWarmURL(t *testing.T) {
 func TestWarmingARealServer(t *testing.T) {
 	var (
 		method, path, contentType string
-		sent                      warmRequest
+		sent                      completionRequest
 	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The warm asks the health endpoint whether there is anything to warm
@@ -78,14 +78,14 @@ func TestWarmingARealServer(t *testing.T) {
 	defer server.Close()
 
 	manager := newManager(t, &fakeHost{})
-	manager.warm = newHTTPWarm()
+	manager.complete = newHTTPCompletion()
 	record := recordAt(t, mlxEntry(), server.URL)
 
 	if err := manager.Warm(record); err != nil {
 		t.Fatalf("warming a server that answered: %v", err)
 	}
-	if method != http.MethodPost || path != warmPath {
-		t.Errorf("the warm was %s %s, want POST %s", method, path, warmPath)
+	if method != http.MethodPost || path != completionPath {
+		t.Errorf("the warm was %s %s, want POST %s", method, path, completionPath)
 	}
 	if contentType != "application/json" {
 		t.Errorf("the warm was sent as %q, want application/json", contentType)
@@ -115,7 +115,7 @@ func TestALlamaServerIsNeverWarmed(t *testing.T) {
 	defer server.Close()
 
 	manager := newManager(t, &fakeHost{})
-	manager.warm = newHTTPWarm()
+	manager.complete = newHTTPCompletion()
 
 	if err := manager.Warm(recordAt(t, llamaEntry(), server.URL)); err != nil {
 		t.Fatalf("a llama record came back with %v, want nothing to have happened", err)
@@ -143,13 +143,13 @@ func TestARefusedWarmCarriesTheReason(t *testing.T) {
 	defer server.Close()
 
 	manager := newManager(t, &fakeHost{})
-	manager.warm = newHTTPWarm()
+	manager.complete = newHTTPCompletion()
 
 	err := manager.Warm(recordAt(t, mlxEntry(), server.URL))
 	if err == nil {
 		t.Fatal("a refused completion came back as a warm that worked")
 	}
-	for _, want := range []string{"qwen-mlx did not load its weights", warmPath, "404 Not Found", "Repository Not Found"} {
+	for _, want := range []string{"qwen-mlx did not load its weights", completionPath, "404 Not Found", "Repository Not Found"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the failure reads %q, want it to carry %q", err, want)
 		}
@@ -173,8 +173,8 @@ func TestAWarmThatIsNeverAnsweredEndsAtItsBudget(t *testing.T) {
 	defer close(held)
 
 	manager := newManager(t, &fakeHost{})
-	manager.warm = newHTTPWarm()
-	manager.warmWithin = 50 * time.Millisecond
+	manager.complete = newHTTPCompletion()
+	manager.completionWithin = 50 * time.Millisecond
 
 	began := time.Now()
 	err := manager.Warm(recordAt(t, mlxEntry(), server.URL))
@@ -213,7 +213,7 @@ func TestAWarmWaitsForTheServerToAnswer(t *testing.T) {
 		}
 		return Health{URL: url, Green: true, Status: 200, Detail: "200 OK"}
 	}
-	manager.warm = func(string, string, time.Duration) error {
+	manager.complete = func(string, string, time.Duration) error {
 		atWarm, completed = probes, completed+1
 		return nil
 	}
@@ -239,9 +239,9 @@ func TestAWarmOfAPortThatNeverComesUpEndsAtItsBudget(t *testing.T) {
 	host := &fakeHost{}
 	manager := newManager(t, host)
 	record, _ := startOne(t, manager, host, mlxEntry(), 4242)
-	manager.warmWithin = 20 * time.Millisecond
+	manager.completionWithin = 20 * time.Millisecond
 	manager.probe = func(url string) Health { return Health{URL: url, Detail: "connection refused"} }
-	manager.warm = func(string, string, time.Duration) error {
+	manager.complete = func(string, string, time.Duration) error {
 		t.Error("a completion was sent to a server that never answered")
 		return nil
 	}
@@ -276,7 +276,7 @@ func TestAWarmEndsWhenTheServerDiesWhileItWaits(t *testing.T) {
 		}
 		return Health{URL: url, Detail: "connection refused"}
 	}
-	manager.warm = func(string, string, time.Duration) error {
+	manager.complete = func(string, string, time.Duration) error {
 		t.Error("a completion was sent to a server that had died")
 		return nil
 	}

@@ -87,17 +87,7 @@ func (m model) selectedRow() (row, bool) {
 // The server keys act on what the status box shows, and that entry belongs to
 // whichever backend started it — not to the tab the user is standing on
 // (docs/specs/TUI.md).
-func (m model) entryNamed(id string) (config.Entry, bool) {
-	if m.tree == nil {
-		return config.Entry{}, false
-	}
-	for _, entry := range m.tree.Entries {
-		if entry.ID == id {
-			return entry, true
-		}
-	}
-	return config.Entry{}, false
-}
+func (m model) entryNamed(id string) (config.Entry, bool) { return m.tree.Entry(id) }
 
 // serveScreen draws the list and the detail pane into the rows the frame left
 // them: side by side where there is width for both, stacked where there is not.

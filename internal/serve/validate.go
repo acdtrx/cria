@@ -7,13 +7,16 @@ import (
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/tools"
 )
 
 // Validating an entry means starting it where something else may already be
 // serving: the server holding the target's port is stopped, the target is
 // proved, and the displaced server is put back from what cria wrote down about
-// it. This file answers the two questions that come before any of that — which
-// server would be displaced, and whether it may be displaced right now.
+// it. This file holds the mechanisms that protocol is composed of — which
+// server would be displaced, whether it may be displaced right now, the stop
+// that keeps what puts it back, that restore, and the one completion that proves
+// a server serves.
 //
 // The port is the whole scope of a displacement. The one server that may be
 // stopped is the live record holding the target's port, and the target entry
@@ -73,6 +76,65 @@ func (m *Manager) Displaced(entry config.Entry) (Displacement, error) {
 		displaced.Holder = &use.Managed.Record
 	}
 	return displaced, nil
+}
+
+// Displace stops the server one record names and hands back what it takes to
+// put it there again.
+//
+// The stop is the ordinary one: SIGTERM, the grace period, and the record file
+// removed once the process is gone (stop.go). That removal is why this exists —
+// the record cria has to restore from is a value taken before the stop, with its
+// picks copied out of the caller's map rather than shared with it, so what goes
+// back is the combination that was running and not whatever anyone wrote into
+// that map since.
+func (m *Manager) Displace(holder Record) (Record, error) {
+	held := holder
+	held.Selection = picksOf(holder.Selection)
+	if err := m.Stop(holder); err != nil {
+		return Record{}, err
+	}
+	return held, nil
+}
+
+// Restore starts a held record again: the entry the config tree declares under
+// that name today, launched under the picks the record was composed with
+// (Replay). Self-validation is not a special case — the record found on the
+// port is replayed the same way whether or not it belongs to the target.
+//
+// The three things that can stand in the way each come back naming which one it
+// was: the entry is no longer in the tree, its picks no longer resolve, or the
+// start itself failed. The caller is the one that has to say what is serving
+// now, and it composes that around this.
+func (m *Manager) Restore(tree *config.Tree, held Record, report tools.Report) (Record, error) {
+	entry, selection, err := Replay(tree, held)
+	if err != nil {
+		return Record{}, fmt.Errorf("cannot put %s back on port %d: %w", held.EntryID, held.Port, err)
+	}
+	record, err := m.Start(entry, selection, report)
+	if err != nil {
+		return Record{}, fmt.Errorf("cannot put %s back on port %d: %w", held.EntryID, held.Port, err)
+	}
+	return record, nil
+}
+
+// Prove asks a running server for one real completion — the answer no health
+// signal stands in for.
+//
+// A green /health is a model that loaded, and a model that loaded can still die
+// on its first request: a speculative batch that does not fit, a buffer the
+// machine cannot allocate. So proof is an answer, and nothing less: the minimal
+// completion the warm sends (warm.go), carrying the record's own model
+// reference, for every backend there is. This is fit-proofing rather than the
+// lazy-load warming Warm gates on the backend — what the two share is the
+// request, never that gate.
+//
+// A failure carries the evidence a caller has to report: the server's own
+// refusal, quoted as it gave it, or the transport failure under it.
+func (m *Manager) Prove(record Record) error {
+	if err := m.complete(completionURL(record), record.Repo, m.completionWithin); err != nil {
+		return fmt.Errorf("%s did not answer a completion: %w", record.EntryID, err)
+	}
+	return nil
 }
 
 // Busy is what cria could tell about a server's work at one moment.

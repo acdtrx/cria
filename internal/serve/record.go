@@ -57,6 +57,31 @@ func picksOf(selection config.Selection) config.Selection {
 	return maps.Clone(selection)
 }
 
+// Replay is what starting one record again takes: the entry the config tree
+// declares under its name today, and the picks the record itself was composed
+// with — never the picks anything holds now.
+//
+// A record is self-contained, but a start needs the file, so both halves are
+// checked here and every caller starting a record again gets the same two
+// refusals: the TUI's restart key on a running server or a crash report
+// (docs/specs/TUI.md), and the restore a validation owes the server it displaced
+// (validate.go).
+//
+// A selection the entry can no longer resolve — its choices edited since the
+// launch — refuses with Resolve's own message rather than falling back to the
+// config defaults, which would start a combination nobody asked for. A record
+// with no picks is a flat entry's and resolves as one.
+func Replay(tree *config.Tree, record Record) (config.Entry, config.Selection, error) {
+	entry, found := tree.Entry(record.EntryID)
+	if !found {
+		return config.Entry{}, nil, fmt.Errorf("%s is not an entry cria can read any more", record.EntryID)
+	}
+	if _, err := config.Resolve(entry, record.Selection); err != nil {
+		return config.Entry{}, nil, err
+	}
+	return entry, record.Selection, nil
+}
+
 // Server is one record next to what the process table says about its pid right
 // now. Live is the whole judgement docs/specs/SERVE.md defines: the pid exists
 // and it is still this process.

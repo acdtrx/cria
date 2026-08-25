@@ -100,11 +100,12 @@ type Manager struct {
 	cache cacheReader
 	hub   hubReader
 
-	// The two requests cria sends a server rather than asks it: the completion
-	// that makes a lazily-loading backend load its weights (warm.go), and the
-	// timed completion one benchmark run is made of (bench.go).
-	warm  warmer
-	bench bencher
+	// The two requests cria sends a server rather than asks it: the minimal
+	// completion that makes a lazily-loading backend load its weights and that
+	// proves any server can answer at all (warm.go, validate.go), and the timed
+	// completion one benchmark run is made of (bench.go).
+	complete completer
+	bench    bencher
 
 	// Whether a server is answering somebody right now — what a swap asks
 	// before it stops one (validate.go).
@@ -131,12 +132,12 @@ type Manager struct {
 	settle     time.Duration
 	settlePoll time.Duration
 
-	// How long a warm may take, how often it asks whether the server is
-	// answering yet, and how long one benchmark run may take, held for the same
-	// reason again — no test waits out a budget measured in minutes.
-	warmWithin  time.Duration
-	warmPoll    time.Duration
-	benchWithin time.Duration
+	// How long a minimal completion may take, how often a warm asks whether the
+	// server is answering yet, and how long one benchmark run may take, held for
+	// the same reason again — no test waits out a budget measured in minutes.
+	completionWithin time.Duration
+	warmPoll         time.Duration
+	benchWithin      time.Duration
 }
 
 // New builds the manager cria uses: a state root and a process table, wired to
@@ -149,7 +150,7 @@ func New(root string, host procs.Host) *Manager {
 		probe:    newHTTPProbe(),
 		cache:    readCache,
 		hub:      hubTotals(),
-		warm:     newHTTPWarm(),
+		complete: newHTTPCompletion(),
 		bench:    newHTTPBench(),
 		slots:    newHTTPSlots(),
 		greenPID: map[string]int{},
@@ -161,9 +162,9 @@ func New(root string, host procs.Host) *Manager {
 		settle:     identitySettle,
 		settlePoll: identityPoll,
 
-		warmWithin:  warmBudget,
-		warmPoll:    warmPoll,
-		benchWithin: benchBudget,
+		completionWithin: completionBudget,
+		warmPoll:         warmPoll,
+		benchWithin:      benchBudget,
 	}
 }
 

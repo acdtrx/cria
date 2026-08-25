@@ -35,10 +35,10 @@ import (
 
 const (
 	// benchPath is where a measurement is sent: the same documented completion
-	// endpoint the warm uses (warm.go). It takes a raw prompt, so no chat
-	// template stands between the request and the model, and a prompt of an
-	// exact size stays a prompt of that size.
-	benchPath = warmPath
+	// endpoint the minimal completion uses (warm.go). It takes a raw prompt, so
+	// no chat template stands between the request and the model, and a prompt of
+	// an exact size stays a prompt of that size.
+	benchPath = completionPath
 
 	// BenchMinSize is the smallest prompt a sweep measures. Two things set it:
 	// a prefill of a handful of tokens is dominated by request overhead rather

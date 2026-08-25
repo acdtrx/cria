@@ -303,6 +303,26 @@ func TestLoadReportsUnparsableSettings(t *testing.T) {
 	}
 }
 
+// The lookup every caller acting on a named entry makes: the entry when the
+// tree declares one, nothing when it does not — and nothing rather than a panic
+// for a caller whose tree has not been read yet.
+func TestTreeEntryFindsWhatTheTreeDeclares(t *testing.T) {
+	tree := &Tree{Entries: []Entry{{ID: "qwen"}, {ID: "gemma"}}}
+
+	entry, found := tree.Entry("gemma")
+	if !found || entry.ID != "gemma" {
+		t.Errorf("the tree answered %+v (found %v), want the gemma entry", entry, found)
+	}
+	if _, found := tree.Entry("nothing"); found {
+		t.Error("an id the tree does not declare was answered with an entry")
+	}
+
+	var unread *Tree
+	if _, found := unread.Entry("qwen"); found {
+		t.Error("a tree nobody has read yet answered with an entry")
+	}
+}
+
 func TestRootIsUnderTheHomeConfigDirectory(t *testing.T) {
 	root, err := Root()
 	if err != nil {
