@@ -67,8 +67,10 @@ Group entries under headings as themes emerge.
   is-processing, never open-connections — the validating agent's own client
   holds an idle keep-alive socket to the port, so counting connections would
   refuse on the caller's ghost. llama's documented `/slots` endpoint answers
-  it (verify at build time: the enable flag, and what the endpoint exposes on
-  a 0.0.0.0 bind before cria composes it); mlx documents no equivalent, so
+  it (verified 2026-08-25 against the live server: 200 on the 0.0.0.0 bind
+  with `--slot-save-path` alone, per-slot `is_processing` exposed; whether a
+  server with no slot flags at all needs `--slots` is the one enable-flag
+  case still to verify at build time); mlx documents no equivalent, so
   mlx gets the honest degradation (a warning, or a coarse check that names
   its false positive) plus an override flag. Revisit trigger: the next
   agent-driven profile-writing session against a live server — build it
@@ -195,13 +197,12 @@ Group entries under headings as themes emerge.
   predecessor llama-runner broke on every llama.cpp release doing this; endpoints
   like `/props` or `/metrics` would qualify, a log format never will.)
 
-- **Context-cache (slots) visibility.** With slot saving enabled
-  (`--slot-save-path`, in test on the slottest profile), knowing whether the
-  context cache fills up means a view of per-slot fill against the entry's
-  context size, plus the sizes of saved slot files on disk. Same rails as the
-  ruling above: llama's documented `/slots` endpoint — already slated for
-  validate's busy gate; verify at build time what it exposes for context fill —
-  plus the filesystem, never logs; mlx documents no equivalent, so this is
-  llama-only. (noted 2026-08-25 during the slot save/restore experiment.)
-  Revisit trigger: slot saving graduates past the test profile, or a session
-  dies to a full context that cria could have shown filling.
+- **Context-cache (slots) visibility.** With slot saving live (a `slots`
+  choice on the main profile), knowing whether the context cache fills up
+  means a view of per-slot fill against the slot's context, plus the sizes of
+  saved slot files on disk. Same rails as the ruling above: llama's documented
+  `/slots` endpoint plus the filesystem, never logs; mlx documents no
+  equivalent, so this is llama-only. The data is verified there (2026-08-25,
+  live probe): per-slot `n_ctx`, `n_prompt_tokens`, `n_prompt_tokens_cache`.
+  Revisit trigger: context-fill blindness felt in daily slot-saving use, or a
+  session dies to a full context that cria could have shown filling.
