@@ -205,3 +205,14 @@ Group entries under headings as themes emerge.
   insufficient in daily use. (ruled 2026-08-18: log parsing is permanently rejected —
   predecessor llama-runner broke on every llama.cpp release doing this; endpoints
   like `/props` or `/metrics` would qualify, a log format never will.)
+
+- **Context-cache (slots) visibility.** With slot saving enabled
+  (`--slot-save-path`, in test on the slottest profile), knowing whether the
+  context cache fills up means a view of per-slot fill against the entry's
+  context size, plus the sizes of saved slot files on disk. Same rails as the
+  ruling above: llama's documented `/slots` endpoint — already slated for
+  validate's busy gate; verify at build time what it exposes for context fill —
+  plus the filesystem, never logs; mlx documents no equivalent, so this is
+  llama-only. (noted 2026-08-25 during the slot save/restore experiment.)
+  Revisit trigger: slot saving graduates past the test profile, or a session
+  dies to a full context that cria could have shown filling.
