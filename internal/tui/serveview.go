@@ -390,9 +390,25 @@ func (m model) entryDetail(entry config.Entry, inner int) (facts, command []stri
 	add("name", entry.Name, factStyle)
 	add("file", entry.Path, factStyle)
 	add("backend", string(entry.Backend), backendTone(entry.Backend))
-	add("repo", entry.Repo, factStyle)
-	if entry.Quant != "" {
-		add("quant", entry.Quant, factStyle)
+	// Repo and quant are the launch's, not the file's: an axis may replace
+	// either (docs/specs/CONFIG.md), and a pane showing the declared pair — or,
+	// for a quant that lives only in options, no quant at all — would document
+	// a launch nobody is about to start. A replaced value rides the pick's ink,
+	// like the args below; a selection that does not resolve falls back to the
+	// declared pair, and the command line spells the refusal.
+	repoValue, repoStyle := entry.Repo, factStyle
+	quantValue, quantStyle := entry.Quant, factStyle
+	if launched, ok := launchedModel(entry, selection); ok {
+		if launched.Repo != entry.Repo {
+			repoValue, repoStyle = launched.Repo, pickedFactStyle
+		}
+		if launched.Quant != entry.Quant {
+			quantValue, quantStyle = launched.Quant, pickedFactStyle
+		}
+	}
+	add("repo", repoValue, repoStyle)
+	if quantValue != "" {
+		add("quant", quantValue, quantStyle)
 	}
 	add("port", strconv.Itoa(entry.Port), factStyle)
 	add("host", entry.Host, factStyle)

@@ -144,11 +144,14 @@ keybinds get detailed as they are built.
     picking and seeing the resulting command line are one loop. An entry that
     outgrows the pane loses fact lines behind an ellipsis, never the command
     (settled 2026-08-25).
-  - The pane's args block reads as the launch's effective args: the file's own
-    lines first, then what the current picks contribute, in composition order,
-    drawn in the pick's ink — mauve means sourced-from-the-current-pick
-    wherever it appears (settled 2026-08-25, user-requested: choices had made
-    their args invisible outside the command line).
+  - The pane's facts are the launch's, not the file's: the args block reads as
+    the effective args — the file's own lines first, then what the current
+    picks contribute, in composition order — and repo and quant are the pair a
+    start would use, shown even when the declared value lives only in the
+    options. Everything a pick sourced is drawn in the pick's ink — mauve
+    means sourced-from-the-current-pick wherever it appears (settled
+    2026-08-25, user-requested: choices had made their args and quant
+    invisible outside the command line).
   - Start launches the stored picks; restart-last replays the *record's* picks,
     not the current defaults — a swap-back reproduces what ran, records being
     self-contained (`docs/specs/SERVE.md`). The status box names the running

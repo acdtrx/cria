@@ -536,6 +536,28 @@ func TestDetailPaneCarriesThePickedArgs(t *testing.T) {
 	}
 }
 
+// A quant that lives in the options has no declared value to show — the pane
+// carries the launch's effective quant on the pick's ink instead, and follows
+// the pick when it moves. The repo, which no axis of this entry replaces, stays
+// the declared fact.
+func TestDetailPaneCarriesThePickedQuant(t *testing.T) {
+	frame, _ := choicesFrame(t, &fakeServers{})
+
+	drawn := strings.Join(frame.detailLines(200, 30), "\n")
+	if !strings.Contains(drawn, pickedFactStyle.Render("UD-Q4_K_XL")) {
+		t.Errorf("the pane does not carry the picked quant on the pick's ink:\n%s", drawn)
+	}
+	if !strings.Contains(drawn, factStyle.Render("unsloth/Qwen3-30B-A3B-GGUF")) {
+		t.Errorf("the pane does not keep the unreplaced repo as a declared fact:\n%s", drawn)
+	}
+
+	frame.stored = picks.Picks{"qwen": {"quant": "q6"}}
+	moved := strings.Join(frame.detailLines(200, 30), "\n")
+	if !strings.Contains(moved, pickedFactStyle.Render("UD-Q6_K_XL")) {
+		t.Errorf("the quant line does not follow the pick:\n%s", moved)
+	}
+}
+
 // An entry that outgrows its pane loses fact lines behind an ellipsis, never
 // the command: the command is what the pane exists to show, beside the picker
 // most of all (docs/specs/TUI.md — picking and seeing the command are one loop).
