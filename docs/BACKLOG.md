@@ -115,6 +115,20 @@ Group entries under headings as themes emerge.
   actually gets exchanged between people or machines and re-creating it via
   agent/docs feels like friction.
 
+- **A global profile merged into every entry.** Params and choices stable across
+  profiles — `-ngl 99`, `-fa on`, an mmproj or slot-saving toggle — live once in
+  a global profile that composition merges into each entry: redundancy removal
+  and uniformity on purpose-stable settings, nothing more. It is merged with
+  profiles, not globally applicable state, and the tree stays human-owned. To
+  settle at design time: per-backend scoping (those are llama flags; mlx
+  entries must not inherit them); how the loud flag-collision rule extends
+  across the merge — entry-overrides-global is an ordering decision, and
+  silent both-win is exactly what the collision rule exists to forbid; and
+  where a global choice's pick lives relative to per-entry picks. (noted
+  2026-08-25.) Revisit trigger: the next uniformity edit across several
+  profiles — the same flag changed file by file — or a drift found where one
+  profile missed a stable param.
+
 ## Cache view
 
 - **`entriesUsing` matches declared repo/quant, not picks.** The cache view's
