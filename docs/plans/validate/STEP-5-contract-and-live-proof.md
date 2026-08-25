@@ -30,6 +30,9 @@ and the protocol is proven on real metal without touching the main server.
      whose args refuse to start); otherwise exit 1 stays covered by the
      component tests and that is recorded here honestly.
   6. `cria stop lfm25-26b-q8` — the machine as the session found it.
+  7. Refresh `~/.config/cria/AGENTS.md` to the new embedded text (cria writes
+     it only when missing): move the old one aside and run any cria command
+     once, or copy the text over — user's call, stated not encoded.
 - Timing: the run needs the user's go — builds and the LFM model load share
   the machine with the live model session.
 

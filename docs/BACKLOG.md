@@ -208,6 +208,14 @@ Group entries under headings as themes emerge.
   saved slot files on disk. Same rails as the ruling above: llama's documented
   `/slots` endpoint plus the filesystem, never logs; mlx documents no
   equivalent, so this is llama-only. The data is verified there (2026-08-25,
-  live probe): per-slot `n_ctx`, `n_prompt_tokens`, `n_prompt_tokens_cache`.
-  Revisit trigger: context-fill blindness felt in daily slot-saving use, or a
-  session dies to a full context that cria could have shown filling.
+  live probe): per-slot `n_ctx`, `n_prompt_tokens`, `n_prompt_tokens_cache`,
+  `is_processing`. Direction (user-sketched 2026-08-25): `is_processing`
+  gates the label — a busy slot shows live data, an idle one shows what it
+  last processed. `/slots` carries counts, not rates (verified same probe);
+  tok/sec comes from cria's own poll deltas — `n_decoded` and
+  `n_prompt_tokens_processed` across ticks give live decode/prefill rates,
+  remembered as the idle slot's "last" rate. Rejected for now: `--metrics`
+  (Prometheus) — lifetime averages, needs a flag in every profile (the
+  running server answers 501), and poll deltas answer the actual question.
+  Build after the validate plan lands — wanted; the trigger (watching logs to
+  see how the server is doing) is being felt.

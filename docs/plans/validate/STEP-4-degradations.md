@@ -34,6 +34,16 @@ know, and the one override exists: the busy gate can be skipped deliberately.
 - Restore-failure reporting (exit 3) names: what failed, and what is serving
   now (nothing, or the target left running when its stop failed) — the state
   a human must fix, in one line.
+- **The agent-facing surfaces teach validate as THE verb** (user-requested
+  2026-08-25): `internal/config/docs.go`'s footer and the embedded
+  `internal/config/agents.md` ("Validate what you wrote") currently teach the
+  start-wait/status/stop choreography — the exact dance that burns the
+  calling agent's own model. Both switch to `cria validate <id>
+  [choice=option ...]` with the exit-code contract, keeping start/stop
+  documented as the manual verbs they remain. The user's existing
+  `~/.config/cria/AGENTS.md` is only written when missing — the manual
+  refresh (delete it, run cria once, or copy the new text) is stated in the
+  step-5 live-proof checklist, per feature-building mode.
 
 ## Acceptance criteria
 
