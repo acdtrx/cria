@@ -48,7 +48,12 @@ Group entries under headings as themes emerge.
 - **`cria validate <id> [choice=option ...]` — swap, prove, restore.** An agent
   running on the local model cannot validate a profile it just wrote: starting
   it means stopping the model it thinks with. Validate makes that safe as one
-  blocking command — stop the running server (keeping its record), start the
+  blocking command — stop the server holding the target's port (keeping its
+  record; port-scoped, settled 2026-08-25: the target entry itself carries the
+  one fact the agent has no prior knowledge of, servers on other ports are
+  structurally untouchable, and on shared-port machines — the config doctrine —
+  the port holder *is* the running server; rejected: refusing when several
+  servers run, and any flag naming a server to stop), start the
   target, wait green, send one real completion (fit-proofing: /health passes
   while the first request can still die — the q8 speculative-batch death, the
   mini's Metal limit), stop it, restart the previous server from its record's
