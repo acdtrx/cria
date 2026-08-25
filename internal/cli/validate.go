@@ -14,7 +14,7 @@ import (
 
 // validateSynopsis is the command line every validate refusal points back at
 // (docs/specs/CLI.md).
-const validateSynopsis = "cria validate <id> [choice=option ...]"
+const validateSynopsis = "cria validate <id> [choice=option ...] [" + ignoreBusyFlag + "]"
 
 // The exit codes a validation answers with, on top of the two every subcommand
 // shares (cli.go). They are four outcomes an agent branches on, and nothing
@@ -46,12 +46,11 @@ const (
 // it was; from there on the displaced server is put back whatever happens
 // (swap).
 func (a *app) validate(args []string) int {
-	for _, arg := range args {
-		if strings.HasPrefix(arg, "-") {
-			return a.usage("validate: unknown flag %s; usage: %s", arg, validateSynopsis)
-		}
+	rest, ignoreBusy, unknown := splitFlag(args, ignoreBusyFlag)
+	if unknown != "" {
+		return a.usage("validate: unknown flag %s; usage: %s", unknown, validateSynopsis)
 	}
-	ids, explicit, err := splitPicks(args)
+	ids, explicit, err := splitPicks(rest)
 	if err != nil {
 		return a.usage("validate: %v; usage: %s", err, validateSynopsis)
 	}
@@ -100,7 +99,7 @@ func (a *app) validate(args []string) int {
 	if err != nil {
 		return a.failWith(exitRefused, "validate %s: %v", id, err)
 	}
-	if refusal := a.displacementRefusal(manager, entry, displaced); refusal != "" {
+	if refusal := a.displacementRefusal(manager, entry, displaced, ignoreBusy); refusal != "" {
 		return a.failWith(exitRefused, "validate %s: %s", id, refusal)
 	}
 	return a.swap(manager, tree, entry, selection, report, displaced)
@@ -110,7 +109,13 @@ func (a *app) validate(args []string) int {
 // or the empty string when it can. It is the last thing asked before the machine
 // changes, and the warning it may print on the way is part of the same
 // judgement: what cria could not check about the server it is about to stop.
-func (a *app) displacementRefusal(manager servers, entry config.Entry, displaced serve.Displacement) string {
+//
+// ignoreBusy is the operator's word that a generation cut off mid-answer is
+// acceptable, and it lifts that one gate. The other two refusals stand under it,
+// because neither is about anybody's patience: a process cria did not start has
+// no record to put it back from, and a target already serving elsewhere would be
+// orphaned by its own second start.
+func (a *app) displacementRefusal(manager servers, entry config.Entry, displaced serve.Displacement, ignoreBusy bool) string {
 	if len(displaced.Foreign) > 0 {
 		return foreignRefusal(entry, displaced.Foreign)
 	}
@@ -125,14 +130,14 @@ func (a *app) displacementRefusal(manager servers, entry config.Entry, displaced
 		return err.Error()
 	}
 	if running && (displaced.Holder == nil || displaced.Holder.EntryID != entry.ID) {
-		return fmt.Sprintf("%s is already running as pid %d on port %d, which is not the port it launches on now (%d); stop it first",
-			held.EntryID, held.PID, held.Port, entry.Port)
+		return fmt.Sprintf("%s is already running as pid %d on port %d, which is not the port it launches on now (%d); validating would leave that process with nothing naming it — `cria stop %s` first",
+			held.EntryID, held.PID, held.Port, entry.Port, held.EntryID)
 	}
 
 	if displaced.Holder == nil {
 		return ""
 	}
-	refusal, warning := a.busyGate(manager, *displaced.Holder)
+	refusal, warning := a.busyGate(manager, *displaced.Holder, ignoreBusy)
 	if warning != "" {
 		a.note("%s", warning)
 	}
@@ -143,19 +148,35 @@ func (a *app) displacementRefusal(manager servers, entry config.Entry, displaced
 // the refusal that keeps a generation from being cut off mid-answer, or the
 // warning a swap goes ahead under when cria could not tell.
 //
+// A busy holder is refused rather than waited out. Queueing would burn the
+// caller's own clock invisibly — the caller is a coding agent whose turn is
+// running while cria blocks — so the honest answer is the refusal, and the
+// action it names is a human's: let the answer finish, or stop the server.
+// ignoreBusy is that human having answered already, so the verdict is still read
+// and reported, and the swap goes ahead over it.
+//
 // Unverifiable is neither idle nor busy: it is the case where nothing on the
 // machine can answer the question (an mlx server, a llama build without the slot
 // endpoint), and the swap proceeds with the risk named rather than refusing —
 // the machine that needs validate runs one server on one port, usually the
 // caller's own, idle at the moment the tool call executes.
-func (a *app) busyGate(manager servers, holder serve.Record) (refusal, warning string) {
+//
+// The refusal does not name the override. The agent reading it is the one whose
+// request would be cut off, and a bypass on the line it reads is a bypass it
+// will take; the flag is documented where the person deciding reads
+// (`cria --help`).
+func (a *app) busyGate(manager servers, holder serve.Record, ignoreBusy bool) (refusal, warning string) {
 	generation := manager.Generating(holder)
 	switch generation.Busy {
 	case serve.BusyGenerating:
-		return fmt.Sprintf("%s is answering a request on port %d right now; stopping it would cut that generation off — validate again once it is idle",
-			holder.EntryID, holder.Port), ""
+		if ignoreBusy {
+			return "", fmt.Sprintf("%s is answering a request on port %d right now; %s was given, so cria stops it mid-answer",
+				holder.EntryID, holder.Port, ignoreBusyFlag)
+		}
+		return fmt.Sprintf("%s is answering a request on port %d right now, and stopping it would cut that answer off; ask the user to let it finish or to stop %s, then validate again",
+			holder.EntryID, holder.Port, holder.EntryID), ""
 	case serve.BusyUnverifiable:
-		return "", fmt.Sprintf("cria cannot tell whether %s is generating right now (%s); validating stops it anyway, and a request in flight would die with it",
+		return "", fmt.Sprintf("cria cannot tell whether %s is generating right now (%s); validating stops it anyway, so a request in flight would die with it",
 			holder.EntryID, generation.Detail)
 	}
 	return "", ""
@@ -188,7 +209,7 @@ func (a *app) swap(manager servers, tree *config.Tree, entry config.Entry, selec
 		// from, and this copy is the only thing that can put the server back.
 		stopped, err := manager.Displace(*holder)
 		if err != nil {
-			return a.failWith(exitUnrestored, "validate %s: cannot stop %s on port %d: %v; nothing was validated, and %s may no longer be serving",
+			return a.failWith(exitUnrestored, "validate %s: cannot stop %s on port %d: %v; nothing was validated, and %s may already be down — `cria status` says whether it is still serving",
 				entry.ID, holder.EntryID, holder.Port, err, holder.EntryID)
 		}
 		held, holding = stopped, true
@@ -199,7 +220,7 @@ func (a *app) swap(manager servers, tree *config.Tree, entry config.Entry, selec
 	if record != nil {
 		a.printf("stopping %s\n", record.EntryID)
 		if err := manager.Stop(*record); err != nil {
-			return a.failWith(exitUnrestored, "validate %s: cannot stop it again: %v; %s",
+			return a.failWith(exitUnrestored, "validate %s: started it but cannot stop it again: %v; %s",
 				entry.ID, err, unrestorable(*record, holding, held))
 		}
 	}
@@ -208,8 +229,8 @@ func (a *app) swap(manager servers, tree *config.Tree, entry config.Entry, selec
 		a.printf("restoring %s…\n", held.EntryID)
 		restored, err := manager.Restore(tree, held, report)
 		if err != nil {
-			return a.failWith(exitUnrestored, "validate %s: %v; nothing is serving on port %d now",
-				entry.ID, err, held.Port)
+			return a.failWith(exitUnrestored, "validate %s: %v; nothing is serving on port %d now — `cria start %s` once that is fixed",
+				entry.ID, err, held.Port, held.EntryID)
 		}
 		a.printf("restored %s as pid %d on %s\n", restored.EntryID, restored.PID, address(restored))
 	}
@@ -257,7 +278,7 @@ func (a *app) runTarget(manager servers, entry config.Entry, selection config.Se
 // two commands a person runs to end up where validate promised.
 func unrestorable(target serve.Record, holding bool, held serve.Record) string {
 	if !holding {
-		return fmt.Sprintf("%s is still serving on port %d; stop it yourself", target.EntryID, target.Port)
+		return fmt.Sprintf("%s is still serving on port %d; `cria stop %s` ends it", target.EntryID, target.Port, target.EntryID)
 	}
 	return fmt.Sprintf("%s still holds port %d and %s was not put back; `cria stop %s`, then `cria start %s`",
 		target.EntryID, target.Port, held.EntryID, target.EntryID, held.EntryID)

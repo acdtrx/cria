@@ -45,12 +45,18 @@ var subcommands = []string{"start", "stop", "status", "validate", "bench", "list
 // The flags the surface has, all booleans (docs/specs/CLI.md). `cria new` takes
 // two because they are peers: the backend it scaffolds can be named either way,
 // and neither is a special case.
+//
+// --ignore-busy is spelled for what it lifts and nothing else: it is the one
+// override validate has, and a caller reading it anywhere — a shell history, a
+// script — must be able to tell that the busy gate is what it skips, not the
+// refusals cria cannot honour (validate.go).
 const (
-	waitFlag  = "--wait"
-	jsonFlag  = "--json"
-	pathsFlag = "--paths"
-	llamaFlag = "--llama"
-	mlxFlag   = "--mlx"
+	waitFlag       = "--wait"
+	jsonFlag       = "--json"
+	pathsFlag      = "--paths"
+	llamaFlag      = "--llama"
+	mlxFlag        = "--mlx"
+	ignoreBusyFlag = "--ignore-busy"
 )
 
 // How `--wait` watches a start it has just triggered.

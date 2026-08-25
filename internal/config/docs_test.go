@@ -217,6 +217,25 @@ func TestDocsFitsTheWidth(t *testing.T) {
 	}
 }
 
+// The page is what an agent reads before it writes an entry, so it must teach the
+// one command that proves the entry serves — with the four outcomes the agent
+// branches on (docs/cria.md, principle 5).
+func TestDocsTeachesValidateAsTheCheck(t *testing.T) {
+	page := Docs()
+	for _, want := range []string{
+		"cria validate <id> [choice=option ...]",
+		"0  it serves",
+		"1  it does not",
+		"2  cria refused and touched nothing",
+		"3  the swap was left half done",
+		"cria status --json",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("`cria docs` does not hold %q", want)
+		}
+	}
+}
+
 // definedKeyNames lists every key the schemas declare, sub-table keys under their
 // dotted names.
 func definedKeyNames() []string {

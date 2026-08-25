@@ -197,7 +197,7 @@ func (a *app) refuseUnknownEntry(tree *config.Tree, id string) int {
 func unknownEntry(tree *config.Tree, id string) string {
 	for _, broken := range tree.Broken {
 		if broken.ID == id {
-			return fmt.Sprintf("%s: %v; fix that file and start again", broken.Path, broken.Err)
+			return fmt.Sprintf("%s: %v; fix that file and try again", broken.Path, broken.Err)
 		}
 	}
 	if len(tree.Entries) == 0 {
@@ -255,7 +255,7 @@ func foreignRefusal(entry config.Entry, holders []serve.Holder) string {
 		fmt.Fprintf(&message, "\n  pid %d  %s", holder.PID, orUnknown(holder.Command, "command unreadable"))
 		fmt.Fprintf(&message, "\n          working directory %s", orUnknown(holder.WorkingDir, "unreadable"))
 	}
-	fmt.Fprintf(&message, "\nstop that process, or give %s a port of its own in %s, and start again",
+	fmt.Fprintf(&message, "\nstop that process, or give %s a port of its own in %s, and try again",
 		entry.ID, entry.Path)
 	return message.String()
 }

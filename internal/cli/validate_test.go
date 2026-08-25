@@ -219,7 +219,12 @@ func TestValidateReportsAFailedRestore(t *testing.T) {
 		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitUnrestored, errOut)
 	}
 	got := lastLine(errOut.String())
-	for _, want := range []string{"cannot put gemma back on port 8080", "is not an entry cria can read any more", "nothing is serving on port 8080 now"} {
+	for _, want := range []string{
+		"cannot put gemma back on port 8080",
+		"is not an entry cria can read any more",
+		"nothing is serving on port 8080 now",
+		"`cria start gemma` once that is fixed",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("cria's last line is %q, want it to contain %q", got, want)
 		}
@@ -263,7 +268,7 @@ func TestValidateReportsAHolderThatWouldNotStop(t *testing.T) {
 		t.Errorf("cria started %+v and restored %+v after a stop that failed", fake.started, fake.restored)
 	}
 	got := lastLine(errOut.String())
-	for _, want := range []string{"cannot stop gemma on port 8080", "nothing was validated", "gemma may no longer be serving"} {
+	for _, want := range []string{"cannot stop gemma on port 8080", "nothing was validated", "gemma may already be down", "`cria status`"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("cria's last line is %q, want it to contain %q", got, want)
 		}
@@ -338,7 +343,11 @@ func TestValidateRefusesWithoutTouchingTheMachine(t *testing.T) {
 				fake.generation = serve.Generation{Busy: serve.BusyGenerating}
 				return fake
 			}(),
-			want: []string{"gemma is answering a request on port 8080 right now", "once it is idle"},
+			want: []string{
+				"gemma is answering a request on port 8080 right now",
+				"stopping it would cut that answer off",
+				"ask the user to let it finish or to stop gemma",
+			},
 		},
 		{
 			name: "the target is already running on another port",
@@ -349,7 +358,11 @@ func TestValidateRefusesWithoutTouchingTheMachine(t *testing.T) {
 				fake.listing = serve.Listing{Servers: []serve.Server{{Record: elsewhere, Live: true}}}
 				return fake
 			}(),
-			want: []string{"qwen is already running as pid 4242 on port 9999", "not the port it launches on now (8080)", "stop it first"},
+			want: []string{
+				"qwen is already running as pid 4242 on port 9999",
+				"not the port it launches on now (8080)",
+				"`cria stop qwen` first",
+			},
 		},
 	}
 
@@ -385,29 +398,126 @@ func TestValidateRefusesWithoutTouchingTheMachine(t *testing.T) {
 
 // A holder cria cannot ask about its own work is warned about, not refused: the
 // swap goes ahead, and the warning names what could not be checked and what it
-// would cost if the guess is wrong.
+// would cost if the guess is wrong. Which servers cannot be asked is serve's
+// (an mlx holder, a llama holder whose slot endpoint did not answer); what the
+// command does with either answer is the same, and it is this.
 func TestValidateWarnsWhenTheHolderCannotBeAsked(t *testing.T) {
-	fake := greenTarget(heldServer("gemma", nil))
-	fake.generation = serve.Generation{
-		Busy:   serve.BusyUnverifiable,
-		Detail: "mlx_lm.server publishes no per-slot signal, so cria cannot tell whether it is generating",
+	cases := []struct {
+		name   string
+		detail string
+	}{
+		{
+			name:   "an mlx holder publishes no such signal",
+			detail: "mlx_lm.server publishes no per-slot signal, so cria cannot tell whether it is generating",
+		},
+		{
+			name:   "a llama holder's slot endpoint refused",
+			detail: "http://127.0.0.1:8080/slots answered 501 Not Implemented: slots endpoint is disabled",
+		},
 	}
-	app, out, errOut := newTestApp(testTree(), fake)
 
-	if code := app.validate([]string{"qwen"}); code != exitOK {
-		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			fake := greenTarget(heldServer("gemma", nil))
+			fake.generation = serve.Generation{Busy: serve.BusyUnverifiable, Detail: test.detail}
+			app, out, errOut := newTestApp(testTree(), fake)
+
+			if code := app.validate([]string{"qwen"}); code != exitOK {
+				t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+			}
+			for _, want := range []string{"cria cannot tell whether gemma is generating right now", test.detail, "would die with it"} {
+				if !strings.Contains(errOut.String(), want) {
+					t.Errorf("cria printed %q, want it to contain %q", errOut, want)
+				}
+			}
+			if len(fake.displaced) != 1 || len(fake.restored) != 1 {
+				t.Errorf("cria displaced %v and restored %+v, want the swap to have gone ahead", fake.displaced, fake.restored)
+			}
+			// The warning is an aside; the answer a script reads stays on stdout.
+			if strings.Contains(out.String(), "cannot tell") {
+				t.Errorf("cria printed the warning on stdout: %q", out)
+			}
+		})
 	}
-	for _, want := range []string{"cria cannot tell whether gemma is generating right now", "publishes no per-slot signal", "would die with it"} {
-		if !strings.Contains(errOut.String(), want) {
-			t.Errorf("cria printed %q, want it to contain %q", errOut, want)
+}
+
+// --ignore-busy is the operator's word that a generation may die: the busy
+// verdict is still read and reported, and the swap goes ahead over it.
+func TestIgnoreBusyStopsAHolderMidAnswer(t *testing.T) {
+	for _, args := range [][]string{{"qwen", ignoreBusyFlag}, {ignoreBusyFlag, "qwen"}} {
+		fake := greenTarget(heldServer("gemma", nil))
+		fake.generation = serve.Generation{Busy: serve.BusyGenerating}
+		app, out, errOut := newTestApp(testTree(), fake)
+
+		if code := app.validate(args); code != exitOK {
+			t.Fatalf("`cria validate %s` exited %d, want %d (stderr: %s)",
+				strings.Join(args, " "), code, exitOK, errOut)
+		}
+		if want := []string{"gemma", "qwen"}; !slices.Equal(fake.stopped, want) {
+			t.Errorf("cria stopped %v, want %v: the busy holder goes off the port anyway", fake.stopped, want)
+		}
+		if len(fake.restored) != 1 || fake.restored[0].EntryID != "gemma" {
+			t.Errorf("cria put back %+v, want gemma back on its port", fake.restored)
+		}
+		for _, want := range []string{"gemma is answering a request on port 8080 right now", ignoreBusyFlag, "stops it mid-answer"} {
+			if !strings.Contains(errOut.String(), want) {
+				t.Errorf("cria printed %q, want it to contain %q", errOut, want)
+			}
+		}
+		if !strings.Contains(out.String(), "validated qwen") {
+			t.Errorf("cria printed %q, want the verdict", out)
 		}
 	}
-	if len(fake.displaced) != 1 || len(fake.restored) != 1 {
-		t.Errorf("cria displaced %v and restored %+v, want the swap to have gone ahead", fake.displaced, fake.restored)
+}
+
+// The override lifts the busy gate and nothing else: the two refusals that are
+// not about anybody's patience stand under it, and the machine is untouched.
+func TestIgnoreBusyLiftsTheBusyGateAlone(t *testing.T) {
+	elsewhere := testRecord()
+	elsewhere.Port = 9999
+
+	cases := []struct {
+		name string
+		fake *fakeServers
+		want string
+	}{
+		{
+			name: "the port is held by a process cria did not start",
+			fake: &fakeServers{
+				record: testRecord(),
+				use: serve.PortUse{Holders: []serve.Holder{{
+					PID:        9001,
+					Command:    "/opt/homebrew/bin/llama-server -m gemma.gguf --port 8080",
+					WorkingDir: "/Users/someone/models",
+				}}},
+			},
+			want: "port 8080 is held by a process cria did not start",
+		},
+		{
+			name: "the target is already running on another port",
+			fake: func() *fakeServers {
+				fake := greenTarget(nil)
+				fake.listing = serve.Listing{Servers: []serve.Server{{Record: elsewhere, Live: true}}}
+				return fake
+			}(),
+			want: "qwen is already running as pid 4242 on port 9999",
+		},
 	}
-	// The warning is an aside; the answer a script reads stays on stdout.
-	if strings.Contains(out.String(), "cannot tell") {
-		t.Errorf("cria printed the warning on stdout: %q", out)
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			app, _, errOut := newTestApp(testTree(), test.fake)
+
+			if code := app.validate([]string{"qwen", ignoreBusyFlag}); code != exitRefused {
+				t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitRefused, errOut)
+			}
+			if len(test.fake.stopped) != 0 || len(test.fake.started) != 0 {
+				t.Errorf("a refused validation stopped %v and started %+v", test.fake.stopped, test.fake.started)
+			}
+			if !strings.Contains(errOut.String(), test.want) {
+				t.Errorf("cria printed %q, want it to contain %q", errOut, test.want)
+			}
+		})
 	}
 }
 

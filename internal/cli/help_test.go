@@ -35,13 +35,14 @@ func TestHelpNamesTheWholeSurface(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		waitFlag, jsonFlag, pathsFlag, llamaFlag, mlxFlag, "--version",
+		waitFlag, jsonFlag, ignoreBusyFlag, pathsFlag, llamaFlag, mlxFlag, "--version",
 		"0 the asked-for thing is true or done, 1 it is not, 2 the command line could not be routed",
+		"validate: 0 it serves, 1 it does not and the machine is as it was found, 2 refused",
+		"3 the swap was left half done",
 		"cria start <id> [choice=option ...] [--wait]",
 		"config schema and examples: cria docs",
 		"agents: cria docs prints everything needed to write entries",
-		"cria start <id> --wait",
-		"cria status --json",
+		"cria validate <id> [choice=option ...]",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the help page does not contain %q", want)

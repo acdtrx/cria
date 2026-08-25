@@ -31,12 +31,24 @@ learn the schema from this page.
 
 ## Validate what you wrote
 
-    cria start <id> --wait   # exit 0 means the server came up healthy
-    cria status --json       # pid, port, phase, health, log path
-    cria stop <id>
+    cria validate <id> [choice=option ...]
 
-`cria start --wait` is the check: a non-zero exit means the entry does not serve.
-Read `log` from `cria status --json` and tail that file to find out why.
+One blocking command, and it leaves the machine as it found it: cria stops
+whatever server holds the entry's port, starts the entry, waits until it serves,
+asks it for one real completion, stops it, and puts the displaced server back
+under its own picks. Servers on other ports are never touched.
+
+    0  it serves
+    1  it does not; the last line says what failed
+    2  cria refused and touched nothing — unknown entry or pick, a missing tool,
+       or a port held by something it must not stop
+    3  the swap was left half done; the last line says what is serving now
+
+Read `log` from `cria status --json` and tail that file to find out why a
+validation failed.
+
+`cria start <id> [--wait]`, `cria status --json` and `cria stop <id>` are still
+the manual verbs, for driving a server you want left running.
 
 A file cria refuses disables only itself, and the error names the file and the
 offending key.

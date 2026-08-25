@@ -22,9 +22,9 @@ const (
 )
 
 // Docs renders the config reference: the tree layout, one table per schema, a
-// complete example for each backend and for config.toml, and the commands that
-// prove a freshly written entry actually serves. Plain text — it reads in a
-// terminal and pastes into a coding agent's context.
+// complete example for each backend and for config.toml, and the one command
+// that proves a freshly written entry actually serves. Plain text — it reads in
+// a terminal and pastes into a coding agent's context.
 func Docs() string {
 	return fmt.Sprintf(docsPage,
 		keyTable(entrySchema),
@@ -83,9 +83,22 @@ EXAMPLE — config.toml
 %s
 VALIDATE WHAT YOU WROTE
 
-  cria start <id> --wait   starts the entry and waits; exit 0 means it serves
-  cria status --json       pid, port, phase, health and log path, machine-readable
-  cria stop <id>           stops it again
+  cria validate <id> [choice=option ...]
+
+  One blocking command, and the machine ends as it began: cria stops whatever server
+  holds the entry's port, starts the entry, waits until it serves, asks it for one
+  real completion, stops it, and puts the displaced server back under its own picks.
+  Nothing on another port is touched.
+
+  0  it serves
+  1  it does not; the last line says what failed
+  2  cria refused and touched nothing — unknown entry or pick, a missing tool, or a
+     port held by something it must not stop
+  3  the swap was left half done; the last line says what is serving now
+
+  The manual verbs are still there: cria start <id> [--wait] starts one and leaves it
+  running, cria status --json reports pid, port, phase, health and log path, and
+  cria stop <id> stops it.
 `
 
 // keyTable renders one schema as the reference table: name, type, whether the key

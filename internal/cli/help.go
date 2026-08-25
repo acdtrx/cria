@@ -10,7 +10,7 @@ package cli
 // that drifts (CLAUDE.md: schema and docs are one source).
 //
 // The last block is addressed to a coding agent, because one is the expected
-// reader: it names the two commands that prove a freshly written entry actually
+// reader: it names the one command that proves a freshly written entry actually
 // serves (docs/cria.md, principle 5).
 const helpPage = `cria — local LLM servers from a config tree
 
@@ -33,30 +33,36 @@ SUBCOMMANDS
   help                         this page
 
 FLAGS
-  --wait      start: block until the server answers its health endpoint, or fails
-  --json      status, bench: emit the same facts as one JSON document
-  --sizes     bench: prompt sizes in tokens, comma-separated (default 16,4096,16384)
-  --runs      bench: measured runs per size (default 3)
-  --gen       bench: tokens each run asks the server to generate (default 256)
-  --paths     list: add each entry's file path
-  --llama     new: scaffold a llama entry — the backend a bare cria new takes
-  --mlx       new: scaffold an mlx entry
-  --version   print the version of this binary
-  --help, -h  this page
+  --wait         start: block until the server answers its health endpoint, or fails
+  --json         status, bench: emit the same facts as one JSON document
+  --ignore-busy  validate: displace the port's holder even while it answers a request
+  --sizes        bench: prompt sizes in tokens, comma-separated (default 16,4096,16384)
+  --runs         bench: measured runs per size (default 3)
+  --gen          bench: tokens each run asks the server to generate (default 256)
+  --paths        list: add each entry's file path
+  --llama        new: scaffold a llama entry — the backend a bare cria new takes
+  --mlx          new: scaffold an mlx entry
+  --version      print the version of this binary
+  --help, -h     this page
 
 PICKS
   An entry can declare choices — quants, context sizes, layouts — and a start picks
   along them: cria start <id> [choice=option ...] [--wait], as in cria start qwen quant=q6.
   A pick there is one-shot: it composes that launch and leaves the stored picks alone.
+  cria validate takes the same picks — the combination it proves.
   cria list prints each entry's choices with its current pick marked.
 
 EXIT CODES
   0 the asked-for thing is true or done, 1 it is not, 2 the command line could not be routed.
+  validate: 0 it serves, 1 it does not and the machine is as it was found, 2 refused
+  before touching anything, 3 the swap was left half done — the last line says what
+  is serving now and what to put back.
 
 CONFIG
   The tree is ~/.config/cria: you write it, cria reads it and drives what it declares.
   config schema and examples: cria docs
 
-  agents: cria docs prints everything needed to write entries; validate with
-  cria start <id> --wait and cria status --json
+  agents: cria docs prints everything needed to write entries; prove one serves with
+  cria validate <id> [choice=option ...] — it swaps the entry in, asks it for a real
+  completion, and puts back whatever it displaced. start and stop stay the manual verbs.
 `

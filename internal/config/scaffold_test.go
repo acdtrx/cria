@@ -113,12 +113,13 @@ func TestScaffoldedTreeLoadsEmpty(t *testing.T) {
 }
 
 // AGENTS.md is the agent's entry point (docs/cria.md, principle 5): it must send
-// them to the binary for the schema and to the lifecycle loop for validation.
+// them to the binary for the schema and to the one command that proves what they
+// wrote actually serves, exit codes and all.
 func TestAgentsPagePointsAtTheBinary(t *testing.T) {
 	page := string(agentsPage)
 	for _, want := range []string{
 		"cria docs",
-		"cria start <id> --wait",
+		"cria validate <id> [choice=option ...]",
 		"cria status --json",
 		"cria stop <id>",
 		entriesDir + "/<id>.toml",
