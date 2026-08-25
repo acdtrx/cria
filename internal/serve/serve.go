@@ -106,6 +106,10 @@ type Manager struct {
 	warm  warmer
 	bench bencher
 
+	// Whether a server is answering somebody right now — what a swap asks
+	// before it stops one (validate.go).
+	slots slotsReader
+
 	// What a Manager remembers between observations. Both are display state,
 	// live only as long as this cria invocation, and are never persisted: which
 	// pid of an entry has answered green — the line between "not answering yet"
@@ -147,6 +151,7 @@ func New(root string, host procs.Host) *Manager {
 		hub:      hubTotals(),
 		warm:     newHTTPWarm(),
 		bench:    newHTTPBench(),
+		slots:    newHTTPSlots(),
 		greenPID: map[string]int{},
 		totals:   map[string]hubapi.Total{},
 		grace:    stopGrace,

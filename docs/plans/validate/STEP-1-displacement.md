@@ -1,6 +1,6 @@
 # STEP 1 — displacement resolution and the busy gate
 
-Status: not started
+Status: done (2026-08-25)
 
 ## Intent
 
@@ -42,3 +42,37 @@ it in `internal/serve`, pure mechanism, no CLI.
   mlx "unverifiable" without any HTTP call.
 - No log reading anywhere; no new dependencies.
 - Suite state at step end recorded here (expected reds named, if any).
+
+## What was built
+
+`internal/serve/validate.go` — two mechanisms, no CLI:
+
+- `Displaced(entry config.Entry) (Displacement, error)` — the target's own
+  resolved port read through `PortUse` (no attribution machinery duplicated),
+  in a swap's vocabulary: `Displacement{Port, Holder *Record, Foreign
+  []Holder}` with `Free()`. A live record is the server to displace; processes
+  cria did not start come back as `Foreign` for the caller to refuse over;
+  target == holder is the same path as any other.
+- `Generating(record Record) Generation` — the busy gate. `Generation{Busy,
+  Detail}` over `Busy` = `BusyIdle` / `BusyGenerating` / `BusyUnverifiable`.
+  llama: `GET /slots` at the probe's address rule, decoded into a minimal
+  `slot` struct (`is_processing` only, unknown fields ignored), busy when any
+  slot is working. mlx is never asked at all. Unreachable, non-2xx (the
+  server's own refusal text quoted via `warm.go`'s `refusal`), a payload that
+  is not a slot listing, and an empty listing are all `BusyUnverifiable` with
+  a detail naming what stood in the way — never idle.
+- Seam `slotsReader` on the Manager (`slots`), matching `probe`/`warm`/`bench`,
+  wired to `newHTTPSlots()` in `New`.
+
+Decision made while implementing: an empty `/slots` listing is unverifiable
+rather than idle — an answer with no evidence under it is the one shape this
+gate must not take (CODING-RULES §4).
+
+## Suite
+
+`go test ./...` from the worktree root: **all packages ok**, no expected reds.
+`gofmt -l .` empty, `go vet ./...` clean. Nine new tests in
+`internal/serve/validate_test.go` (holder by port · self-validation · exited
+record ignored · free port · foreign holder with pid/command/dir · the slot
+URL rule · busy/idle over real payloads · the three unverifiable payload
+cases · unreachable · mlx never asked).
