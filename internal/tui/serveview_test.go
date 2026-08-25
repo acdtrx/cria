@@ -498,10 +498,54 @@ func TestDetailPaneMarksTheCurrentPicks(t *testing.T) {
 
 	// A pane too narrow for a whole axis wraps it into the label's indent and
 	// never cuts an option in half: the options and their mark are what the
-	// block is read for.
-	narrow := plain(strings.Join(frame.detailLines(22, 30), "\n"))
+	// block is read for. The pane is given the height the whole entry needs at
+	// this width — a shorter one elides facts to keep the command (sizeDetail),
+	// which is not what this case reads.
+	narrow := plain(strings.Join(frame.detailLines(22, 40), "\n"))
 	if want := "choices  quant:  q4 \n          q6   q8 \n         layout:\n          coding \n          chat "; !strings.Contains(narrow, want) {
 		t.Errorf("the narrow pane draws\n%s\nwant the axes wrapped into the indent:\n%s", narrow, want)
+	}
+}
+
+// The args a pick contributes stand in the args block too, under the file's
+// own lines and on the pick's ink: the block reads as the launch's effective
+// args, and hue is what tells the file's lines from the picks'.
+func TestDetailPaneCarriesThePickedArgs(t *testing.T) {
+	frame, _ := choicesFrame(t, &fakeServers{})
+
+	drawn := strings.Join(frame.detailLines(200, 30), "\n")
+	if !strings.Contains(drawn, pickedFactStyle.Render("--parallel 2")) {
+		t.Errorf("the pane does not carry the picked option's args on the pick's ink:\n%s", drawn)
+	}
+	if !strings.Contains(drawn, factStyle.Render("--jinja")) {
+		t.Errorf("the pane does not keep the file's own args as body text:\n%s", drawn)
+	}
+	// The picked lines continue the args block rather than opening one of their
+	// own: one label, the picks' contribution indented under the file's lines.
+	if plain := plain(drawn); strings.Count(plain, "args") != 1 ||
+		!strings.Contains(plain, "args     --ctx-size 16384\n         --jinja\n         --parallel 2") {
+		t.Errorf("the picked args do not continue the args block:\n%s", plain)
+	}
+
+	// A different pick moves the block with it — the pane and the command line
+	// stay one launch.
+	frame.stored = picks.Picks{"qwen": {"layout": "chat"}}
+	moved := strings.Join(frame.detailLines(200, 30), "\n")
+	if !strings.Contains(moved, pickedFactStyle.Render("--parallel 1")) {
+		t.Errorf("the args block does not follow the pick:\n%s", moved)
+	}
+}
+
+// An entry that outgrows its pane loses fact lines behind an ellipsis, never
+// the command: the command is what the pane exists to show, beside the picker
+// most of all (docs/specs/TUI.md — picking and seeing the command are one loop).
+func TestDetailPaneKeepsTheCommandThroughASqueeze(t *testing.T) {
+	frame, _ := choicesFrame(t, &fakeServers{})
+
+	squeezed := plain(strings.Join(frame.detailLines(200, 6), "\n"))
+	if !strings.Contains(squeezed, "…") ||
+		!strings.Contains(squeezed, "-hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL") {
+		t.Errorf("a squeezed pane does not elide facts to keep the command:\n%s", squeezed)
 	}
 }
 

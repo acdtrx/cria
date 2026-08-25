@@ -334,8 +334,9 @@ func (m model) emptyList() []string {
 }
 
 // detailLines is the highlighted row in full: every key the entry sets with the
-// value cria resolved for it, the args as the file wrote them, and the exact
-// command line a start would run. That line is the entry's documentation
+// value cria resolved for it, the args as the file wrote them with the current
+// picks' contributions under them, and the exact command line a start would
+// run. That line is the entry's documentation
 // (docs/specs/CONFIG.md), and it is composed by the same call Start spawns with,
 // so what is read here is what would run.
 func (m model) detailLines(inner, capacity int) []string {
@@ -346,11 +347,32 @@ func (m model) detailLines(inner, capacity int) []string {
 	case selected.broken != nil:
 		return sizeLines(brokenDetail(*selected.broken, inner), capacity)
 	}
-	return sizeLines(m.entryDetail(selected.entry, inner), capacity)
+	facts, command := m.entryDetail(selected.entry, inner)
+	return sizeDetail(facts, command, capacity)
 }
 
-// entryDetail is one entry's contents.
-func (m model) entryDetail(entry config.Entry, inner int) []string {
+// sizeDetail is sizeLines with the command anchored: the command line is what
+// the pane exists to show (docs/specs/TUI.md — picking and seeing the command
+// are one loop), so an entry that outgrows the pane loses fact lines behind an
+// ellipsis, never the command under them.
+func sizeDetail(facts, command []string, capacity int) []string {
+	if len(facts)+len(command) <= capacity {
+		return sizeLines(append(facts, command...), capacity)
+	}
+	room := capacity - len(command) - 1
+	if room < 0 {
+		return sizeLines(command, capacity)
+	}
+	lines := make([]string, 0, capacity)
+	lines = append(lines, facts[:room]...)
+	lines = append(lines, quietStyle.Render("…"))
+	return append(lines, command...)
+}
+
+// entryDetail is one entry's contents: its facts, and the command block those
+// facts compose — apart, so the pane can keep the command through a squeeze
+// (sizeDetail).
+func (m model) entryDetail(entry config.Entry, inner int) (facts, command []string) {
 	var lines []string
 	add := func(label, value string, style lipgloss.Style) {
 		lines = append(lines, detailField(label, value, inner, style)...)
@@ -376,24 +398,34 @@ func (m model) entryDetail(entry config.Entry, inner int) []string {
 	add("host", entry.Host, factStyle)
 	// Args go one flag to a line, verbatim: a file's args list is read to check
 	// what this entry sets, and a single wrapped string hides where one flag
-	// ends and the next begins.
-	for i, arg := range argRows(entry.Args) {
-		label := "args"
-		if i > 0 {
-			label = ""
+	// ends and the next begins. The args the current picks contribute follow in
+	// the same block, in the order composition appends them, on the pick's own
+	// ink — the block reads as the launch's effective args, each line's origin
+	// told by hue.
+	argLines := 0
+	argRow := func(row string, style lipgloss.Style) {
+		label := ""
+		if argLines == 0 {
+			label = "args"
 		}
-		add(label, arg, factStyle)
+		argLines++
+		add(label, row, style)
+	}
+	for _, row := range argRows(entry.Args) {
+		argRow(row, factStyle)
+	}
+	for _, row := range argRows(pickedArgs(entry, selection)) {
+		argRow(row, pickedFactStyle)
 	}
 	add("cached", m.cachedWord(entry, selection), factStyle)
 	lines = append(lines, choiceRows(entry, selection, inner)...)
 
-	command, refused := m.composedCommand(entry, selection)
+	composed, refused := m.composedCommand(entry, selection)
 	style := factStyle
 	if refused {
 		style = alarmStyle
 	}
-	add("command", command, style)
-	return lines
+	return lines, detailField("command", composed, inner, style)
 }
 
 // choiceRows is an entry's axes as the pane reads them: one block under a single
@@ -510,6 +542,22 @@ func (m model) composedCommand(entry config.Entry, selection config.Selection) (
 		return err.Error(), true
 	}
 	return strings.Join(command, " "), false
+}
+
+// pickedArgs is what the current picks add to the launch's args, in the order
+// Resolve composes them — each choice's picked option, choices in file order
+// (config/resolve.go). An axis the selection leaves unpicked adds nothing here;
+// the command line is where that refusal is spelled out (choiceRows).
+func pickedArgs(entry config.Entry, selection config.Selection) []string {
+	var args []string
+	for _, choice := range entry.Choices {
+		for _, option := range choice.Options {
+			if option.Name == selection[choice.Name] {
+				args = append(args, option.Args...)
+			}
+		}
+	}
+	return args
 }
 
 // argRows groups an args list the way it was written: each flag with the values

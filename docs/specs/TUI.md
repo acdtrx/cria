@@ -141,7 +141,14 @@ keybinds get detailed as they are built.
     way out and never a discard (same doctrine as group management). One-shot
     launches are CLI territory; the picker only sets defaults.
   - The detail pane keeps showing the composed command for the current picks —
-    picking and seeing the resulting command line are one loop.
+    picking and seeing the resulting command line are one loop. An entry that
+    outgrows the pane loses fact lines behind an ellipsis, never the command
+    (settled 2026-08-25).
+  - The pane's args block reads as the launch's effective args: the file's own
+    lines first, then what the current picks contribute, in composition order,
+    drawn in the pick's ink — mauve means sourced-from-the-current-pick
+    wherever it appears (settled 2026-08-25, user-requested: choices had made
+    their args invisible outside the command line).
   - Start launches the stored picks; restart-last replays the *record's* picks,
     not the current defaults — a swap-back reproduces what ran, records being
     self-contained (`docs/specs/SERVE.md`). The status box names the running

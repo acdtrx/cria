@@ -64,12 +64,14 @@ const (
 	carryHex        = "#344f4b" // Teal over the terminal's ground
 	carryHeadingHex = "#94e2d5" // Teal
 
-	// The picked chip: the option a bare start composes with rides a small
-	// band of its own hue, in the picker and in the detail pane alike. Mauve
-	// appears nowhere else in cria and means exactly this — a background
-	// carries the mark so the option's own name stays the only text on the
-	// row (user-chosen 2026-08-23 over a star suffix). Like the carried
-	// heading, the whole chip changes hue together.
+	// The pick's hue. The option a bare start composes with rides a small
+	// band of it — the chip — in the picker and in the detail pane alike: a
+	// background carries the mark so the option's own name stays the only
+	// text on the row (user-chosen 2026-08-23 over a star suffix). The same
+	// ink on the terminal's own ground draws the args-block lines a pick
+	// contributed. Mauve appears nowhere else in cria and means exactly this:
+	// sourced from the current pick. Like the carried heading, the whole chip
+	// changes hue together.
 	pickedHex    = "#3a2f52" // Mauve over the terminal's ground
 	pickedInkHex = "#cba6f7" // Mauve
 )
@@ -123,6 +125,7 @@ var palette = []swatch{
 	{name: "carry heading", hex: carryHeadingHex, on: carryHex, floor: textFloor},
 
 	{name: "picked", hex: pickedInkHex, on: pickedHex, floor: textFloor},
+	{name: "picked ink", hex: pickedInkHex, on: terminalBG, floor: textFloor},
 }
 
 // The palette as lipgloss reads it.
@@ -202,6 +205,11 @@ var (
 // cell of padding either side is part of the chip: the band has to be seen
 // holding the name, not just tinting its letters (user-chosen 2026-08-23).
 var pickedStyle = lipgloss.NewStyle().Foreground(pickedInk).Background(pickedBand).Padding(0, 1)
+
+// The pick's ink on the terminal's own ground: an args line the current pick
+// contributed, told from the file's own lines by hue alone (serveview.go,
+// entryDetail).
+var pickedFactStyle = lipgloss.NewStyle().Foreground(pickedInk)
 
 // rowPaint is how one row of a list is drawn: in the palette as it stands, or on
 // the cursor's band. Both lists ask for it the same way, so the highlight is one
