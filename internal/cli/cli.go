@@ -40,7 +40,7 @@ const (
 // page presents it: the server lifecycle, then the config tree, then the two
 // generators, then the binary's own upkeep. Bare `cria` opens the TUI instead
 // of naming a subcommand.
-var subcommands = []string{"start", "stop", "status", "bench", "list", "new", "edit", "docs", "wired-limit", "update"}
+var subcommands = []string{"start", "stop", "status", "validate", "bench", "list", "new", "edit", "docs", "wired-limit", "update"}
 
 // The flags the surface has, all booleans (docs/specs/CLI.md). `cria new` takes
 // two because they are peers: the backend it scaffolds can be named either way,
@@ -93,6 +93,16 @@ type servers interface {
 	ListensOn(record serve.Record) (bool, []int, error)
 	Warm(record serve.Record) error
 	Bench(record serve.Record, spec serve.BenchSpec, report func(serve.BenchStep)) serve.BenchResult
+
+	// The five a validation is composed of (validate.go): who holds the target's
+	// port, whether that server may be stopped right now, the stop that keeps
+	// what puts it back, that restore, and the one completion that proves a
+	// server serves.
+	Displaced(entry config.Entry) (serve.Displacement, error)
+	Generating(record serve.Record) serve.Generation
+	Displace(holder serve.Record) (serve.Record, error)
+	Restore(tree *config.Tree, held serve.Record, report tools.Report) (serve.Record, error)
+	Prove(record serve.Record) error
 }
 
 // updater is the part of selfupdate the update subcommand drives — named on the
@@ -120,6 +130,13 @@ type app struct {
 	// the TUI is a decision here, but nothing about a terminal program is
 	// (CODING-RULES §7 — main.go does the wiring).
 	tui func() error
+
+	// interrupts arms the Ctrl-C watch a command that must not be left halfway
+	// runs under, and hands back the two halves of it: whether the operator has
+	// asked cria to stop, and the disarm (validate.go). It is a field so a
+	// component test can interrupt a wait without signalling the process the
+	// suite runs in.
+	interrupts func() (interrupted func() bool, disarm func())
 
 	// The --wait windows, held rather than read from the constants so a test can
 	// drive a whole wait — including its timeout — without waiting one out.
@@ -149,6 +166,7 @@ func newApp(tui func() error) *app {
 		memoryMB:       physicalMemoryMB,
 		updater:        func() updater { return selfupdate.New() },
 		tui:            tui,
+		interrupts:     watchInterrupt,
 		poll:           waitPoll,
 		startWindow:    waitStartWindow,
 		downloadWindow: waitDownloadWindow,
@@ -175,6 +193,8 @@ func (a *app) run(args []string, version string) int {
 		return a.stop(args[1:])
 	case "status":
 		return a.status(args[1:])
+	case "validate":
+		return a.validate(args[1:])
 	case "bench":
 		return a.bench(args[1:])
 	case "list":
@@ -285,15 +305,22 @@ func (a *app) waiting(format string, args ...any) {
 // exit code that says so (docs/specs/CLI.md). Every message it prints names the
 // failing thing and what clears it.
 func (a *app) fail(format string, args ...any) int {
-	fmt.Fprintf(a.err, "cria "+format+"\n", args...)
-	return exitFailure
+	return a.failWith(exitFailure, format, args...)
 }
 
 // usage reports a command line cria cannot route: a flag it does not know, or
 // the wrong number of arguments.
 func (a *app) usage(format string, args ...any) int {
+	return a.failWith(exitUsage, format, args...)
+}
+
+// failWith writes one refusal line and hands back the code that says what kind
+// of refusal it was. Every non-zero exit cria takes reports its reason this way:
+// one line on stderr, under the program's own name, naming the failing thing and
+// what clears it — validate's further codes (validate.go) included.
+func (a *app) failWith(code int, format string, args ...any) int {
 	fmt.Fprintf(a.err, "cria "+format+"\n", args...)
-	return exitUsage
+	return code
 }
 
 // splitFlag separates the one flag a subcommand takes from its arguments,

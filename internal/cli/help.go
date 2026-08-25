@@ -22,6 +22,7 @@ SUBCOMMANDS
   start <id> [picks] [--wait]  start the entry <id>; --wait blocks until it serves or fails
   stop [<id>]                  stop a running server; the id is required when several run
   status [--json]              what every server cria started is doing right now
+  validate <id> [picks]        prove the entry serves: swap it in, ask it for a completion, swap back
   bench [<id>] [flags]         measure a running server: prefill and decode tokens/second
   list [--paths]               the entries the config tree declares
   new <id> [--llama|--mlx]     scaffold an entry file and open your editor on it

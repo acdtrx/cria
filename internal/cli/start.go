@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -45,24 +46,29 @@ func (a *app) start(args []string) int {
 		return a.refuseUnknownEntry(tree, id)
 	}
 
-	// The three layers a launch is decided by (docs/specs/CONFIG.md, Choices):
-	// the entry's config defaults, under the picks the store holds, under the
-	// ones typed here. The store is read and left alone — a pick on the command
-	// line is one-shot, so an agent's experiment never changes what the next bare
-	// start launches.
-	//
-	// A flat entry has nothing to pick, so nothing to look up: its launch is what
-	// it always was, and a store cria cannot read is not its problem. A pick typed
-	// against it is still refused, by the merge, naming what the entry has.
-	var stored config.Selection
-	if len(entry.Choices) > 0 {
-		stored = a.storedPicks()[entry.ID]
-	}
-	selection, err := picks.Merge(entry, stored, explicit)
+	selection, err := a.launchPicks(entry, explicit)
 	if err != nil {
 		return a.fail("start %s: %v", id, err)
 	}
 	return a.startEntry(tree, entry, selection, wait)
+}
+
+// launchPicks settles what an invocation launches an entry under: the three
+// layers docs/specs/CONFIG.md (Choices) puts over one another — the entry's
+// config defaults, under the picks the store holds, under the ones typed on the
+// command line. The store is read and left alone: a pick typed at a start or at
+// a validation is one-shot, so an agent's experiment never changes what the next
+// bare start launches.
+//
+// A flat entry has nothing to pick, so nothing to look up: its launch is what it
+// always was, and a store cria cannot read is not its problem. A pick typed
+// against it is still refused, by the merge, naming what the entry has.
+func (a *app) launchPicks(entry config.Entry, explicit config.Selection) (config.Selection, error) {
+	var stored config.Selection
+	if len(entry.Choices) > 0 {
+		stored = a.storedPicks()[entry.ID]
+	}
+	return picks.Merge(entry, stored, explicit)
 }
 
 // splitPicks separates the entry id on a start's command line from the picks
@@ -176,21 +182,30 @@ func entryNamed(tree *config.Tree, id string) (config.Entry, bool) {
 	return config.Entry{}, false
 }
 
-// refuseUnknownEntry answers an id that named no usable entry. An id whose file
-// is there but broken gets its own failure back — the author needs the offending
-// key, not a list of the entries that happen to parse (docs/specs/CONFIG.md).
+// refuseUnknownEntry answers an id that named no usable entry.
 func (a *app) refuseUnknownEntry(tree *config.Tree, id string) int {
+	return a.fail("start %s: %s", id, unknownEntry(tree, id))
+}
+
+// unknownEntry is why an id names nothing cria can launch.
+//
+// An id whose file is there but broken gets its own reason — the author needs
+// the offending key, not a list of the entries that happen to parse
+// (docs/specs/CONFIG.md) — and every other id gets the ids that do exist, which
+// is the answer to "what did I mistype". Both commands that take an entry id
+// refuse with this, at the exit code each of them owes its caller.
+func unknownEntry(tree *config.Tree, id string) string {
 	for _, broken := range tree.Broken {
 		if broken.ID == id {
-			return a.fail("start %s: %s: %v; fix that file and start again", id, broken.Path, broken.Err)
+			return fmt.Sprintf("%s: %v; fix that file and start again", broken.Path, broken.Err)
 		}
 	}
 	if len(tree.Entries) == 0 {
-		return a.fail("start %s: no entry named %q, and %s holds no usable entry; write one and run `cria docs` for the schema",
-			id, id, tree.Root)
+		return fmt.Sprintf("no entry named %q, and %s holds no usable entry; write one and run `cria docs` for the schema",
+			id, tree.Root)
 	}
-	return a.fail("start %s: no entry named %q in %s; available entries: %s",
-		id, id, tree.Root, strings.Join(entryIDs(tree), ", "))
+	return fmt.Sprintf("no entry named %q in %s; available entries: %s",
+		id, tree.Root, strings.Join(entryIDs(tree), ", "))
 }
 
 // entryIDs lists the ids a start could name, in the order config.Load returns
@@ -223,10 +238,20 @@ func portRefusal(entry config.Entry, use serve.PortUse) string {
 	if len(use.Holders) == 0 {
 		return ""
 	}
+	return foreignRefusal(entry, use.Holders)
+}
 
+// foreignRefusal is what cria says about the processes holding a port that it
+// did not start: their pids, what they run and where they run — and it leaves
+// them alone, because the kill is the TUI's offer, never the CLI's
+// (docs/specs/SERVE.md).
+//
+// A validation refuses over the same processes for a second reason on top of the
+// busy port: a server cria has no record of is one it could never put back.
+func foreignRefusal(entry config.Entry, holders []serve.Holder) string {
 	var message strings.Builder
 	fmt.Fprintf(&message, "port %d is held by a process cria did not start:", entry.Port)
-	for _, holder := range use.Holders {
+	for _, holder := range holders {
 		fmt.Fprintf(&message, "\n  pid %d  %s", holder.PID, orUnknown(holder.Command, "command unreadable"))
 		fmt.Fprintf(&message, "\n          working directory %s", orUnknown(holder.WorkingDir, "unreadable"))
 	}
@@ -244,44 +269,69 @@ func orUnknown(value, missing string) string {
 	return value
 }
 
-// await is --wait: watch a start until its phase settles (docs/specs/CLI.md).
-// Running is the answer the caller asked for; exited and unhealthy are failures
-// with the log path attached, since the log is the only crash evidence cria has
-// (docs/specs/SERVE.md).
-//
-// The window is the budget the wait is bound by, and the phase chooses it: a
-// start that has to fetch its model is bound by the network, one that does not
-// is bound by how long a cached model takes to load. Once a download has been
-// seen the larger budget stays — a fetch that finishes and hands over to a slow
-// load must not be cut off by the smaller one.
+// await is --wait: watch a start until its phase settles and report what settled
+// it (docs/specs/CLI.md). Running is the answer the caller asked for; everything
+// else is a failure the wait names.
 func (a *app) await(manager servers, record serve.Record) int {
+	status, waited, err := a.awaitGreen(manager, record, uninterrupted)
+	if err != nil {
+		return a.fail("start %s: %v", record.EntryID, err)
+	}
+	a.printf("%s is running after %s: %s answered %s\n",
+		record.EntryID, waited, status.Health.URL, status.Health.Detail)
+	return exitOK
+}
+
+// awaitGreen watches a server cria has just started until its phase settles, and
+// answers what settled it: the status it landed in, how long that took, and why
+// it is not serving — nil when it is.
+//
+// Two commands wait for this same thing and do different things with the answer
+// (CODING-RULES §2): `cria start --wait` reports it and exits, and a validation
+// goes on to prove the server and put back whatever it displaced. What they
+// share is the whole judgement — the phase, the attribution of the port, the
+// lazy backend's first completion, and the budget the wait is bound by. Exited
+// and unhealthy come back with the log path attached, since the log is the only
+// crash evidence cria has (docs/specs/SERVE.md).
+//
+// The window is that budget, and the phase chooses it: a start that has to fetch
+// its model is bound by the network, one that does not is bound by how long a
+// cached model takes to load. Once a download has been seen the larger budget
+// stays — a fetch that finishes and hands over to a slow load must not be cut
+// off by the smaller one.
+//
+// interrupted is asked between observations, so a caller that catches Ctrl-C can
+// stop waiting and get on with whatever it must not leave undone (validate.go).
+func (a *app) awaitGreen(manager servers, record serve.Record, interrupted func() bool) (serve.Status, time.Duration, error) {
 	began := time.Now()
 	window := a.startWindow
 	var lastProgress time.Time
 
 	for {
+		if interrupted() {
+			return serve.Status{}, since(began), errors.New("interrupted while waiting for it to serve")
+		}
+
 		status, err := manager.Snapshot(record)
 		if err != nil {
-			return a.fail("start %s: cannot tell whether it is serving: %v", record.EntryID, err)
+			return status, since(began), fmt.Errorf("cannot tell whether it is serving: %w", err)
 		}
 
 		switch status.Phase {
 		case serve.PhaseRunning:
 			if refusal := a.listenerRefusal(manager, record); refusal != "" {
-				return a.fail("start %s: %s", record.EntryID, refusal)
+				return status, since(began), errors.New(refusal)
 			}
 			if refusal := a.loadRefusal(manager, record, began); refusal != "" {
-				return a.fail("start %s: %s", record.EntryID, refusal)
+				return status, since(began), errors.New(refusal)
 			}
-			a.printf("%s is running after %s: %s answered %s\n",
-				record.EntryID, since(began), status.Health.URL, status.Health.Detail)
-			return exitOK
+			return status, since(began), nil
 		case serve.PhaseExited:
-			return a.fail("start %s: it exited after %s without serving; its log is the crash report: %s",
-				record.EntryID, since(began), record.LogPath)
+			return status, since(began), fmt.Errorf("it exited after %s without serving; its log is the crash report: %s",
+				since(began), record.LogPath)
 		case serve.PhaseUnhealthy:
-			return a.fail("start %s: it stopped answering after %s (%s said %s); log: %s",
-				record.EntryID, since(began), status.Health.URL, status.Health.Detail, record.LogPath)
+			return status, since(began), fmt.Errorf("it stopped answering after %s (%s said %s); log: %s",
+				since(began), status.Health.URL, status.Health.Detail, record.LogPath)
 		case serve.PhaseDownloading:
 			window = a.downloadWindow
 			if lastProgress.IsZero() || time.Since(lastProgress) >= a.progressEvery {
@@ -291,8 +341,8 @@ func (a *app) await(manager servers, record serve.Record) int {
 		}
 
 		if time.Since(began) >= window {
-			return a.fail("start %s: it is still %s after %s; log: %s",
-				record.EntryID, status.Phase, window, record.LogPath)
+			return status, since(began), fmt.Errorf("it is still %s after %s; log: %s",
+				status.Phase, window, record.LogPath)
 		}
 		// Sleeping between observations, not around a race: the phase lives in
 		// another process and there is no event to wait on (CODING-RULES §6).

@@ -44,6 +44,19 @@ type fakeServers struct {
 	asked    []int // the ports PortUse was asked about, in order
 	observed int   // how many snapshots the wait took
 
+	// A swap's own trail (validate.go): the holders it stopped keeping their
+	// records, the held records it put back, and the servers it asked for a
+	// completion — each in order, so a test reads the protocol off them.
+	displaced []string
+	restored  []serve.Record
+	proved    []string
+
+	// What the port holder answers about its own work, and what Restore hands
+	// back. A test that scripts neither gets an idle holder and the record that
+	// was held, which is what a swap that went as planned looks like.
+	generation serve.Generation
+	putBack    serve.Record
+
 	// What a sweep comes back with, and the progress it reports on the way. A
 	// test that only cares that a bench ran leaves both empty.
 	benchSizes []serve.BenchSize
@@ -60,6 +73,9 @@ type fakeServers struct {
 	portErr      error
 	listenersErr error
 	warmErr      error
+	displaceErr  error
+	restoreErr   error
+	proveErr     error
 }
 
 func (f *fakeServers) Start(entry config.Entry, selection config.Selection, _ tools.Report) (serve.Record, error) {
@@ -165,6 +181,62 @@ func (f *fakeServers) Bench(record serve.Record, spec serve.BenchSpec, report fu
 	}
 }
 
+// Displaced answers in a swap's vocabulary what PortUse answers in a start's,
+// off the same fixture: whoever the test put on the port is the server a
+// validation would displace, or the processes it would refuse over.
+func (f *fakeServers) Displaced(entry config.Entry) (serve.Displacement, error) {
+	f.asked = append(f.asked, entry.Port)
+	if f.portErr != nil {
+		return serve.Displacement{}, f.portErr
+	}
+	displacement := serve.Displacement{Port: entry.Port, Foreign: f.use.Holders}
+	if f.use.Managed != nil {
+		displacement.Holder = &f.use.Managed.Record
+	}
+	return displacement, nil
+}
+
+// Generating answers idle unless a test scripted otherwise. What the gate reads
+// off a server is serve's; what is exercised here is what the command does with
+// each of the three answers.
+func (f *fakeServers) Generating(serve.Record) serve.Generation {
+	if f.generation.Busy == "" {
+		return serve.Generation{Busy: serve.BusyIdle}
+	}
+	return f.generation
+}
+
+// Displace is a stop that keeps the record, so it lands in both trails: a test
+// asserting that a refusal stopped nothing reads `stopped` alone, and one about
+// the protocol reads the order of `displaced`.
+func (f *fakeServers) Displace(holder serve.Record) (serve.Record, error) {
+	f.displaced = append(f.displaced, holder.EntryID)
+	f.stopped = append(f.stopped, holder.EntryID)
+	if f.displaceErr != nil {
+		return serve.Record{}, f.displaceErr
+	}
+	return holder, nil
+}
+
+// Restore keeps the record it was handed — the whole question a test asks of it
+// is which combination went back — and answers with the record the entry is
+// running under again.
+func (f *fakeServers) Restore(_ *config.Tree, held serve.Record, _ tools.Report) (serve.Record, error) {
+	f.restored = append(f.restored, held)
+	if f.restoreErr != nil {
+		return serve.Record{}, f.restoreErr
+	}
+	if f.putBack.EntryID != "" {
+		return f.putBack, nil
+	}
+	return held, nil
+}
+
+func (f *fakeServers) Prove(record serve.Record) error {
+	f.proved = append(f.proved, record.EntryID)
+	return f.proveErr
+}
+
 func (f *fakeServers) PortUse(port int) (serve.PortUse, error) {
 	f.asked = append(f.asked, port)
 	if f.portErr != nil {
@@ -187,6 +259,7 @@ func newTestApp(tree *config.Tree, fake *fakeServers) (*app, *bytes.Buffer, *byt
 		picksStore:     func() (picks.Picks, error) { return picks.Picks{}, nil }, // nothing picked yet
 		memoryMB:       func() (int, error) { return 16384, nil },                 // a 16 GiB machine
 		tui:            func() error { return nil },
+		interrupts:     func() (func() bool, func()) { return uninterrupted, func() {} }, // nobody hits Ctrl-C in a test unless it says so
 		poll:           time.Millisecond,
 		startWindow:    200 * time.Millisecond,
 		downloadWindow: 400 * time.Millisecond,
@@ -278,11 +351,14 @@ func TestRouting(t *testing.T) {
 	}{
 		{name: "the version is printed", args: []string{"--version"}, want: exitOK, contains: "cria 9.9.9-test"},
 		{name: "docs prints the config schema", args: []string{"docs"}, want: exitOK, contains: "backend"},
-		{name: "an unknown subcommand names the valid set", args: []string{"serve"}, want: exitUsage, contains: "valid subcommands are: start, stop, status, bench, list, new, edit, docs, wired-limit, update"},
+		{name: "an unknown subcommand names the valid set", args: []string{"serve"}, want: exitUsage, contains: "valid subcommands are: start, stop, status, validate, bench, list, new, edit, docs, wired-limit, update"},
 		{name: "start needs an entry id", args: []string{"start"}, want: exitUsage, contains: "usage: cria start <id> [choice=option ...] [--wait]"},
 		{name: "start takes one entry id", args: []string{"start", "a", "b"}, want: exitUsage, contains: "one entry at a time (got a, b)"},
 		{name: "start refuses a flag it does not know", args: []string{"start", "qwen", "--now"}, want: exitUsage, contains: "unknown flag --now"},
 		{name: "stop takes one entry id", args: []string{"stop", "a", "b"}, want: exitUsage, contains: "one entry at a time (got a, b)"},
+		{name: "validate needs an entry id", args: []string{"validate"}, want: exitUsage, contains: "usage: cria validate <id> [choice=option ...]"},
+		{name: "validate takes one entry id", args: []string{"validate", "a", "b"}, want: exitUsage, contains: "one entry at a time (got a, b)"},
+		{name: "validate refuses a flag it does not know", args: []string{"validate", "qwen", "--force"}, want: exitUsage, contains: "unknown flag --force"},
 		{name: "stop refuses a flag it does not know", args: []string{"stop", "--all"}, want: exitUsage, contains: "unknown flag --all"},
 		{name: "status takes no arguments", args: []string{"status", "qwen"}, want: exitUsage, contains: "takes no arguments (got qwen)"},
 		{name: "status refuses a flag it does not know", args: []string{"status", "--yaml"}, want: exitUsage, contains: "unknown flag --yaml"},
