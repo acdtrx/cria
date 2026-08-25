@@ -74,6 +74,17 @@ Group entries under headings as themes emerge.
   agent-driven profile-writing session against a live server — build it
   before that session; it is wanted.
 
+## TUI
+
+- **Choices-sourced args are invisible in the detail pane's args block.** The
+  block shows the entry file's `args` verbatim; the args a picked option
+  contributes appear only in the composed command line, so reading a choices
+  entry's effective params means picking them out of that one long line. Show
+  the current picks' args in the args block too, in a colour of their own so
+  their choices origin stays visible at a glance. (noted 2026-08-25.) Revisit
+  trigger: already fired — wanted from daily use of choices entries; build on
+  the next TUI session.
+
 ## Cache view (orphans)
 
 - **Orphan blobs have no unit.** The real Qwen3.8 repo holds a complete 1.37 GB
