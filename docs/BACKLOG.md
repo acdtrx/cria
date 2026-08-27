@@ -155,6 +155,25 @@ Group entries under headings as themes emerge.
   family's with `?model=` addressing — confirm `/slots` takes it during the
   live probe). Upstream drift (unified KV) is then contained in the engine
   module that owns the semantics.
+  **Refactor discipline for the extraction** (ruled 2026-08-27, user-raised:
+  test-preservation must not become the target in place of the new
+  architecture — "behavior-preserving" and "test-preserving" are different
+  claims): step zero classifies every test as *contract* (what the outside
+  sees — CLI output and exit codes, TUI frames, files, HTTP requests made;
+  the refactor's definition of behavior) or *structure* (pins the current
+  shape — seams, fakes, signatures). Contract tests never go red at any
+  step; structure tests may go red mid-phase, each named with the step that
+  rewrites it against the Engine interface — CLAUDE.md's phase rule,
+  sharpened to say which tests it licenses. The interface is designed from
+  the seams inventory before the first edit; steps move seams behind it,
+  never shuffle-until-green. No shim survives a phase end (code whose only
+  caller is an old-shape test is a named red in disguise). Fakes are
+  regenerated against the interface — an awkward fake is interface feedback,
+  not a reason to adapt. Deleting a structure test of a removed shape is
+  legitimate only paired, in the step file, with its replacement asserting
+  the same concern against the new shape; contract tests keep the full
+  never-delete protection. If this discipline proves out here, it graduates
+  to CLAUDE.md as a template lesson.
   Open rulings: repeatable flags are inexpressible as keys (upstream's
   preset shares the limit) — entries needing them stay argv-only or the
   limit is accepted; booleans mirror upstream exactly; router inclusion
