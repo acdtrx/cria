@@ -144,9 +144,17 @@ Group entries under headings as themes emerge.
   needs comments to explain the division), and raising parallel then costs
   memory loudly at start (validate's exact job) instead of silently halving
   every conversation. `context`/`parallel` would join `host`/`port` as
-  schema fields — engine-owned flag composition, the deliberate documented
-  exception to no-flag-knowledge, contained in the engine module because
-  upstream's semantics are moving (unified KV).
+  schema fields composed by the engine module — not an exception but the
+  layer's job (ruled 2026-08-27, user): cria is a llama-and-mlx runner, not
+  a generic process manager. The *tree's* args stay flag-agnostic
+  passthrough; each **engine module knows its engine by design** — schema
+  fields, endpoint knowledge (`/health`, `/slots`, the completion shape —
+  all already engine knowledge living in serve), phase semantics, and stats
+  collection (the slots-visibility entry's collector is llama-engine
+  territory; mlx answers "nothing" honestly; router reuses the llama
+  family's with `?model=` addressing — confirm `/slots` takes it during the
+  live probe). Upstream drift (unified KV) is then contained in the engine
+  module that owns the semantics.
   Open rulings: repeatable flags are inexpressible as keys (upstream's
   preset shares the limit) — entries needing them stay argv-only or the
   limit is accepted; booleans mirror upstream exactly; router inclusion
@@ -224,5 +232,8 @@ Group entries under headings as themes emerge.
   remembered as the idle slot's "last" rate. Rejected for now: `--metrics`
   (Prometheus) — lifetime averages, needs a flag in every profile (the
   running server answers 501), and poll deltas answer the actual question.
-  Build after the validate plan lands — wanted; the trigger (watching logs to
-  see how the server is doing) is being felt.
+  Home (ruled 2026-08-27): the collector is llama-engine territory — engine
+  modules know their engine by design (see Engines); the TUI asks the engine
+  what it reports rather than special-casing a backend. Build after the
+  validate plan lands — wanted; the trigger (watching logs to see how the
+  server is doing) is being felt.
