@@ -174,25 +174,28 @@ Group entries under headings as themes emerge.
   or per-entry process management proving to be daily friction — and it half-fired
   2026-08-23: pi's llama.cpp integration (pi-llama-cpp) *requires* router mode
   (it manages models via `GET /models` + load/unload, which single-model servers
-  lack). Verify before designing: whether router discovery covers the HF hub
-  cache (the announcement names `LLAMA_CACHE`/`~/.cache/llama.cpp` — a private
-  cache would collide with the single-source-of-truth constraint), and whether
-  preset sections carry the full flag surface entries compose (`-ctk`,
-  `--parallel`, `--spec-type`, …) — the README documents the flags, not the ini
-  keys. A cria-managed router would compose the ini into the state dir the way
-  argv is composed today; the tree stays human-owned. Direction (user-sketched
-  2026-08-23): a third backend alongside llama and mlx — it runs one router
-  process and shows the *same* llama entries as its source; which entries are
-  included, each with its own combination of choices independent of the llama
-  backend's picks, is router-scoped state edited like picks are (config
-  declares what can vary, state holds what is chosen — the choices doctrine,
-  one step further). One combo per included entry; section names = entry ids =
-  the `model` field clients send. The hard collision to verify first: argv vs
-  ini keys — entries carry passthrough tokens and cria refuses flag knowledge,
-  so the design stands only if ini keys are flag-spelled (mechanical strip) or
-  router-included entries are required to use long-form args; a short→long
-  mapping inside cria is off the table. (noted 2026-08-18: documented and
-  maintained upstream, so it clears the bar that log parsing never did.)
+  lack). Both verify-first items are answered by the upstream README
+  (docs-verified 2026-08-27, not yet tried live): discovery covers the HF hub
+  cache automatically (plus `LLAMA_CACHE` and `--models-dir`) — no
+  single-source-of-truth collision — and preset ini keys are flag-spelled
+  (long `n-gpu-layers`, short `c`/`ngl`, `no-` negation), so entry passthrough
+  tokens map by mechanically stripping dashes; precedence is argv > model
+  section > `[*]` global. Loading is on-demand (`--models-autoload`, default
+  on) with `--models-max` resident at once (default 4, 0 = unlimited; idle
+  models sleep via `--sleep-idle-seconds`, eviction algorithm undocumented);
+  presets add `load-on-startup` and `stop-timeout`. `--models-max 1` behaves
+  as automatic stop-one-start-another keyed by the request's `model` field —
+  the shared-port doctrine, driven by the client. A cria-managed router would
+  compose the ini into the state dir the way argv is composed today; the tree
+  stays human-owned. Direction (user-sketched 2026-08-23): a third backend
+  alongside llama and mlx — it runs one router process and shows the *same*
+  llama entries as its source; which entries are included, each with its own
+  combination of choices independent of the llama backend's picks, is
+  router-scoped state edited like picks are (config declares what can vary,
+  state holds what is chosen — the choices doctrine, one step further). One
+  combo per included entry; section names = entry ids = the `model` field
+  clients send. (noted 2026-08-18: documented and maintained upstream, so it
+  clears the bar that log parsing never did.)
 
 ## Telemetry
 
