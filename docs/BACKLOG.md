@@ -161,13 +161,27 @@ Group entries under headings as themes emerge.
   stays router-scoped state per the 2026-08-23 ruling, pending one
   confirmation now that engines exist; migration is a manual rewrite of
   every profile's args block (feature-building mode, ~15 files).
+  **Shape of the build** (ruled 2026-08-27, user): an Engine interface with
+  one implementation per engine, extracted from the seams the code already
+  has — today the backend is a string enum dispatched at ~10 named
+  predicates/switches (command+tool composition, health endpoint,
+  LoadsLazily, publishesSlots, record validation, hub/cache presence
+  semantics, schema fields, TUI toggle, scaffold). Phase 1 of the plan is
+  that extraction, behavior-preserving, llama+mlx only — the suite validates
+  it — then router lands as the third implementation instead of an eleventh
+  if-site. The interface's altitude is the open design question the probe
+  informs: not "give me argv" but make-this-entry-serve / stop-serving /
+  what-is-its-state — process spawn/kill for llama and mlx, load/unload API
+  calls against one resident process for the router, preset-ini
+  materialization instead of argv composition.
   Router facts docs-verified 2026-08-27 (see git history of the router
   entry for the full list): HF-cache discovery, on-demand autoload,
   `--models-max` residency with idle sleep, `GET /models` +
   `POST /models/load|unload`. Revisit trigger: the confined live probe — a
   hand-written preset run on a machine with room, proving discovery sees
   the cached quants and sections accept the keys the entries actually use
-  (`ctk`, `spec-type`, …) — build nothing before it passes; graduates to
+  (`ctk`, `spec-type`, …), and how load/unload, sleep and `?model=`
+  addressing behave — build nothing before it passes; graduates to
   `docs/plans/` after.
 
 ## Cache view
