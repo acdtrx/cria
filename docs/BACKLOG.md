@@ -111,19 +111,56 @@ Group entries under headings as themes emerge.
   actually gets exchanged between people or machines and re-creating it via
   agent/docs feels like friction.
 
-- **A global profile merged into every entry.** Params and choices stable across
-  profiles — `-ngl 99`, `-fa on`, an mmproj or slot-saving toggle — live once in
-  a global profile that composition merges into each entry: redundancy removal
-  and uniformity on purpose-stable settings, nothing more. It is merged with
-  profiles, not globally applicable state, and the tree stays human-owned. To
-  settle at design time: per-backend scoping (those are llama flags; mlx
-  entries must not inherit them); how the loud flag-collision rule extends
-  across the merge — entry-overrides-global is an ordering decision, and
-  silent both-win is exactly what the collision rule exists to forbid; and
-  where a global choice's pick lives relative to per-entry picks. (noted
-  2026-08-25.) Revisit trigger: the next uniformity edit across several
-  profiles — the same flag changed file by file — or a drift found where one
-  profile missed a stable param.
+## Engines
+
+- **Engine config + shared model profiles; router as a third engine.**
+  (direction settled in discussion 2026-08-27; supersedes the global-profile
+  and router-mode entries — git holds their history.) The cut: model profiles
+  keep only what is true of the model wherever it runs — repo, quant, name,
+  sampling, fit choices — shared verbatim by the llama and router engines;
+  per-engine config (`engines/llama.toml`, `engines/router.toml`,
+  `engines/mlx.toml`) owns how this machine runs that engine — `ngl`, `fa`,
+  ports, `models-max`, parallelism. The TUI's backend toggle becomes an
+  engine toggle. Rejected: separate router profiles — the model facts would
+  fork and drift; the "global profile" framing — those params were never
+  global, they were engine-scoped, which also settles that entry's
+  per-backend-scoping question.
+  **Args become ini-style keys** (`key = value`, upstream's own preset
+  spelling): key→argv is mechanical without arity knowledge (`c = 65536` →
+  `-c 65536`, `jinja = true` → `--jinja`), composition is order-independent
+  with exact key collisions (retiring the token heuristics), override
+  precedence is upstream's documented model-section > engine `[*]` rather
+  than cria's invention, and the router's `--models-preset` ini composes
+  near-verbatim into the state dir — one section per included entry plus its
+  router-scoped picks; section names = entry ids = the `model` field clients
+  send. (Router half-fired 2026-08-23: pi-llama-cpp *requires* router mode —
+  it manages models via `GET /models` + load/unload, which single-model
+  servers lack.)
+  **Context semantics** (open — user still pondering 2026-08-27;
+  recommendation recorded): the model profile declares *per-conversation*
+  context, the engine declares parallelism, and the engine's composer
+  computes the pool (`-c = context × parallel`) — not llama's pool-spelling:
+  the written number should be what a client experiences (the current tree
+  needs comments to explain the division), and raising parallel then costs
+  memory loudly at start (validate's exact job) instead of silently halving
+  every conversation. `context`/`parallel` would join `host`/`port` as
+  schema fields — engine-owned flag composition, the deliberate documented
+  exception to no-flag-knowledge, contained in the engine module because
+  upstream's semantics are moving (unified KV).
+  Open rulings: repeatable flags are inexpressible as keys (upstream's
+  preset shares the limit) — entries needing them stay argv-only or the
+  limit is accepted; booleans mirror upstream exactly; router inclusion
+  stays router-scoped state per the 2026-08-23 ruling, pending one
+  confirmation now that engines exist; migration is a manual rewrite of
+  every profile's args block (feature-building mode, ~15 files).
+  Router facts docs-verified 2026-08-27 (see git history of the router
+  entry for the full list): HF-cache discovery, on-demand autoload,
+  `--models-max` residency with idle sleep, `GET /models` +
+  `POST /models/load|unload`. Revisit trigger: the confined live probe — a
+  hand-written preset run on a machine with room, proving discovery sees
+  the cached quants and sections accept the keys the entries actually use
+  (`ctk`, `spec-type`, …) — build nothing before it passes; graduates to
+  `docs/plans/` after.
 
 ## Cache view
 
@@ -163,39 +200,6 @@ Group entries under headings as themes emerge.
   the binary per host. Revisit trigger: cria runs on 3+ machines and per-host SSH
   sessions become a felt daily friction. (ruled 2026-08-18: v1 is single-host; keep
   the host-access layer clean enough that a remote backend could slot in.)
-
-## Upstream APIs
-
-- **llama-server router mode.** Recent llama-server hosts several models in one
-  process — auto-discovery from the cache, `GET /models`, `POST /models/load` and
-  `/models/unload`, `--models-max`, per-model settings via a `--models-preset`
-  ini (`[*]` defaults, per-model overrides). Could replace process-per-entry on
-  the llama side. Revisit trigger: wanting several GGUF models resident at once,
-  or per-entry process management proving to be daily friction — and it half-fired
-  2026-08-23: pi's llama.cpp integration (pi-llama-cpp) *requires* router mode
-  (it manages models via `GET /models` + load/unload, which single-model servers
-  lack). Both verify-first items are answered by the upstream README
-  (docs-verified 2026-08-27, not yet tried live): discovery covers the HF hub
-  cache automatically (plus `LLAMA_CACHE` and `--models-dir`) — no
-  single-source-of-truth collision — and preset ini keys are flag-spelled
-  (long `n-gpu-layers`, short `c`/`ngl`, `no-` negation), so entry passthrough
-  tokens map by mechanically stripping dashes; precedence is argv > model
-  section > `[*]` global. Loading is on-demand (`--models-autoload`, default
-  on) with `--models-max` resident at once (default 4, 0 = unlimited; idle
-  models sleep via `--sleep-idle-seconds`, eviction algorithm undocumented);
-  presets add `load-on-startup` and `stop-timeout`. `--models-max 1` behaves
-  as automatic stop-one-start-another keyed by the request's `model` field —
-  the shared-port doctrine, driven by the client. A cria-managed router would
-  compose the ini into the state dir the way argv is composed today; the tree
-  stays human-owned. Direction (user-sketched 2026-08-23): a third backend
-  alongside llama and mlx — it runs one router process and shows the *same*
-  llama entries as its source; which entries are included, each with its own
-  combination of choices independent of the llama backend's picks, is
-  router-scoped state edited like picks are (config declares what can vary,
-  state holds what is chosen — the choices doctrine, one step further). One
-  combo per included entry; section names = entry ids = the `model` field
-  clients send. (noted 2026-08-18: documented and maintained upstream, so it
-  clears the bar that log parsing never did.)
 
 ## Telemetry
 
