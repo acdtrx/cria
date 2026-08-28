@@ -38,6 +38,17 @@ Group entries under headings as themes emerge.
 
 ## Serve
 
+- **Keyed servers vs cria's own requests.** An entry carrying
+  `--api-key-file` makes llama-server 401 everything but `/health`: phases
+  and start/stop survive, but the mlx warm, validate's prove, `cria bench`
+  and the `/slots` busy gate all send unauthenticated requests — prove
+  hard-fails, the gate degrades to unverifiable. If cria is to drive keyed
+  servers, the key-file path becomes engine-module knowledge (read the file,
+  attach the header) — never the key via argv. (noted 2026-08-28 while
+  designing LAN restriction: llama has no IP allowlist, so proxy-only access
+  is api-key at llama + pf at the host.) Revisit trigger: a server actually
+  gets keyed.
+
 - **A multimodal repo's first mmproj download is not oid-matched.** hubapi's
   Total sums only the quant's own files, so an mmproj landing first reads as
   "another file's partial" and the phase stays `starting` until the quant
