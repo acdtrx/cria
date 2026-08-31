@@ -66,6 +66,17 @@ type fakeServers struct {
 	// printed by the time it started loading the weights.
 	onWarm func()
 
+	// The router this host has, if any: whether a record exists, what it says,
+	// whether its process is still there, and the phase an observation reports.
+	// routerStarts holds the engine config each start was composed from.
+	routerRecord   serve.Record
+	routerFound    bool
+	routerLive     bool
+	routerPhase    serve.Phase
+	routerStarts   []config.RouterConfig
+	routerStartErr error
+	routerErr      error
+
 	startErr     error
 	stopErr      error
 	listErr      error
@@ -238,6 +249,42 @@ func (f *fakeServers) Prove(record serve.Record) error {
 	return f.proveErr
 }
 
+// The router's own half of the seam (router.go): whether this host has a record
+// of one, what it says, and what an observation of it reports.
+func (f *fakeServers) RouterServer() (serve.Server, bool, error) {
+	if f.routerErr != nil {
+		return serve.Server{}, false, f.routerErr
+	}
+	if !f.routerFound {
+		return serve.Server{}, false, nil
+	}
+	return serve.Server{Record: f.routerRecord, Live: f.routerLive}, true, nil
+}
+
+func (f *fakeServers) StartRouter(router config.RouterConfig, _ tools.Report) (serve.Record, error) {
+	f.routerStarts = append(f.routerStarts, router)
+	if f.routerStartErr != nil {
+		return serve.Record{}, f.routerStartErr
+	}
+	return f.routerRecord, nil
+}
+
+func (f *fakeServers) StopRouter(record serve.Record) error {
+	f.stopped = append(f.stopped, record.EntryID)
+	return f.stopErr
+}
+
+func (f *fakeServers) RouterSnapshot(record serve.Record) (serve.Status, error) {
+	if f.snapshotErr != nil {
+		return serve.Status{}, f.snapshotErr
+	}
+	phase := f.routerPhase
+	if phase == "" {
+		phase = serve.PhaseRunning
+	}
+	return serve.Status{Record: record, Phase: phase, Health: f.health, Uptime: time.Second}, nil
+}
+
 func (f *fakeServers) PortUse(port int) (serve.PortUse, error) {
 	f.asked = append(f.asked, port)
 	if f.portErr != nil {
@@ -268,10 +315,11 @@ func newTestApp(tree *config.Tree, fake *fakeServers) (*app, *bytes.Buffer, *byt
 	}, out, errOut
 }
 
-// usableReport is a tool check that found both servers, so the start gate opens.
+// usableReport is a tool check that found both servers on a llama.cpp that can
+// also run as a router, so every start gate opens.
 func usableReport() tools.Report {
 	return tools.Report{
-		LlamaServer: tools.Tool{Name: tools.LlamaServer, Status: tools.StatusFound, Path: "/opt/homebrew/bin/llama-server", Build: 9000},
+		LlamaServer: tools.Tool{Name: tools.LlamaServer, Status: tools.StatusFound, Path: "/opt/homebrew/bin/llama-server", Build: 9000, Router: true},
 		MLXLMServer: tools.Tool{Name: tools.MLXLMServer, Status: tools.StatusFound, Path: "/opt/homebrew/bin/mlx_lm.server"},
 		HF:          tools.Tool{Name: tools.HF, Status: tools.StatusFound, Path: "/opt/homebrew/bin/hf"},
 	}
@@ -352,7 +400,7 @@ func TestRouting(t *testing.T) {
 	}{
 		{name: "the version is printed", args: []string{"--version"}, want: exitOK, contains: "cria 9.9.9-test"},
 		{name: "docs prints the config schema", args: []string{"docs"}, want: exitOK, contains: "backend"},
-		{name: "an unknown subcommand names the valid set", args: []string{"serve"}, want: exitUsage, contains: "valid subcommands are: start, stop, status, validate, bench, list, new, edit, docs, wired-limit, update"},
+		{name: "an unknown subcommand names the valid set", args: []string{"serve"}, want: exitUsage, contains: "valid subcommands are: start, stop, status, router, validate, bench, list, new, edit, docs, wired-limit, update"},
 		{name: "start needs an entry id", args: []string{"start"}, want: exitUsage, contains: "usage: cria start <id> [choice=option ...] [--wait]"},
 		{name: "start takes one entry id", args: []string{"start", "a", "b"}, want: exitUsage, contains: "one entry at a time (got a, b)"},
 		{name: "start refuses a flag it does not know", args: []string{"start", "qwen", "--now"}, want: exitUsage, contains: "unknown flag --now"},

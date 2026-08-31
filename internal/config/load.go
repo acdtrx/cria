@@ -41,11 +41,11 @@ func Load(root string) (*Tree, error) {
 	if err != nil {
 		return nil, err
 	}
-	engineArgs, err := loadEngineArgs(root)
+	engineArgs, router, err := loadEngines(root, settings)
 	if err != nil {
 		return nil, err
 	}
-	tree := &Tree{Root: root, Settings: settings}
+	tree := &Tree{Root: root, Settings: settings, Router: router}
 
 	dir := filepath.Join(root, entriesDir)
 	files, err := os.ReadDir(dir)
@@ -107,37 +107,67 @@ func loadSettings(path string) (Settings, error) {
 	return settings, nil
 }
 
-// loadEngineArgs reads engines/<engine>.toml for every backend the tree may
-// declare. A file that is not there is an engine with no defaults of its own —
-// the common case, and never an error.
+// loadEngines reads engines/<engine>.toml for every engine cria has. A file that
+// is not there is an engine with no configuration of its own — the common case,
+// and never an error.
 //
 // A file that is there and wrong fails the whole load rather than disabling the
 // entries it governs: it is tree-wide configuration, like config.toml, and the
 // alternative reports one file's mistake once per entry while pointing the
 // reader at the wrong file.
-func loadEngineArgs(root string) (map[Backend][]string, error) {
-	args := make(map[Backend][]string, len(backends))
-	for _, backend := range Backends() {
-		path := filepath.Join(root, enginesDir, string(backend)+tomlExt)
+//
+// The router's file carries more than args — it configures a process no entry
+// declares — so it comes back as its own value beside the args every other
+// engine's entries start from.
+func loadEngines(root string, settings Settings) (map[Backend][]string, RouterConfig, error) {
+	args := make(map[Backend][]string, len(engines))
+	router := RouterConfig{Path: enginePath(root, BackendRouter)}
+
+	for _, engine := range Engines() {
+		path := enginePath(root, engine)
 
 		data, err := os.ReadFile(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("cannot read %s: %w", path, err)
+			return nil, RouterConfig{}, fmt.Errorf("cannot read %s: %w", path, err)
 		}
 
 		table, err := parseTable(data)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+			return nil, RouterConfig{}, fmt.Errorf("%s: %w", path, err)
 		}
 		if err := engineSchema.check(table, ""); err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+			return nil, RouterConfig{}, fmt.Errorf("%s: %w", path, err)
 		}
-		args[backend] = optStrings(table, "args")
+		if err := refuseKeysOfOtherEngines(engineSchema, table, engine); err != nil {
+			return nil, RouterConfig{}, fmt.Errorf("%s: %w", path, err)
+		}
+
+		args[engine] = optStrings(table, "args")
+		if engine == BackendRouter {
+			router.Port = optInt(table, "port")
+			router.Host = optString(table, "host")
+			router.Args = args[engine]
+			router.RouterArgs = optStrings(table, "router_args")
+		}
 	}
-	return args, nil
+
+	// The router binds by the same rule an entry does (docs/specs/CONFIG.md): its
+	// own host, else the tree's default, else every address the host has.
+	if router.Host == "" {
+		router.Host = settings.DefaultHost
+	}
+	if router.Host == "" {
+		router.Host = defaultBindHost
+	}
+	return args, router, nil
+}
+
+// enginePath is where one engine's file lives.
+func enginePath(root string, engine Backend) string {
+	return filepath.Join(root, enginesDir, string(engine)+tomlExt)
 }
 
 // ValidID reports whether id may name an entry: the charset a filename must hold
@@ -225,14 +255,28 @@ func resolveEntry(id, path string, table map[string]any, settings Settings, engi
 // does not run, from the same declaration `cria docs` renders that backend's
 // example from. prefix qualifies the key name the way the schema check does.
 func refuseOtherBackendKeys(s schema, table map[string]any, prefix string, backend Backend) error {
+	return refuseKeysOfOthers(s, table, prefix, backend, fmt.Sprintf("this entry's backend is %q", backend))
+}
+
+// refuseKeysOfOtherEngines is the same rule for an engine file: a key another
+// engine takes is refused in this one, naming the engine this file configures
+// rather than an entry's backend key.
+func refuseKeysOfOtherEngines(s schema, table map[string]any, engine Backend) error {
+	return refuseKeysOfOthers(s, table, "", engine, fmt.Sprintf("this file configures the %q engine", engine))
+}
+
+// refuseKeysOfOthers holds the rule both refusals are: a key declared for some
+// ids only is an error under any other one. whose is the clause that says which
+// id this file speaks for, because a file says it in its own way.
+func refuseKeysOfOthers(s schema, table map[string]any, prefix string, id Backend, whose string) error {
 	for _, k := range s {
-		if k.takenBy(backend) {
+		if k.takenBy(id) {
 			continue
 		}
 		if _, present := table[k.name]; present {
 			return &KeyError{
 				Key:    prefix + k.name,
-				Reason: fmt.Sprintf("%s; this entry's backend is %q", k.takenByNamed(), backend),
+				Reason: fmt.Sprintf("%s; %s", k.takenByNamed(), whose),
 			}
 		}
 	}

@@ -13,7 +13,8 @@ construction.
 ├── AGENTS.md          # scaffolded on first run when missing; points agents at `cria docs`
 ├── config.toml        # tree-wide settings (file itself optional)
 ├── engines/
-│   └── <engine>.toml  # what this machine serves every entry of one backend with (optional)
+│   └── <engine>.toml  # what this machine serves every model of one engine with (optional);
+│                      # engines/router.toml also configures the router process itself
 └── models/
     └── <id>.toml      # one launchable entry per file
 ```
@@ -160,13 +161,44 @@ how *this machine* runs one backend. Anything uniform across every entry of a
 backend — how many layers to offload, which attention path, a log level — belongs
 there rather than repeated in fifteen profiles.
 
-| key    | type     | rules                                                              |
-| ------ | -------- | ------------------------------------------------------------------ |
-| `args` | string[] | optional; the same verbatim-token shape entries use, and the level they override |
+| key           | type     | rules                                                              |
+| ------------- | -------- | ------------------------------------------------------------------ |
+| `args`        | string[] | optional; the same verbatim-token shape entries use, and the level they override |
+| `port`        | integer  | router only; the port the router serves on — without it there is no router to start |
+| `host`        | string   | router only; bind address, by the entries' own rule (`default_host`, else `0.0.0.0`) |
+| `router_args` | string[] | router only; the router process's own flags, verbatim                |
 
-- One file per backend, named after it (`engines/llama.toml`, `engines/mlx.toml`).
-  Both the directory and every file in it are optional: an engine with no file
-  serves entries with what they declare themselves.
+- One file per engine, named after it (`engines/llama.toml`, `engines/mlx.toml`,
+  `engines/router.toml`). Both the directory and every file in it are optional: an
+  engine with no file serves entries with what they declare themselves.
+- **An engine is not always a backend an entry may declare** (settled 2026-08-31).
+  `llama` and `mlx` run one server per entry, and an entry names one of them in its
+  `backend` key. The router runs **one server for the host** that serves the models
+  included in it — ordinary entries — so no entry declares it: `backend = "router"`
+  is refused, naming the backends that do serve an entry, and `cria new --router`
+  scaffolds nothing. The tree therefore declares two sets: the engines it can
+  configure (engine files, records, display) and the narrower set of backends an
+  entry may name. Rejected: making the router a backend key — the same entry is
+  meant to serve under llama *and* under the router, with picks of its own on each
+  side (`docs/plans/engines/OVERVIEW.md`, ruling 2), which a single backend key
+  cannot express.
+- **The router's file carries two arg lists, because it has two command lines**
+  (settled 2026-08-31). `args` is what every model it serves starts from — cria
+  composes it into the `[*]` section of the preset the router reads, which is the
+  same meaning `args` has in every engine file, and the model sections override it
+  exactly as an entry overrides its engine. `router_args` is the supervisor's own
+  flags (`--models-max`, `--models-autoload`, …), passed verbatim after the flags
+  cria composes. Rejected: a schema field per router flag — `host`/`port` stay the
+  only schema-composed fields (OVERVIEW ruling 3), and upstream's defaults stay
+  upstream's.
+- **The router takes no port from `default_port`** (settled 2026-08-31): that is
+  the port the entries share, and a router bound to it would collide with every one
+  of them at the first start. A tree with no `engines/router.toml`, or one that
+  sets no `port`, simply has no router, and `cria router start` says so naming the
+  file.
+- Every flag in the router's `args` must be writable as one preset key: a flag
+  written twice, a flag carrying more than one value, or tokens before any flag
+  refuse the start by name (`docs/specs/SERVE.md`, The router).
 - Human/agent-owned like the rest of the tree; cria reads it and never writes it.
 - A file named after something cria does not serve is not read at all — it is
   somebody's note, not a config cria silently obeys.
@@ -198,18 +230,20 @@ on the same port (settled 2026-08-18, `docs/cria.md`, v1 surface).
   `config.toml` or `engines/<engine>.toml` fails the load, naming the file and the
   key.
 - `cria docs` output = this schema, a complete commented example entry per backend,
-  an example engine file per backend, and a `config.toml` example. The examples are
-  the templates agents copy from.
-- **The backend set and its per-key metadata live in the schema** (settled
-  2026-08-31): which backends a file may declare, which keys each of them takes,
-  the value each key carries in that backend's example, and the flag that
-  backend's model reference is composed under. A key states one example that holds
+  an example engine file per **engine** (the router's included), and a `config.toml`
+  example. The examples are the templates agents copy from.
+- **The engine set and its per-key metadata live in the schema** (settled
+  2026-08-31): which engines the tree may configure, which of them a file may
+  declare as its backend, which keys each of them takes, the value each key carries
+  in that engine's example, and the flag cria composes that engine's models under
+  (`-hf`, `--model`, `--models-preset`) — the flag no args list may restate. A key states one example that holds
   under every backend or one per backend — never one backend's value standing in
   for another's, which would hand an agent a repo the backend it names cannot
   serve. `cria docs` walks that set, so a backend cria serves is a backend the
   page teaches, and the keys the page says are refused are the keys the parser
   refuses.
 - **Key applicability is a set, not a single backend** (settled 2026-08-31): a key
-  names the backends that take it and is refused for every other one; naming none
-  means all of them. A key two of three backends take — `quant`, once a router
-  engine exists — is expressible without a third state, and refusals stay total.
+  names the engines that take it and is refused for every other one; naming none
+  means all of them. It is the same rule in an entry file and in an engine file —
+  the refusal names the key's engines and then what this file speaks for (its
+  backend key, or the engine it is named after).

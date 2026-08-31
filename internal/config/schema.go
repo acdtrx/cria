@@ -75,17 +75,18 @@ func (k key) takenBy(backend Backend) bool {
 	return len(k.onlyBackends) == 0 || slices.Contains(k.onlyBackends, backend)
 }
 
-// takenByNamed is the clause a refusal opens with: which backends this key
-// belongs to, in the file's own vocabulary.
+// takenByNamed is the clause a refusal opens with: which engines this key
+// belongs to. An entry file names its engine in its backend key and an engine
+// file is named after one, so both refusals open the same way.
 func (k key) takenByNamed() string {
 	named := make([]string, 0, len(k.onlyBackends))
 	for _, backend := range k.onlyBackends {
 		named = append(named, fmt.Sprintf("%q", backend))
 	}
 	if len(named) == 1 {
-		return "only the " + named[0] + " backend takes it"
+		return "only the " + named[0] + " engine takes it"
 	}
-	return "only the " + strings.Join(named[:len(named)-1], ", ") + " and " + named[len(named)-1] + " backends take it"
+	return "only the " + strings.Join(named[:len(named)-1], ", ") + " and " + named[len(named)-1] + " engines take it"
 }
 
 // backendNote is how the docs table flags a key not every backend takes; a key
@@ -269,19 +270,48 @@ var choiceOptionSchema = schema{
 	},
 }
 
-// engineSchema is engines/<engine>.toml: what this machine serves every entry of
-// one backend with. It is the level entries override, and it is optional — an
+// engineSchema is engines/<engine>.toml: what this machine serves every model of
+// one engine with. It is the level entries override, and it is optional — an
 // engine with no file has no defaults of its own (docs/specs/CONFIG.md).
+//
+// The router takes keys the process engines do not: it serves no entry of its
+// own, so the port it answers on, the address it binds and its own flags have
+// nowhere else to live (docs/specs/CONFIG.md).
 var engineSchema = schema{
+	{
+		name:         "port",
+		kind:         kindInteger,
+		onlyBackends: []Backend{BackendRouter},
+		rules:        "the port the router serves on; it has no entry to take one from, so without this key there is no router to start (give it a port of its own — entries keep theirs)",
+		examples:     map[Backend]string{BackendRouter: "11434"},
+		check:        checkPort,
+	},
+	{
+		name:         "host",
+		kind:         kindString,
+		onlyBackends: []Backend{BackendRouter},
+		rules:        `the router's bind address; defaults to config.toml default_host, else "` + defaultBindHost + `"`,
+		examples:     map[Backend]string{BackendRouter: `"0.0.0.0"`},
+		check:        checkNonEmpty,
+	},
 	{
 		name:  "args",
 		kind:  kindStringList,
-		rules: "what every entry this engine serves starts from — the machine's own flags, not the model's; an entry that sets the same flag overrides it",
+		rules: "what every model this engine serves starts from — the machine's own flags, not the model's; an entry that sets the same flag overrides it. Under the router these become the composed preset's [*] block, so each flag must take one value or none",
 		examples: map[Backend]string{
-			BackendLlama: `["-ngl", "99", "-fa", "on"]`,
-			BackendMLX:   `["--log-level", "INFO"]`,
+			BackendLlama:  `["-ngl", "99", "-fa", "on"]`,
+			BackendMLX:    `["--log-level", "INFO"]`,
+			BackendRouter: `["-ngl", "99", "-fa", "on"]`,
 		},
 		check: checkArgs,
+	},
+	{
+		name:         "router_args",
+		kind:         kindStringList,
+		onlyBackends: []Backend{BackendRouter},
+		rules:        "the router process's own flags, passed verbatim — how many models it may keep loaded, whether it loads them on request, and anything else llama-server takes as a router; the flags for the models it serves belong in args",
+		examples:     map[Backend]string{BackendRouter: `["--models-max", "2"]`},
+		check:        checkArgs,
 	},
 }
 
@@ -332,16 +362,16 @@ var treeSchema = schema{
 	},
 }
 
-// composedFlags are the flags cria builds itself out of an entry's own keys
-// (docs/specs/CONFIG.md): the bind address, the port, and the flag each
-// backend's model reference is passed under. An args list restating one of them
-// would fight the composed command line, so it is refused instead of silently
-// overriding — and every backend's model flag is refused under every backend,
-// since a flag one server does not take is a mistake either way.
+// composedFlags are the flags cria builds itself out of the tree's own keys
+// (docs/specs/CONFIG.md): the bind address, the port, and the flag each engine's
+// models are named under. An args list restating one of them would fight the
+// composed command line, so it is refused instead of silently overriding — and
+// every engine's model flag is refused under every engine, since a flag one
+// server does not take is a mistake either way.
 func composedFlags() []string {
-	flags := make([]string, 0, len(backends)+2)
-	for _, backend := range backends {
-		flags = append(flags, backend.modelFlag)
+	flags := make([]string, 0, len(engines)+2)
+	for _, engine := range engines {
+		flags = append(flags, engine.modelFlag)
 	}
 	return append(flags, "--host", "--port")
 }
@@ -501,7 +531,7 @@ func checkBackend(value any) error {
 	if slices.Contains(Backends(), declared) {
 		return nil
 	}
-	named := make([]string, 0, len(backends))
+	named := make([]string, 0, len(engines))
 	for _, backend := range Backends() {
 		named = append(named, fmt.Sprintf("%q", backend))
 	}

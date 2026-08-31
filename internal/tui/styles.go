@@ -32,6 +32,7 @@ const (
 	amberHex  = "#fab387" // starting, notices, sizes, and the llama backend (Peach)
 	redHex    = "#f38ba8" // unhealthy, exited, and anything cria could not do (Red)
 	blueHex   = "#89b4fa" // the labels of a detail pane, and the mlx backend (Blue)
+	pinkHex   = "#f5c2e7" // the router engine (Pink)
 	keyHex    = "#eba0ac" // the keys themselves, in the bar (Maroon)
 
 	// The group headings the entry list is partitioned by: a hue of its own, so
@@ -111,6 +112,7 @@ var palette = []swatch{
 	{name: "amber", hex: amberHex, on: terminalBG, floor: textFloor},
 	{name: "red", hex: redHex, on: terminalBG, floor: textFloor},
 	{name: "blue", hex: blueHex, on: terminalBG, floor: textFloor},
+	{name: "pink", hex: pinkHex, on: terminalBG, floor: textFloor},
 	{name: "key", hex: keyHex, on: terminalBG, floor: textFloor},
 	{name: "heading", hex: headingHex, on: terminalBG, floor: textFloor},
 
@@ -138,6 +140,7 @@ var (
 	amber       = lipgloss.Color(amberHex)
 	red         = lipgloss.Color(redHex)
 	blue        = lipgloss.Color(blueHex)
+	pink        = lipgloss.Color(pinkHex)
 	keyRed      = lipgloss.Color(keyHex)
 	heading     = lipgloss.Color(headingHex)
 	band        = lipgloss.Color(bandHex)
@@ -374,9 +377,14 @@ func (p rowPaint) fill(line string, width int) string {
 // than by the engine — an engine module renders nothing. The table is looked up,
 // never defaulted through: a backend drawn in another's colour would read as
 // that other one.
+// The router's pink is neither engine's hue and neither alarm's: it is lighter
+// and more violet than the maroon the key bar is drawn in and than the red a
+// failure takes, so the one place a backend word is read — a title, a detail
+// pane's backend row — cannot be mistaken for either.
 var backendTones = map[config.Backend]color.Color{
-	config.BackendLlama: amber,
-	config.BackendMLX:   blue,
+	config.BackendLlama:  amber,
+	config.BackendMLX:    blue,
+	config.BackendRouter: pink,
 }
 
 // backendTone is the colour a backend's name is spelled in. A backend with no

@@ -41,9 +41,20 @@ func versionOutput(build int) string {
 	return fmt.Sprintf("version: 0.1.0-dev (build %d, commit ece963f41)\nbuilt with AppleClang 21.0.0.21000101 for Darwin arm64\n", build)
 }
 
-// modernVersion stands in for a llama.cpp new enough to share the hub cache, for
-// the tests that are about resolution rather than about the build judgement.
-func modernVersion(string) (string, error) { return versionOutput(hubCacheBuild), nil }
+// routerHelp is the one line of `llama-server --help` cria reads: the flag that
+// turns the program into a router. A build without it predates router mode.
+var routerHelp = fmt.Sprintf("  %s PATH    path to INI file containing model presets\n", RouterFlag)
+
+// modernVersion stands in for a llama.cpp new enough to share the hub cache and
+// to run as a router, for the tests that are about resolution rather than about
+// the build judgement. It answers each flag with that flag's own output, the way
+// the program does.
+func modernVersion(_, flag string) (string, error) {
+	if flag == helpFlag {
+		return routerHelp, nil
+	}
+	return versionOutput(hubCacheBuild), nil
+}
 
 func TestCheckResolvesEveryToolFromPath(t *testing.T) {
 	dir := pathWith(t, LlamaServer, MLXLMServer, HF)
@@ -124,6 +135,87 @@ func TestCheckReportsMissingTools(t *testing.T) {
 		if !strings.Contains(tool.Fix, key) {
 			t.Errorf("%s fix is %q, want it to name %s", tool.Name, tool.Fix, key)
 		}
+	}
+}
+
+// Router mode is a second requirement on the one llama-server: the report reads
+// it off the program's own --help, and a build that does not name the flag is
+// refused before a spawn could fail on it (docs/specs/TOOLS.md).
+func TestTheRouterVerdictReadsTheBinarysOwnHelp(t *testing.T) {
+	tests := []struct {
+		name        string
+		help        string
+		wantUsable  bool
+		wantMention []string
+	}{
+		{
+			name:       "a build that names the flag serves as a router",
+			help:       routerHelp,
+			wantUsable: true,
+		},
+		{
+			name:        "a build that does not is refused, naming what it lacks",
+			help:        "  --host HOST    ip address to listen on\n",
+			wantMention: []string{RouterFlag, "the router", "upgrade llama.cpp"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pathWith(t, LlamaServer)
+			probe := func(_, flag string) (string, error) {
+				if flag == helpFlag {
+					return test.help, nil
+				}
+				return versionOutput(10450), nil
+			}
+
+			report := check(config.Settings{}, probe)
+			if !report.LlamaServer.Usable() {
+				t.Fatalf("llama-server is %s (%s), want found; router mode is a second question about a fit binary",
+					report.LlamaServer.Status, report.LlamaServer.Disables)
+			}
+
+			router := report.RouterMode()
+			if router.Name != LlamaServer {
+				t.Errorf("the router's finding is about %q, want the one program it runs", router.Name)
+			}
+			if router.Usable() != test.wantUsable {
+				t.Fatalf("the router's finding is %s (%s), want usable=%v", router.Status, router.Disables, test.wantUsable)
+			}
+			if test.wantUsable {
+				if router.Disables != "" || router.Fix != "" {
+					t.Errorf("a usable router reports disables=%q fix=%q, want both empty", router.Disables, router.Fix)
+				}
+				return
+			}
+			for _, want := range test.wantMention {
+				if !strings.Contains(router.Disables+" "+router.Fix, want) {
+					t.Errorf("the refusal reads %q / %q, want it to name %q", router.Disables, router.Fix, want)
+				}
+			}
+			// The llama engine is untouched: this binary serves entries fine.
+			if !report.LlamaServer.Usable() {
+				t.Errorf("a build without router mode also disabled llama entries: %s", report.LlamaServer.Disables)
+			}
+		})
+	}
+}
+
+// A llama-server cria cannot use at all is the router's answer too, in the words
+// the tool check already found for it: it is the same program and the same fix,
+// and the router has nothing to add to "it is not installed".
+func TestAnUnusableLlamaServerIsTheRoutersAnswerToo(t *testing.T) {
+	pathWith(t)
+
+	report := check(config.Settings{}, modernVersion)
+	router := report.RouterMode()
+
+	if router != report.LlamaServer {
+		t.Errorf("the router's finding is %+v, want the llama-server finding itself: %+v", router, report.LlamaServer)
+	}
+	if !strings.Contains(router.Disables, "the router") {
+		t.Errorf("a missing llama-server disables %q, want it to name the router it also takes away", router.Disables)
 	}
 }
 
@@ -295,7 +387,12 @@ func TestCheckJudgesTheLlamaServerBuild(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			pathWith(t, LlamaServer)
-			version := func(string) (string, error) { return test.output, test.err }
+			version := func(_, flag string) (string, error) {
+				if flag == helpFlag {
+					return routerHelp, nil
+				}
+				return test.output, test.err
+			}
 
 			llama := check(config.Settings{}, version).LlamaServer
 
@@ -396,7 +493,12 @@ func TestTheVersionProbeIsRetriedOnceWhenItCannotRun(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			pathWith(t, LlamaServer)
 			runs := 0
-			version := func(string) (string, error) {
+			version := func(_, flag string) (string, error) {
+				// The retry rule is the version probe's alone; the help probe that
+				// follows a fit build is one run of its own and never counted here.
+				if flag == helpFlag {
+					return routerHelp, nil
+				}
 				answer := test.answers[min(runs, len(test.answers)-1)]
 				runs++
 				return answer.output, answer.err

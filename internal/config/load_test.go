@@ -236,6 +236,126 @@ func TestABrokenEngineFileFailsTheLoad(t *testing.T) {
 	}
 }
 
+// engines/router.toml is the whole configuration of a process no entry declares,
+// so it carries more than args: the port it answers on, the address it binds and
+// its own flags (docs/specs/CONFIG.md).
+func TestTheRouterFileConfiguresTheRouterProcess(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		settingsFile: "default_port = 8080\n",
+		"engines/router.toml": "port = 11434\nhost = \"127.0.0.1\"\n" +
+			"args = [\"-ngl\", \"99\"]\nrouter_args = [\"--models-max\", \"2\"]\n",
+		"models/one.toml": "backend = \"llama\"\nrepo = \"org/one\"\n",
+	})
+
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	router := tree.Router
+	if router.Port != 11434 {
+		t.Errorf("the router serves on port %d, want 11434", router.Port)
+	}
+	if router.Host != "127.0.0.1" {
+		t.Errorf("the router binds %q, want the address its own file names", router.Host)
+	}
+	if want := []string{"-ngl", "99"}; !reflect.DeepEqual(router.Args, want) {
+		t.Errorf("the models the router serves start from %v, want %v", router.Args, want)
+	}
+	if want := []string{"--models-max", "2"}; !reflect.DeepEqual(router.RouterArgs, want) {
+		t.Errorf("the router process runs with %v, want %v", router.RouterArgs, want)
+	}
+	if router.Path != filepath.Join(root, "engines", "router.toml") {
+		t.Errorf("the router config came from %q, want the file it was read from", router.Path)
+	}
+
+	// The router's args are its own preset's; no entry starts from them.
+	if len(tree.Entries) != 1 {
+		t.Fatalf("entries are %+v, want one", tree.Entries)
+	}
+	if got := tree.Entries[0].EngineArgs; len(got) != 0 {
+		t.Errorf("the llama entry starts from %v, which is the router file's args", got)
+	}
+}
+
+// The router binds by the entries' own doctrine: its file, else the tree's
+// default, else every address the host has (docs/specs/CONFIG.md).
+func TestTheRouterBindsLikeAnEntry(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings string
+		file     string
+		want     string
+	}{
+		{name: "its own host wins", settings: "default_host = \"127.0.0.1\"\n", file: "port = 11434\nhost = \"192.168.1.10\"\n", want: "192.168.1.10"},
+		{name: "else the tree's default", settings: "default_host = \"127.0.0.1\"\n", file: "port = 11434\n", want: "127.0.0.1"},
+		{name: "else every address the host has", file: "port = 11434\n", want: defaultBindHost},
+		{name: "and a tree with no router file still answers", settings: "default_host = \"127.0.0.1\"\n", want: "127.0.0.1"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			files := map[string]string{}
+			if test.settings != "" {
+				files[settingsFile] = test.settings
+			}
+			if test.file != "" {
+				files["engines/router.toml"] = test.file
+			}
+
+			tree, err := Load(writeTree(t, files))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if tree.Router.Host != test.want {
+				t.Errorf("the router binds %q, want %q", tree.Router.Host, test.want)
+			}
+		})
+	}
+}
+
+// A tree with no engines/router.toml has no router to start, and says so by
+// carrying no port — not by falling back to default_port, which is the port the
+// entries share (docs/specs/CONFIG.md).
+func TestARouterlessTreeNamesNoRouterPort(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		settingsFile:      "default_port = 8080\n",
+		"models/one.toml": "backend = \"llama\"\nrepo = \"org/one\"\n",
+	})
+
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if tree.Router.Port != 0 {
+		t.Errorf("the router took port %d from a tree with no router file", tree.Router.Port)
+	}
+	if tree.Router.Path == "" {
+		t.Error("the router config names no file, so a refusal could not say where to write one")
+	}
+}
+
+// A key belongs to the engines that take it, in an engine file as in an entry:
+// the router's keys are refused in another engine's file, and the refusal names
+// both the key's engines and the one this file configures.
+func TestAnEngineFileRefusesAnotherEnginesKeys(t *testing.T) {
+	for _, file := range []string{"port = 11434\n", "host = \"127.0.0.1\"\n", "router_args = [\"--models-max\", \"2\"]\n"} {
+		root := writeTree(t, map[string]string{
+			settingsFile:         "default_port = 8080\n",
+			"engines/llama.toml": file,
+		})
+
+		tree, err := Load(root)
+		if err == nil {
+			t.Fatalf("engines/llama.toml holding %q loaded as %+v", file, tree)
+		}
+		for _, want := range []string{`"router"`, `"llama"`} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("the refusal of %q reads %v, want it to name %s", file, err, want)
+			}
+		}
+	}
+}
+
 // engines/ holds one file per backend and cria reads no others: a file named
 // after nothing cria serves is somebody's note, not a config it silently obeys.
 func TestOnlyTheEnginesOwnFilesAreRead(t *testing.T) {

@@ -18,13 +18,28 @@ import (
 // disables llama serving outright rather than warning (docs/specs/TOOLS.md).
 const hubCacheBuild = 8498
 
-// versionTimeout bounds the only program this package runs: a llama-server that
-// hangs on --version must not hang cria's startup check. Generous on purpose —
-// the first exec after a brew upgrade revalidates signatures over ~15 MB of
-// dylibs, and a machine busy serving a model pages them in slowly; both were
-// seen pushing an otherwise-40ms run over an earlier 3s budget, whose kill was
-// then misread as an unverifiable build.
-const versionTimeout = 10 * time.Second
+// probeTimeout bounds every run of the only program this package runs: a
+// llama-server that hangs on --version must not hang cria's startup check.
+// Generous on purpose — the first exec after a brew upgrade revalidates
+// signatures over ~15 MB of dylibs, and a machine busy serving a model pages
+// them in slowly; both were seen pushing an otherwise-40ms run over an earlier
+// 3s budget, whose kill was then misread as an unverifiable build.
+const probeTimeout = 10 * time.Second
+
+// The flags this package asks a program about itself with. Both are the
+// program's own documented output, read for one fact each: which build this is,
+// and whether it takes the flag that turns it into a router.
+const (
+	versionFlag = "--version"
+	helpFlag    = "--help"
+
+	// RouterFlag is how llama-server is told to be a router: the ini preset
+	// listing the models it may serve. A build whose `--help` does not name it
+	// predates router mode, and would answer a start with an unknown-flag error
+	// instead of a server (docs/specs/TOOLS.md). internal/engine composes the
+	// flag from here, so the capability cria checks for is the flag cria passes.
+	RouterFlag = "--models-preset"
+)
 
 // The two positions llama.cpp has printed its build number in. See parseBuild.
 const (
@@ -32,20 +47,20 @@ const (
 	buildLabel    = "build"
 )
 
-// versionRunner runs a tool's --version and returns everything it printed. It is
-// this package's one seam: the rest of the check reads the filesystem, which a
-// test can build for real.
-type versionRunner func(path string) (string, error)
+// probeRunner runs one of a program's own information flags and returns
+// everything it printed. It is this package's one seam: the rest of the check
+// reads the filesystem, which a test can build for real.
+type probeRunner func(path, flag string) (string, error)
 
-// runVersion is the real runner. llama.cpp writes its version banner to stderr,
-// so both streams are captured, and the output comes back alongside any failure —
-// a build number the caller can read is worth having even from a program that
+// runProbe is the real runner. llama.cpp writes its version banner to stderr, so
+// both streams are captured, and the output comes back alongside any failure — a
+// build number the caller can read is worth having even from a program that
 // exited badly.
-func runVersion(path string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), versionTimeout)
+func runProbe(path, flag string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, path, "--version")
+	cmd := exec.CommandContext(ctx, path, flag)
 	// Without WaitDelay a child that leaked its output pipe to a grandchild keeps
 	// the read alive past the kill, and the timeout would not bound this call.
 	cmd.WaitDelay = time.Second
@@ -53,10 +68,16 @@ func runVersion(path string) (string, error) {
 	if err != nil && ctx.Err() != nil {
 		// The kill was cria's own timeout: say that, not "signal: killed" — the
 		// reader is deciding whether the binary is broken or the machine busy.
-		err = fmt.Errorf("took longer than %s: %w", versionTimeout, err)
+		err = fmt.Errorf("took longer than %s: %w", probeTimeout, err)
 	}
 	return string(output), err
 }
+
+// takesRouterFlag reads a `llama-server --help` for the flag that turns it into
+// a router. The program's own help is the evidence, rather than a build number
+// cria would have to keep a threshold for: the question is whether this binary
+// takes the flag, and the binary is the one that answers it.
+func takesRouterFlag(help string) bool { return strings.Contains(help, RouterFlag) }
 
 // parseBuild reads the llama.cpp build number out of `llama-server --version`.
 // llama.cpp prints it on the version line, in one of the two shapes it has used:

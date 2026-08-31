@@ -64,6 +64,7 @@ type Tool struct {
 	Path     string // the program cria would exec; empty when the tool was not found
 	Override bool   // the path came from the config.toml [tools] table, not from PATH
 	Build    int    // llama-server only: the llama.cpp build number read from --version; 0 when unread
+	Router   bool   // llama-server only: this build takes the router flags, read from its own --help
 	Disables string // what this status takes away; empty while the status is StatusFound
 	Fix      string // the action that clears it; empty while the status is StatusFound
 }
@@ -83,19 +84,43 @@ type Report struct {
 
 // All lists the findings in the order docs/specs/TOOLS.md presents them, for
 // consumers that render the whole report.
+//
+// The router is not among them: it is llama-server in another mode, so it is one
+// program to install and one row to read, and its own verdict is derived from
+// that row rather than listed beside it (RouterMode).
 func (r Report) All() []Tool { return []Tool{r.LlamaServer, r.MLXLMServer, r.HF} }
+
+// RouterMode is the llama-server finding read for the router's requirement: the
+// same binary, asked whether this build takes the router flags cria composes
+// (docs/specs/TOOLS.md).
+//
+// A llama-server cria cannot use at all fails here for its own reason, already
+// phrased — it is the same program and the same fix. A build cria can use but
+// that predates router mode is refused here alone, so a too-old binary answers
+// with what it lacks instead of failing at the spawn with an unknown flag.
+func (r Report) RouterMode() Tool {
+	tool := r.LlamaServer
+	if !tool.Usable() || tool.Router {
+		return tool
+	}
+	tool.Status = StatusOutdated
+	tool.Disables = unstartable("the router", fmt.Sprintf(
+		"`llama-server --help` names no %s, so this build cannot serve models as a router", RouterFlag))
+	tool.Fix = fmt.Sprintf("upgrade llama.cpp to a build whose `llama-server --help` names %s", RouterFlag)
+	return tool
+}
 
 // Check resolves every managed tool and judges it. It never fails: a tool cria
 // cannot find or cannot verify is a finding, not an error.
 func Check(settings config.Settings) Report {
-	return check(settings, runVersion)
+	return check(settings, runProbe)
 }
 
 // check is Check with its one exec injected, so tests can drive the llama-server
-// judgement from canned --version output instead of a real llama.cpp.
-func check(settings config.Settings, version versionRunner) Report {
+// judgement from canned --version and --help output instead of a real llama.cpp.
+func check(settings config.Settings, probe probeRunner) Report {
 	return Report{
-		LlamaServer: checkLlamaServer(settings.Tools.LlamaServer, version),
+		LlamaServer: checkLlamaServer(settings.Tools.LlamaServer, probe),
 		MLXLMServer: checkMLXLMServer(settings.Tools.MLXLMServer),
 		HF:          checkHF(settings.Tools.HF),
 	}
@@ -103,20 +128,21 @@ func check(settings config.Settings, version versionRunner) Report {
 
 // checkLlamaServer resolves llama-server and, when it is there, decides whether
 // its llama.cpp is recent enough to share the Hugging Face hub cache — the
-// condition llama serving depends on (docs/specs/TOOLS.md).
-func checkLlamaServer(override string, version versionRunner) Tool {
+// condition llama serving depends on (docs/specs/TOOLS.md) — and reads which
+// modes this build can serve in.
+func checkLlamaServer(override string, version probeRunner) Tool {
 	found := resolve(LlamaServer, override)
 	tool := Tool{Name: LlamaServer, Path: found.path, Override: found.override != ""}
 	if !found.ok() {
 		tool.Status = StatusMissing
-		tool.Disables = unstartable("llama", "")
+		tool.Disables = unstartable(llamaServing, "")
 		tool.Fix = found.fix("llama_server", "install llama.cpp so llama-server is on PATH")
 		return tool
 	}
 
 	// A program that printed its version and still exited badly has answered the
 	// question, so the exec error only matters when nothing could be parsed.
-	output, err := version(found.path)
+	output, err := version(found.path, versionFlag)
 	build, parsed := parseBuild(output)
 	// One immediate retry, and only for a probe that could not run at all: a
 	// binary revalidating its signatures or a machine busy serving a model has
@@ -124,7 +150,7 @@ func checkLlamaServer(override string, version versionRunner) Tool {
 	// the build. An answer — parsed, or printed in a shape cria does not read — is
 	// the tool's own reply and is never asked for twice.
 	if !parsed && err != nil {
-		output, err = version(found.path)
+		output, err = version(found.path, versionFlag)
 		build, parsed = parseBuild(output)
 	}
 	switch {
@@ -133,20 +159,29 @@ func checkLlamaServer(override string, version versionRunner) Tool {
 		// not the same as knowing it is old. The fix is to run it again, not to
 		// upgrade a llama.cpp that may well be current.
 		tool.Status = StatusUnverified
-		tool.Disables = unstartable("llama", fmt.Sprintf("`llama-server --version` could not be run (%v), twice in a row, so cria could not read this build's version", err))
+		tool.Disables = unstartable(llamaServing, fmt.Sprintf("`llama-server --version` could not be run (%v), twice in a row, so cria could not read this build's version", err))
 		tool.Fix = retryFix
+		return tool
 	case !parsed:
 		tool.Status = StatusUnverified
-		tool.Disables = unstartable("llama", "`llama-server --version` reported no build number, so cria cannot confirm this build downloads into the Hugging Face hub cache")
+		tool.Disables = unstartable(llamaServing, "`llama-server --version` reported no build number, so cria cannot confirm this build downloads into the Hugging Face hub cache")
 		tool.Fix = unreadableVersionFix
+		return tool
 	case build < hubCacheBuild:
 		tool.Status = StatusOutdated
 		tool.Build = build
-		tool.Disables = unstartable("llama", fmt.Sprintf("build %d downloads models into a private ~/.cache/llama.cpp instead of the Hugging Face hub cache", build))
+		tool.Disables = unstartable(llamaServing, fmt.Sprintf("build %d downloads models into a private ~/.cache/llama.cpp instead of the Hugging Face hub cache", build))
 		tool.Fix = upgradeFix
-	default:
-		tool.Build = build
+		return tool
 	}
+	tool.Build = build
+
+	// Which modes this build serves in is asked only of a binary cria may
+	// actually use: one whose verdict is already a refusal is refused for the
+	// router too, and asking it a second question would answer nothing new while
+	// costing every invocation another exec.
+	help, _ := version(found.path, helpFlag)
+	tool.Router = takesRouterFlag(help)
 	return tool
 }
 
@@ -158,7 +193,7 @@ func checkMLXLMServer(override string) Tool {
 	tool := Tool{Name: MLXLMServer, Path: found.path, Override: found.override != ""}
 	if !found.ok() {
 		tool.Status = StatusMissing
-		tool.Disables = unstartable("mlx", "")
+		tool.Disables = unstartable("mlx entries", "")
 		tool.Fix = found.fix("mlx_lm_server", "install mlx-lm so mlx_lm.server is on PATH (Apple silicon only)")
 	}
 	return tool
@@ -195,11 +230,17 @@ var (
 	unreadableVersionFix = fmt.Sprintf("run `llama-server --version` yourself: upgrade llama.cpp if it names a build below %d, and report the banner if it names none", hubCacheBuild)
 )
 
-// unstartable phrases what a backend loses, the way the degradation principle
-// puts it: entries stay listed, they just cannot start (docs/specs/TOOLS.md).
-// because names the cause when the tool is present but unfit.
-func unstartable(backend, because string) string {
-	line := "starting " + backend + " entries; they stay listed, marked unstartable"
+// llamaServing is what an unusable llama-server costs: the engine that runs one
+// server per entry and the router that runs one for the host are the same
+// program, so a binary cria cannot use disables both at once.
+const llamaServing = "llama entries and the router"
+
+// unstartable phrases what an unusable tool loses, the way the degradation
+// principle puts it: what it serves stays listed, it just cannot start
+// (docs/specs/TOOLS.md). because names the cause when the tool is present but
+// unfit.
+func unstartable(what, because string) string {
+	line := "starting " + what + "; they stay listed, marked unstartable"
 	if because == "" {
 		return line
 	}

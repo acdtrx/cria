@@ -28,6 +28,10 @@ learn the schema from this page.
 - What this machine serves *every* entry of one backend with goes in
   `engines/<backend>.toml` — an `args` list like an entry's. A flag the entry
   sets overrides it, and a picked option's overrides both.
+- `engines/router.toml` configures the one router process this host runs: no
+  entry declares the router, it serves ordinary entries, and its file carries a
+  port of its own besides the `args` every model it serves starts from.
+  `cria router start|stop|status` is its lifecycle.
 - Take parameters from the model provider's own recommendation and note the source
   in a comment.
 - Tree-wide settings live in `config.toml`: `default_port`, `default_host`, and

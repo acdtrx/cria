@@ -46,6 +46,11 @@ type Engine interface {
 	// takes it. It is the head of a command line: the flags cria owns and the
 	// args the launch composed are appended by the caller, which is what keeps
 	// that tail one composition for every engine.
+	//
+	// An engine whose one server serves every model included in it names nothing
+	// here: no entry is on its command line, and no entry may declare it
+	// (config.Backends). Its own launch is composed where its process is started
+	// from, under the flag the tree refuses all the same (router.go, PresetArgs).
 	ModelArgs(launch config.Launch) []string
 
 	// TakesQuant reports whether a model reference under this engine is qualified
@@ -75,7 +80,7 @@ type Engine interface {
 
 // engines is every engine cria has, in the order docs/specs/TOOLS.md presents
 // the backends.
-var engines = []Engine{llama{}, mlx{}}
+var engines = []Engine{llama{}, mlx{}, router{}}
 
 // For answers which engine serves one backend.
 //
@@ -109,13 +114,17 @@ func IDs() []string {
 
 // Programs names the server programs the engines run: what the process table is
 // scanned for when cria looks for servers it did not start (internal/procs). An
-// engine that runs no program of its own contributes nothing to the scan.
+// engine that runs no program of its own contributes nothing to the scan, and a
+// program two engines run is named once — the scan looks for programs, and the
+// llama engine and the router run the same one in two modes.
 func Programs() []tools.Name {
 	programs := make([]tools.Name, 0, len(engines))
 	for _, engine := range engines {
-		if program := engine.Program(); program != "" {
-			programs = append(programs, program)
+		program := engine.Program()
+		if program == "" || slices.Contains(programs, program) {
+			continue
 		}
+		programs = append(programs, program)
 	}
 	return programs
 }

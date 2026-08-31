@@ -15,15 +15,23 @@ import (
 // prints lands there raw and is never parsed — the tail is what a person reads
 // when a server dies (docs/cria.md, principle 6).
 func (m *Manager) logPath(entryID string, at time.Time) string {
-	return filepath.Join(m.logsRoot(), entryID+"-"+at.Format(logStamp)+logExt)
+	return launchLogPath(m.logsRoot(), entryID, at)
+}
+
+// launchLogPath names one launch's log inside the directory that holds it: the
+// shared log directory for an entry's server, an engine's own state folder for
+// the server that engine runs itself (router.go).
+func launchLogPath(dir, name string, at time.Time) string {
+	return filepath.Join(dir, name+"-"+at.Format(logStamp)+logExt)
 }
 
 // createLog opens a launch's log file. It is opened for appending rather than
 // truncating: two launches of one entry inside the same second would otherwise
 // have the second erase the first one's crash.
 func (m *Manager) createLog(path string) (*os.File, error) {
-	if err := os.MkdirAll(m.logsRoot(), 0o755); err != nil {
-		return nil, fmt.Errorf("cannot create the server log directory %s: %w", m.logsRoot(), err)
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("cannot create the server log directory %s: %w", dir, err)
 	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
@@ -42,12 +50,18 @@ func (m *Manager) createLog(path string) (*os.File, error) {
 // launch stamp: an entry id can be the prefix of another one, and the stamp is
 // what tells "qwen-30b-20260818-150405.log" from any log of entry "qwen".
 func (m *Manager) pruneLogs(entryID string, keep int) error {
-	files, err := os.ReadDir(m.logsRoot())
+	return pruneLogsIn(m.logsRoot(), entryID, keep)
+}
+
+// pruneLogsIn is that rule in one directory, so a server whose logs live beside
+// its own engine's state is kept to the same retention as an entry's.
+func pruneLogsIn(dir, name string, keep int) error {
+	files, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("cannot read the server log directory %s: %w", m.logsRoot(), err)
+		return fmt.Errorf("cannot read the server log directory %s: %w", dir, err)
 	}
 
 	type launchLog struct {
@@ -59,7 +73,7 @@ func (m *Manager) pruneLogs(entryID string, keep int) error {
 		if file.IsDir() {
 			continue
 		}
-		at, ok := launchStamp(file.Name(), entryID)
+		at, ok := launchStamp(file.Name(), name)
 		if !ok {
 			continue
 		}
@@ -76,7 +90,7 @@ func (m *Manager) pruneLogs(entryID string, keep int) error {
 	})
 
 	for _, log := range logs[min(keep, len(logs)):] {
-		path := filepath.Join(m.logsRoot(), log.name)
+		path := filepath.Join(dir, log.name)
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("cannot remove the old log %s: %w", path, err)
 		}

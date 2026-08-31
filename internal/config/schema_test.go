@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -775,8 +776,8 @@ func TestSettingsReject(t *testing.T) {
 // renders these definitions, so a key added without its documentation would ship
 // an undocumented key rather than a stale doc page.
 func TestSchemaDefinitionsCarryTheirDocs(t *testing.T) {
-	var walk func(t *testing.T, s schema, prefix string)
-	walk = func(t *testing.T, s schema, prefix string) {
+	var walk func(t *testing.T, s schema, prefix string, ids []Backend)
+	walk = func(t *testing.T, s schema, prefix string, ids []Backend) {
 		if len(s) == 0 {
 			t.Errorf("%sschema declares no keys", prefix)
 		}
@@ -794,12 +795,18 @@ func TestSchemaDefinitionsCarryTheirDocs(t *testing.T) {
 				t.Errorf("key %q has no rules line to document it", name)
 			}
 			if k.kind.holdsKeys() {
-				walk(t, k.keys, name+".")
+				walk(t, k.keys, name+".", ids)
 				continue
 			}
-			for _, backend := range Backends() {
-				if k.exampleFor(backend) == "" {
-					t.Errorf("key %q has no example value under the %q backend", name, backend)
+			// A key answers for the ids that take it and for no others: an example
+			// under an engine the key is refused for would document a file that
+			// cannot load.
+			for _, id := range ids {
+				if !k.takenBy(id) {
+					continue
+				}
+				if k.exampleFor(id) == "" {
+					t.Errorf("key %q has no example value under %q", name, id)
 				}
 			}
 			if k.keys != nil {
@@ -808,26 +815,53 @@ func TestSchemaDefinitionsCarryTheirDocs(t *testing.T) {
 		}
 	}
 
-	t.Run("entry", func(t *testing.T) { walk(t, entrySchema, "") })
-	t.Run("engine", func(t *testing.T) { walk(t, engineSchema, "") })
-	t.Run("config.toml", func(t *testing.T) { walk(t, treeSchema, "") })
+	// Each schema answers for the ids its files are read for: an entry file names
+	// a backend, an engine file is named after an engine, and config.toml is one
+	// file for the whole tree.
+	t.Run("entry", func(t *testing.T) { walk(t, entrySchema, "", Backends()) })
+	t.Run("engine", func(t *testing.T) { walk(t, engineSchema, "", Engines()) })
+	t.Run("config.toml", func(t *testing.T) { walk(t, treeSchema, "", Backends()) })
 }
 
-// Every backend the tree may declare answers for the flag cria composes its
-// model reference under. Without one, an args list could restate the flag cria
-// builds itself and silently win the command line (schema.go, composedFlags).
-func TestEveryBackendNamesItsModelFlag(t *testing.T) {
-	for _, backend := range Backends() {
-		flag := ModelFlag(backend)
+// Every engine answers for the flag cria composes its models under — the one an
+// entry declares and the router alike. Without one, an args list could restate
+// the flag cria builds itself and silently win the command line (schema.go,
+// composedFlags).
+func TestEveryEngineNamesItsModelFlag(t *testing.T) {
+	for _, engine := range Engines() {
+		flag := ModelFlag(engine)
 		if flag == "" {
-			t.Errorf("backend %q names no model flag, so args restating it would not be refused", backend)
+			t.Errorf("engine %q names no model flag, so args restating it would not be refused", engine)
 		}
 		if !strings.HasPrefix(flag, "-") {
-			t.Errorf("backend %q spells its model flag %q; it is the flag a command line carries", backend, flag)
+			t.Errorf("engine %q spells its model flag %q; it is the flag a command line carries", engine, flag)
 		}
 	}
 	if flag := ModelFlag("nothing-serves-this"); flag != "" {
-		t.Errorf("a backend the tree does not declare answered with model flag %q", flag)
+		t.Errorf("an engine the tree does not have answered with model flag %q", flag)
+	}
+}
+
+// The engines an entry may declare are the ones that run a server per entry. The
+// router runs one server for the host, so a file naming it as its backend is
+// refused with the ids that do serve an entry — the alternative is an entry
+// nothing can start, sitting in the tree looking valid.
+func TestAnEntryMayNotDeclareTheRouter(t *testing.T) {
+	if slices.Contains(Backends(), BackendRouter) {
+		t.Fatal("an entry may declare the router; the router serves the entries included in it, and declares none of its own")
+	}
+	if !slices.Contains(Engines(), BackendRouter) {
+		t.Fatal("the router is not an engine the tree knows, so engines/router.toml would never be read")
+	}
+
+	err := checkBackend(string(BackendRouter))
+	if err == nil {
+		t.Fatal("an entry declaring backend = \"router\" was accepted")
+	}
+	for _, want := range []string{`"router"`, `"llama"`, `"mlx"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal reads %v, want it to name %s", err, want)
+		}
 	}
 }
 

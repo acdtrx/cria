@@ -16,7 +16,7 @@ the command line to `cli`, passing `tui.Run` as the program bare `cria` opens.
 | `internal/config` | the config tree, its schema, the schema's own documentation, and how an args list pairs into flag groups (`specs/CONFIG.md`) | `Load(root)`, `FlagGroups(args)` | — |
 | `internal/format` | how a size, a duration and a Hub reference are spelled | `Bytes`, `HubReference`, … | — |
 | `internal/tools` | which managed programs the host has and what each one's state disables (`specs/TOOLS.md`) | `Check(settings)` | `config` |
-| `internal/engine` | what cria knows about each way of serving: the program, the model reference, the endpoints, the warm and slot rules (`specs/SERVE.md`) | `For(backend)`, `All()` | `config`, `tools` |
+| `internal/engine` | what cria knows about each way of serving — llama, mlx and the router: the program, the model reference, the endpoints, the warm and slot rules, and the router's preset composition (`specs/SERVE.md`) | `For(backend)`, `All()`, `RouterPreset` | `config`, `tools` |
 | `internal/procs` | every `ps`/`lsof` exec and every signal cria sends (`specs/SERVE.md`) | `System{}` (a `Host`) | `engine`, `tools` |
 | `internal/hubcache` | the cache walk, true blob-deduped sizes, entry presence, and the delete plans (`specs/CACHE.md`) | `Read(root)`, `Plan*`/`Execute` | `config`, `engine` |
 | `internal/hubapi` | what a model comes to when complete, and the HF token | `New()`, `Token()` | `config`, `engine`, `hubcache` |
@@ -179,8 +179,8 @@ cria writes to exactly two trees and reads a third it does not own:
 
 | tree | who writes it | what is in it |
 | --- | --- | --- |
-| `~/.config/cria/` | people and coding agents; cria creates the root, `models/` and `AGENTS.md` when missing | `config.toml`, one `models/<id>.toml` per launchable entry |
-| `~/.local/state/cria/` | cria alone | `servers/<id>.json` state records, `logs/<id>-<stamp>.log` (newest three per entry), `ui.json` UI memory |
+| `~/.config/cria/` | people and coding agents; cria creates the root, `models/` and `AGENTS.md` when missing | `config.toml`, one `models/<id>.toml` per launchable entry, one `engines/<engine>.toml` per engine |
+| `~/.local/state/cria/` | cria alone | `servers/<id>.json` state records, `logs/<id>-<stamp>.log` (newest three per entry), `engines/<engine>/` for state that belongs to an engine rather than an entry (the router's composed preset, its record and its logs), `ui.json` UI memory |
 | `~/.cache/huggingface/hub/` | `hf` and the servers; cria only through a delete plan | every model byte on the host — the single source of truth |
 
 The cache location is resolved the way `huggingface_hub` resolves it

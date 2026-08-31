@@ -36,6 +36,11 @@ first question rather than answered with another engine's endpoints.
   composed command line, log path, launch timestamp — and, for an entry with
   choices, the picks the launch composed (settled 2026-08-22): what runs is a
   combination, and the record is where a combination's identity lives.
+- **A record says what its server was started to serve, and there are two answers**
+  (settled 2026-08-31): one entry's server serves a model, named by `repo` (and
+  `quant`); an engine's own server serves the models a composed preset lists, and
+  carries `preset` instead, with the engine's id where an entry id stands. Exactly
+  one of the two is set — a record with both, or neither, is refused on read.
 - Records are **self-contained**: status and stop never need the config tree, so
   editing or deleting an entry never confuses its already-running server.
 - An entry runs once at a time; its record is replaced on the next start.
@@ -131,6 +136,45 @@ failure states.
   At each launch, older logs of the same entry are pruned to the newest three —
   retention by count, no rotation machinery. Logs are displayed as a raw tail and
   never parsed (`docs/cria.md`, principle 6).
+
+## The router (settled 2026-08-31)
+
+One `llama-server` per host, started in router mode: it supervises a child server
+per model it holds and proxies all of them on one port (probe-verified
+2026-08-31). cria starts, watches and stops that one process and never touches its
+children — which models it holds is asked through the router's documented API
+(STEP-8).
+
+- **It is not an entry.** No `models/<id>.toml` declares it; it is configured by
+  `engines/router.toml` and started as itself (`cria router start`,
+  `docs/specs/CLI.md`). One router per host, on a port of its own beside the
+  entries' — a busy port refuses exactly as a start's does, naming a managed
+  holder to stop or a foreign process to deal with.
+- **Engine-scoped state lives in a subfolder per engine** (settled 2026-08-31,
+  OVERVIEW ruling 2): `~/.local/state/cria/engines/router/` holds `preset.ini`
+  (the composed preset), `server.json` (the record) and `logs/router-<stamp>.log`
+  (the newest three, the same retention entries get). Entry records and logs stay
+  where they are — an entry's server is still an entry's — so nothing moves and
+  nothing needs cleaning up. The router's logs live under its own folder rather
+  than beside the entries' so an entry named `router` can neither prune them nor
+  be pruned by them.
+- **The preset is runtime state, composed at every start and never edited.** The
+  tree stays human-owned: `engines/router.toml`'s `args` become the `[*]` section
+  of upstream's ini, a flag group with its dashes stripped (`-ngl 99` → `ngl = 99`,
+  a bare flag → `key = true`). cria owns no key mapping — upstream canonicalizes
+  its own aliases (probe-verified 2026-08-31) — and writes no comments into the
+  file, because that parser judges every line it reads. A flag that cannot be one
+  key (written twice, carrying more than one value, or tokens before any flag)
+  refuses the start by name, before anything on the host has changed.
+- **Liveness and phases are every server's** (docs above): the pid is still the
+  process cria launched, and its own `/health` answers. A router with no model
+  loaded answers green — that is what routing means, and it is why the router
+  loads nothing lazily and is never warmed. There is no `downloading` phase for
+  it: it holds no weights, and a model's bytes are fetched by the child that
+  serves it, when a request asks for one.
+- **The tool check answers for router mode** (`docs/specs/TOOLS.md`): the same
+  `llama-server`, asked whether this build takes `--models-preset`, so a build that
+  predates router mode refuses up front instead of failing at the spawn.
 
 ## Foreign servers (settled 2026-08-18)
 

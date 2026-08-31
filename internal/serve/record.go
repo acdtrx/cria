@@ -32,11 +32,19 @@ import (
 // its picks were applied — and Selection is the picks themselves, so a record can
 // say which combination is running and a restart can replay it. A flat entry picks
 // nothing and records nothing.
+//
+// A record says what its server was started to serve, and there are two answers.
+// One entry's server serves a model, named by repo and quant; an engine's own
+// server serves the models a composed preset lists, and its EntryID is that
+// engine's id — the name the CLI takes for it (docs/specs/SERVE.md). Exactly one
+// of Repo and Preset is set, which is what tells the two apart wherever a record
+// is read.
 type Record struct {
 	EntryID    string           `json:"entry_id"`
 	Backend    config.Backend   `json:"backend"`
-	Repo       string           `json:"repo"`
+	Repo       string           `json:"repo,omitempty"`
 	Quant      string           `json:"quant,omitempty"`
+	Preset     string           `json:"preset,omitempty"`    // the composed preset this server serves from; an engine's own record has one and no model
 	Selection  config.Selection `json:"selection,omitempty"` // choice → picked option; absent for a flat entry
 	Host       string           `json:"host"`
 	Port       int              `json:"port"`
@@ -109,12 +117,19 @@ type BrokenRecord struct {
 	Err     error
 }
 
-// writeRecord saves one record. The write lands through a temporary file and a
-// rename so a reader never meets a half-written record: this file is the only
-// thing standing between a later cria invocation and a running server.
+// writeRecord saves one entry's record.
 func (m *Manager) writeRecord(record Record) error {
-	if err := os.MkdirAll(m.recordsRoot(), 0o755); err != nil {
-		return fmt.Errorf("cannot create the server records directory %s: %w", m.recordsRoot(), err)
+	return writeRecordAt(m.recordPath(record.EntryID), record)
+}
+
+// writeRecordAt saves a record to the file that holds it. The write lands through
+// a temporary file and a rename so a reader never meets a half-written record:
+// this file is the only thing standing between a later cria invocation and a
+// running server.
+func writeRecordAt(path string, record Record) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("cannot create the server records directory %s: %w", dir, err)
 	}
 
 	// Indented: this file is machine-owned, but a person reading it while
@@ -125,7 +140,6 @@ func (m *Manager) writeRecord(record Record) error {
 	}
 	data = append(data, '\n')
 
-	path := m.recordPath(record.EntryID)
 	temp := path + ".writing"
 	if err := os.WriteFile(temp, data, 0o644); err != nil {
 		return fmt.Errorf("cannot write the record of %s: %w", record.EntryID, err)
@@ -182,8 +196,10 @@ func (r Record) validate(id string) error {
 		return missing("entry_id")
 	case r.EntryID != id:
 		return fmt.Errorf("entry_id is %q, but the file is named after entry %q", r.EntryID, id)
-	case r.Repo == "":
+	case r.Repo == "" && r.Preset == "":
 		return missing("repo")
+	case r.Repo != "" && r.Preset != "":
+		return fmt.Errorf("the record names a model (%s) and a preset (%s); a server serves one model or the models a preset lists, never both", r.Repo, r.Preset)
 	case r.Quant != "" && !served.TakesQuant():
 		return fmt.Errorf("quant is %q, but a %q server takes no quantization: its model reference is the repo alone", r.Quant, r.Backend)
 	case r.Host == "":
@@ -219,11 +235,11 @@ func (m *Manager) loadRecord(entryID string) (Record, bool, error) {
 	return record, true, nil
 }
 
-// removeRecord deletes one entry's record. A record that is already gone is the
+// removeRecordAt deletes one record file. A record that is already gone is the
 // state this asks for, not a failure.
-func (m *Manager) removeRecord(entryID string) error {
-	if err := os.Remove(m.recordPath(entryID)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("cannot remove the record of %s: %w", entryID, err)
+func removeRecordAt(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("cannot remove the record %s: %w", path, err)
 	}
 	return nil
 }

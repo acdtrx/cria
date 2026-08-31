@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"cria/internal/config"
-	"cria/internal/engine"
 )
 
 // What the UI remembers survives the program: a change is written, and the next
@@ -150,23 +149,28 @@ func TestBrokenPrefsResetLoudly(t *testing.T) {
 	}
 }
 
-// The toggle is a cycle: pressing it reaches every engine cria has and comes
-// back to where it started, so no backend is a dead end and none is unreachable.
-func TestTheBackendToggleWalksEveryEngine(t *testing.T) {
-	engines := engine.All()
+// The toggle is a cycle: pressing it reaches every backend an entry may declare
+// and comes back to where it started, so no backend is a dead end and none is
+// unreachable.
+//
+// It walks the backends rather than the engines cria has: the key changes which
+// entries the lists show, and the router declares none of its own — the engine
+// toggle that reaches it comes with the view it would show (docs/specs/TUI.md).
+func TestTheBackendToggleWalksEveryBackend(t *testing.T) {
+	backends := config.Backends()
 	saved := defaultPrefs()
 	visited := map[config.Backend]bool{saved.Backend: true}
 
-	for press := 1; press < len(engines); press++ {
+	for press := 1; press < len(backends); press++ {
 		saved.Backend = saved.next()
 		if visited[saved.Backend] {
 			t.Fatalf("press %d came back to %q before every backend had been shown", press, saved.Backend)
 		}
 		visited[saved.Backend] = true
 	}
-	for _, served := range engines {
-		if !visited[served.ID()] {
-			t.Errorf("the toggle never reaches %q", served.ID())
+	for _, backend := range backends {
+		if !visited[backend] {
+			t.Errorf("the toggle never reaches %q", backend)
 		}
 	}
 	if back := saved.next(); back != defaultPrefs().Backend {

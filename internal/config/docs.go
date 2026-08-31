@@ -48,12 +48,12 @@ func entryExamples() string {
 	return sections.String()
 }
 
-// engineExamples is one complete engine file per backend, walked from the same
-// registry.
+// engineExamples is one complete engine file per engine — the router included,
+// which no entry declares and which is therefore configured here alone.
 func engineExamples() string {
 	var sections strings.Builder
-	for _, backend := range Backends() {
-		sections.WriteString(fmt.Sprintf(exampleEngineSection, backend, exampleEngine(backend)))
+	for _, engine := range Engines() {
+		sections.WriteString(fmt.Sprintf(exampleEngineSection, engine, exampleEngine(engine)))
 	}
 	return sections.String()
 }
@@ -64,15 +64,25 @@ const (
 	exampleEngineSection = "EXAMPLE — engines/%s.toml\n\n%s\n"
 )
 
-// composedFlagsNote lists the flags cria composes itself, each with the backend
+// composedFlagsNote lists the flags cria composes itself, each with the engine
 // it belongs to. It reads the same registry the parser refuses them from, so the
 // page cannot name a different set than the one a file is held to.
+// It is wrapped and indented here rather than left to the bullet it follows: the
+// list grows with the engines, and a line of the page may not run off the edge
+// whatever cria comes to compose.
 func composedFlagsNote() string {
-	named := make([]string, 0, len(backends)+2)
-	for _, backend := range backends {
-		named = append(named, fmt.Sprintf("%s (%s)", backend.modelFlag, backend.id))
+	named := make([]string, 0, len(engines)+2)
+	for _, engine := range engines {
+		named = append(named, fmt.Sprintf("%s (%s)", engine.modelFlag, engine.id))
 	}
-	return strings.Join(append(named, "--host", "--port"), ", ")
+	joined := strings.Join(append(named, "--host", "--port"), ", ")
+
+	const indent = 6
+	var note strings.Builder
+	for _, line := range wrapWords(joined, docsWidth-indent) {
+		note.WriteString(strings.Repeat(" ", indent) + line + "\n")
+	}
+	return note.String()
 }
 
 const docsPage = `cria config — the tree at ~/.config/cria
@@ -87,8 +97,8 @@ LAYOUT
   ├── AGENTS.md            created on first run when missing
   ├── config.toml          tree-wide settings; the file itself is optional
   ├── engines/
-  │   └── <engine>.toml    what this machine serves every entry of one backend
-  │                        with; optional, one file per backend
+  │   └── <engine>.toml    what this machine serves every model of one engine
+  │                        with; optional, one file per engine
   └── models/
       └── <id>.toml        one launchable entry per file
 
@@ -103,6 +113,12 @@ ENTRY KEYS — models/<id>.toml
 ENGINE KEYS — engines/<engine>.toml
 
 %s
+  An entry names the engine that serves it — "llama" or "mlx", one server per
+  entry. The router is an engine no entry declares: one llama-server per host,
+  serving many models behind one port, so engines/router.toml is the whole of its
+  configuration. Its args are what every model it serves starts from, and its own
+  flags — how many models may be resident, and the rest — go in router_args.
+
 TREE KEYS — config.toml
 
 %s
@@ -132,7 +148,9 @@ ARGS ARE THE SERVER'S OWN FLAGS
     at once, so there is no winner. Options of one choice share flags freely —
     only one of them is ever picked.
   - cria composes the model reference, the host and the port itself from the keys
-    above, so args may not restate them: %s.
+    above, so args may not restate them:
+
+%s
 
 HOW THE TREE IS READ
 
@@ -303,20 +321,40 @@ func exampleBlockLines(k key, prefix, indent string, backend Backend) []string {
 	return lines
 }
 
-// exampleEngine renders a complete engines/<engine>.toml for one backend: what
-// this machine would serve every entry of that backend with. Built from the same
-// definitions the parser checks the file against, like every other example here.
-func exampleEngine(backend Backend) string {
+// exampleEngine renders a complete engines/<engine>.toml for one engine: what
+// this machine would serve every model of that engine with, and — for the router
+// — what the router process itself runs as. Built from the same definitions the
+// parser checks the file against, like every other example here.
+func exampleEngine(engine Backend) string {
 	var file strings.Builder
-	writeComment(&file, fmt.Sprintf(exampleEnginePreamble, backend, backend))
+	writeComment(&file, enginePreamble(engine))
 	for _, k := range engineSchema {
-		writeExampleKey(&file, k, backend)
+		if !k.takenBy(engine) {
+			continue
+		}
+		writeExampleKey(&file, k, engine)
 	}
 	return file.String()
 }
 
-const exampleEnginePreamble = "A complete engines/%s.toml: what this machine serves every %q entry with. " +
-	"The file is optional and so is every key in it — without one, entries carry their own args alone."
+// enginePreamble opens one engine's example. The router's says something else
+// because the file is something else: no entry declares the router, so this file
+// is the whole of its configuration, and without it there is no router at all.
+func enginePreamble(engine Backend) string {
+	if engine == BackendRouter {
+		return exampleRouterPreamble
+	}
+	return fmt.Sprintf(exampleEnginePreamble, engine, engine)
+}
+
+const (
+	exampleEnginePreamble = "A complete engines/%s.toml: what this machine serves every %q entry with. " +
+		"The file is optional and so is every key in it — without one, entries carry their own args alone."
+
+	exampleRouterPreamble = "A complete engines/router.toml: the one router process this host runs. No entry " +
+		"declares the router — it serves the models included in it, each of which is an ordinary entry — so " +
+		"this file is all of its configuration, and without a port there is no router to start."
+)
 
 // exampleSettings renders a complete config.toml. Scalar keys come before any
 // table because TOML gives every key after a [table] header to that table; the

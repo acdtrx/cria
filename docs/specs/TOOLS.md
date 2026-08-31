@@ -15,9 +15,10 @@ each one's absence disables.
 
 ## Per-tool contract
 
-- **`llama-server`** — missing: llama entries stay visible but unstartable, marked
-  with the reason. Present: the cache check below must pass for llama serving to
-  be enabled.
+- **`llama-server`** — missing: llama entries and the router stay visible but
+  unstartable, marked with the reason (one program serves both, so a binary cria
+  cannot use disables both). Present: the cache check below must pass for llama
+  serving to be enabled, and the router mode check for the router.
 - **`mlx_lm.server`** — missing: mlx entries stay visible but unstartable; normal
   on non-Apple hosts and reported without alarm.
 - **`hf`** — cria never execs it in v1: its job is authentication
@@ -46,6 +47,23 @@ each one's absence disables.
   probe that ran but printed no recognizable build advises checking the banner
   by hand; only a build that was actually read and is actually old gets the
   upgrade advice.
+
+## The llama-server router mode check (settled 2026-08-31)
+
+- Router mode is a second question about the same binary: cria reads
+  `llama-server --help` for `--models-preset`, the flag that turns it into a
+  router. A build that does not name it predates router mode and is refused for
+  the router alone — llama entries still serve fine on it — with what it lacks and
+  the upgrade that clears it.
+- **The binary's own help, not a build threshold**: the question is whether *this*
+  binary takes the flag, and it is the one that can answer. The hub-cache check
+  above keeps its build number because that one is about behavior a flag does not
+  reveal.
+- The probe runs once per invocation and only for a llama-server cria may
+  otherwise use: a binary already refused is refused for the router too, and asking
+  it a second question would learn nothing while costing every invocation an exec.
+- The router's verdict is **derived** from the llama-server finding rather than
+  listed beside it: one program to install, one row to read.
 
 ## Degradation principle
 

@@ -32,45 +32,84 @@ func TestEveryBackendResolvesToItsOwnEngine(t *testing.T) {
 	}
 }
 
-// The two registries are one set. config declares which backends a file may
-// name (it cannot read them from here — this package imports config, so the
+// The two registries are one set. config declares which engines the tree knows
+// (it cannot read them from here — this package imports config, so the
 // dependency only runs one way), and this package declares which of them cria
-// can actually serve. A backend on one side only is a config the parser accepts
-// and nothing serves, or an engine no entry can reach; either way it is silent
-// unless something checks, and this is that check.
-func TestTheEnginesAreExactlyTheBackendsTheTreeMayDeclare(t *testing.T) {
-	declared := config.Backends()
+// can actually serve. An engine on one side only is a config file nothing reads,
+// or an engine the tree cannot configure; either way it is silent unless
+// something checks, and this is that check.
+func TestTheEnginesAreExactlyTheOnesTheTreeKnows(t *testing.T) {
+	known := config.Engines()
 	for _, engine := range All() {
-		if !slices.Contains(declared, engine.ID()) {
-			t.Errorf("the %q engine serves a backend no entry may declare; add it to config.Backends", engine.ID())
+		if !slices.Contains(known, engine.ID()) {
+			t.Errorf("cria has a %q engine the tree does not know; add it to config.Engines", engine.ID())
 		}
 	}
-	for _, backend := range declared {
-		if _, err := For(backend); err != nil {
-			t.Errorf("an entry may declare backend %q, which no engine serves: %v", backend, err)
+	for _, id := range known {
+		if _, err := For(id); err != nil {
+			t.Errorf("the tree knows engine %q, which cria cannot serve: %v", id, err)
+		}
+	}
+
+	// An entry names the engine that serves it, so every backend a file may
+	// declare has to be one of them too — a narrower set, since an engine whose
+	// one server serves many entries is started as itself.
+	for _, backend := range config.Backends() {
+		if !slices.Contains(known, backend) {
+			t.Errorf("an entry may declare backend %q, which is not an engine the tree knows", backend)
 		}
 	}
 }
 
 // The flag an args list may not restate is the flag its engine actually
 // composes. config declares it — it is what a file is refused against — and each
-// engine passes the model under it; this is the one place both are in view, so
+// engine passes its models under it; this is the one place both are in view, so
 // the two cannot drift into an args flag that silently overrides the composed
 // model reference.
+//
+// The claim is bidirectional, because the two shapes of engine are told apart by
+// exactly this: an engine that serves one entry per server names it under its
+// model flag, and an engine that serves many names none and is not a backend an
+// entry may declare.
 func TestEveryEnginesModelFlagIsTheFlagTheTreeRefuses(t *testing.T) {
 	launch := config.Launch{Repo: "org/repo", Quant: "Q4"}
 
 	for _, engine := range All() {
 		t.Run(string(engine.ID()), func(t *testing.T) {
 			args := engine.ModelArgs(launch)
+			perEntry := slices.Contains(config.Backends(), engine.ID())
+
 			if len(args) == 0 {
-				t.Fatal("the engine names no model on the command line it composes")
+				if perEntry {
+					t.Fatal("an entry may declare this engine, but it names no model on the command line it composes")
+				}
+				return
+			}
+			if !perEntry {
+				t.Fatalf("the engine composes %v for one entry, but no entry may declare it", args)
 			}
 			if flag, refused := args[0], config.ModelFlag(engine.ID()); flag != refused {
 				t.Errorf("the engine composes %q while the tree refuses %q; args may set %q and win the command line",
 					flag, refused, flag)
 			}
 		})
+	}
+}
+
+// The router's model flag is the preset it serves from, held to the tree the
+// same way: the flag that turns llama-server into a router is the flag no args
+// list may restate, since a second one would replace the file cria composed.
+func TestTheRouterServesFromThePresetTheTreeRefuses(t *testing.T) {
+	args := PresetArgs("/state/engines/router/preset.ini")
+	if len(args) != 2 {
+		t.Fatalf("the router is launched with %v, want a flag and the preset it names", args)
+	}
+	if flag, refused := args[0], config.ModelFlag(config.BackendRouter); flag != refused {
+		t.Errorf("the router serves from %q while the tree refuses %q; args may set %q and win the command line",
+			flag, refused, flag)
+	}
+	if args[1] != "/state/engines/router/preset.ini" {
+		t.Errorf("the router is pointed at %q, want the preset it was given", args[1])
 	}
 }
 
@@ -115,8 +154,11 @@ func TestEveryEngineAnswersEveryQuestion(t *testing.T) {
 			if path := engine.HealthPath(); !strings.HasPrefix(path, "/") {
 				t.Errorf("the health endpoint is %q, want a path a server answers on", path)
 			}
-			if args := engine.ModelArgs(launch); len(args) == 0 {
-				t.Error("the engine names no model on the command line it composes")
+			// What an engine names on a per-entry command line is the one answer
+			// that may legitimately be nothing; which engines those are is held by
+			// TestEveryEnginesModelFlagIsTheFlagTheTreeRefuses.
+			if args := engine.ModelArgs(launch); len(args) == 1 {
+				t.Errorf("the engine composes %v, which names a flag with no model after it", args)
 			}
 
 			// A program and a tool are two spellings of one fact: an engine that
@@ -197,7 +239,9 @@ func TestTheStartGateOpensForAnEngineThatRunsNoProgram(t *testing.T) {
 
 // The process scan looks for every engine's program, so a way of serving that
 // cria knows about cannot be a foreign server it fails to recognise
-// (internal/procs).
+// (internal/procs). Two engines running one program name it once: the scan looks
+// for programs, and a program listed twice would report every foreign server of
+// it twice.
 func TestTheProcessScanLooksForEveryEnginesProgram(t *testing.T) {
 	programs := Programs()
 	for _, engine := range All() {
@@ -211,6 +255,11 @@ func TestTheProcessScanLooksForEveryEnginesProgram(t *testing.T) {
 	}
 	if slices.Contains(programs, "") {
 		t.Error("the scan looks for a program with no name")
+	}
+	for i, program := range programs {
+		if slices.Contains(programs[:i], program) {
+			t.Errorf("the scan looks for %q twice", program)
+		}
 	}
 }
 

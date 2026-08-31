@@ -12,11 +12,15 @@ import (
 //
 // Stopping a server that has already exited is not a failure: it removes the
 // record, which is the state the caller asked for.
-func (m *Manager) Stop(record Record) error { return m.end(record, m.grace) }
+func (m *Manager) Stop(record Record) error {
+	return m.end(record, m.grace, m.recordPath(record.EntryID))
+}
 
 // Kill is Stop without the grace: SIGKILL straight away, for a server that is
 // wedged or that the user does not want to wait for.
-func (m *Manager) Kill(record Record) error { return m.end(record, 0) }
+func (m *Manager) Kill(record Record) error {
+	return m.end(record, 0, m.recordPath(record.EntryID))
+}
 
 // Dismiss clears the record of a server that has exited — the crash report, once
 // the user is done with it (docs/specs/SERVE.md). It refuses a live server:
@@ -30,12 +34,14 @@ func (m *Manager) Dismiss(record Record) error {
 	if live {
 		return fmt.Errorf("%s is running as pid %d; stop it rather than dismissing it", record.EntryID, record.PID)
 	}
-	return m.removeRecord(record.EntryID)
+	return removeRecordAt(m.recordPath(record.EntryID))
 }
 
 // end is the whole escalation. grace is how long SIGTERM is given before SIGKILL
-// follows; zero skips SIGTERM entirely.
-func (m *Manager) end(record Record, grace time.Duration) error {
+// follows; zero skips SIGTERM entirely. recordPath is the file this record lives
+// in — an entry's, or an engine's own (router.go) — since a confirmed exit is
+// what removes it.
+func (m *Manager) end(record Record, grace time.Duration, recordPath string) error {
 	live, err := m.Live(record)
 	if err != nil {
 		return err
@@ -67,7 +73,7 @@ func (m *Manager) end(record Record, grace time.Duration) error {
 				record.EntryID, record.PID, m.confirm)
 		}
 	}
-	return m.removeRecord(record.EntryID)
+	return removeRecordAt(recordPath)
 }
 
 // waitGone watches one pid until it stops being the server the record names, or

@@ -95,6 +95,18 @@ findings bind this plan and are restated where they decide something.
    ruling 1): a list is a command line, so a flag written twice is passed
    twice. The limit this ruling was about belongs to the router's preset
    alone, and only phase 3 has to answer for it.
+5. **The router is an engine, not a backend an entry may declare** (settled
+   2026-08-31 in STEP-7, following from ruling 2). Inclusion is
+   router-scoped state, and the same entry carries llama picks and router
+   picks — so `backend = "router"` cannot be what includes it, and is
+   refused. The tree declares two sets: the engines it can configure
+   (`config.Engines()`: engine files, records, display) and the narrower
+   backends an entry may name (`config.Backends()`: llama, mlx). Consequences
+   for the remaining steps: `cria new` scaffolds no router entry (it refuses
+   with why), the TUI toggle walks the *backends* until STEP-9 gives the
+   router a view of its own, and a router-included entry stays an ordinary
+   llama entry — quant and all — so nothing in the entry schema widens for
+   it. STEP-7's file records the full reasoning and what was rejected.
 
 ## Scope
 

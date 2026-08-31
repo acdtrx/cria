@@ -70,11 +70,11 @@ func TestDocsExamplesShowEveryKeyOfTheirBackend(t *testing.T) {
 // — that backend's template would quietly carry another backend's value
 // (schema.go, exampleFor).
 func TestEveryKeyExamplesEveryBackend(t *testing.T) {
-	var walk func(s schema, prefix string)
-	walk = func(s schema, prefix string) {
+	var walk func(s schema, prefix string, ids []Backend)
+	walk = func(s schema, prefix string, ids []Backend) {
 		for _, k := range s {
 			if k.kind.holdsKeys() {
-				walk(k.keys, prefix+k.name+".")
+				walk(k.keys, prefix+k.name+".", ids)
 				continue
 			}
 			switch {
@@ -83,17 +83,20 @@ func TestEveryKeyExamplesEveryBackend(t *testing.T) {
 			case k.example == "" && k.examples == nil:
 				t.Errorf("key %q declares no example, so it lands in a template with nothing after the '='", prefix+k.name)
 			case k.examples != nil:
-				for _, backend := range Backends() {
-					if k.examples[backend] == "" {
-						t.Errorf("key %q has no example for the %q backend, so that template would take another backend's value", prefix+k.name, backend)
+				for _, id := range ids {
+					if !k.takenBy(id) {
+						continue
+					}
+					if k.examples[id] == "" {
+						t.Errorf("key %q has no example for %q, so that template would take another one's value", prefix+k.name, id)
 					}
 				}
 			}
 		}
 	}
-	walk(entrySchema, "")
-	walk(engineSchema, "")
-	walk(treeSchema, "")
+	walk(entrySchema, "", Backends())
+	walk(engineSchema, "", Engines())
+	walk(treeSchema, "", Backends())
 }
 
 // An axis is opt-in structure, so the example carries it commented out: what

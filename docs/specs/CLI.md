@@ -16,6 +16,16 @@ its subsystem.
   naming the valid ones.
 - `cria stop [<id>]` — `docs/specs/SERVE.md`.
 - `cria status [--json]` — `docs/specs/SERVE.md`.
+- `cria router [start|stop|status]` (settled 2026-08-31) — the lifecycle of the
+  one router process this host runs (`docs/specs/SERVE.md`, The router). A
+  subcommand of its own rather than an id `cria start` takes: the router is not an
+  entry, nothing in `models/` declares it, an entry could be named `router`
+  without being it, and the verbs this grows next (which models it holds, loading
+  them) are about a process the whole tree shares. A bare `cria router` reports —
+  the verb that changes nothing is the one you get without typing one; `status`
+  exits 0 while a router is up (serving or on its way) and non-zero when there is
+  none, the same question `cria status` answers. No `--wait` in this step: the
+  wait belongs with the router view (`docs/plans/engines/STEP-9`).
 - `cria validate <id> [choice=option ...] [--ignore-busy]` (settled 2026-08-23,
   user-designed) —
   the one blocking command that proves an entry serves on a machine already
@@ -75,7 +85,10 @@ Nothing else: no cache operations from the CLI (`docs/BACKLOG.md`).
 Flags: `--wait` on start, `--json` on status and bench, `--ignore-busy` on
 validate, `--paths` on list, `--llama`/`--mlx` on new, `--sizes`/`--runs`/`--gen`
 on bench, `--version` and `--help` on the bare binary — nothing else takes options,
-and nothing outside `--json` speaks machine.
+and nothing outside `--json` speaks machine. `cria new` takes one flag per backend
+an *entry* may declare (settled 2026-08-31): `--router` scaffolds nothing, and is
+answered with why rather than "unknown flag" — the models the router serves are
+ordinary entries, and what makes them the router's lives outside the tree.
 
 ## Rules
 

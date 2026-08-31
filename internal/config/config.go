@@ -15,61 +15,87 @@ import (
 	"path/filepath"
 )
 
-// Backend names the server program an entry runs. The values below are the whole
-// set cria knows how to launch (docs/specs/TOOLS.md).
+// Backend names one way of serving a model — the id its engine file, its state
+// records and, where an entry may declare it, its backend key carry. The values
+// below are the whole set cria knows how to launch (docs/specs/TOOLS.md).
 type Backend string
 
 const (
-	BackendLlama Backend = "llama"
-	BackendMLX   Backend = "mlx"
+	BackendLlama  Backend = "llama"
+	BackendMLX    Backend = "mlx"
+	BackendRouter Backend = "router"
 )
 
-// backendFacts is one backend as the config tree knows it: the value a file's
-// backend key may carry, and the flag cria composes that backend's model
-// reference under.
-type backendFacts struct {
-	id        Backend
+// engineFacts is one engine as the config tree knows it: the id its files carry,
+// the flag cria composes the models it serves under, and whether an entry file
+// may name it at all.
+type engineFacts struct {
+	id Backend
+
+	// modelFlag is the flag cria composes this engine's models under: the Hub
+	// reference of the one model an entry's server serves, or the preset file a
+	// router serves many from. An args list may not restate it, since restating
+	// it would fight the composed command line rather than change it
+	// (docs/specs/CONFIG.md).
+	//
+	// The engine passes its models under that flag (internal/engine), which is
+	// the one thing this package cannot read from there.
 	modelFlag string
+
+	// perEntry reports whether a models/<id>.toml may declare this engine: an
+	// engine that runs one server per entry is named by the entry it serves,
+	// while one whose single server serves every model included in it is
+	// configured and started as itself and never named by an entry
+	// (docs/specs/CONFIG.md).
+	perEntry bool
 }
 
-// backends is every backend an entry may declare, in the order `cria docs`
-// presents them. It is the set the parser accepts, the set the examples are
-// rendered for, and the set the per-backend schema metadata is read against — so
-// a backend absent here is a backend no file may name.
+// engines is every engine cria has, in the order `cria docs` presents them. It
+// is the set engine files are read for, the set the per-engine schema metadata
+// is read against, and — narrowed to the per-entry ones — the set an entry's
+// backend key may name.
 //
-// The engines that implement these backends live in internal/engine, and that
-// package imports this one: the set cannot be read from there without a cycle,
-// which is why it is declared here rather than derived. internal/engine holds
-// the tests that check the two against each other, so a backend that exists on
-// one side only — or a model flag that is not the one its engine composes — is
-// a red suite rather than a schema that documents something nothing serves.
-var backends = []backendFacts{
-	{id: BackendLlama, modelFlag: "-hf"},
-	{id: BackendMLX, modelFlag: "--model"},
+// The engines that implement these ids live in internal/engine, and that package
+// imports this one: the set cannot be read from there without a cycle, which is
+// why it is declared here rather than derived. internal/engine holds the tests
+// that check the two against each other, so an engine that exists on one side
+// only — or a model flag that is not the one its engine composes — is a red
+// suite rather than a schema that documents something nothing serves.
+var engines = []engineFacts{
+	{id: BackendLlama, modelFlag: "-hf", perEntry: true},
+	{id: BackendMLX, modelFlag: "--model", perEntry: true},
+	{id: BackendRouter, modelFlag: "--models-preset"},
 }
 
-// Backends lists them for the callers that render or enumerate the set: the
-// examples `cria docs` prints, and the refusal a file naming something else
-// gets.
-func Backends() []Backend {
-	ids := make([]Backend, 0, len(backends))
-	for _, backend := range backends {
-		ids = append(ids, backend.id)
+// Engines lists every engine the tree may configure: the ids engines/<id>.toml
+// is read for, and the ids `cria docs` renders an engine example for.
+func Engines() []Backend {
+	ids := make([]Backend, 0, len(engines))
+	for _, engine := range engines {
+		ids = append(ids, engine.id)
 	}
 	return ids
 }
 
-// ModelFlag is the flag cria composes this backend's model reference under —
-// the flag an args list may therefore not restate, since restating it would
-// fight the composed command line rather than change it (docs/specs/CONFIG.md).
-//
-// The engine passes the model under that flag (internal/engine), which is the
-// one thing this package cannot read from there. A backend the tree does not
-// declare has no flag.
+// Backends lists the engines an entry may declare — the set the parser accepts
+// under the backend key, the set entry examples are rendered for, and the
+// refusal a file naming something else gets.
+func Backends() []Backend {
+	ids := make([]Backend, 0, len(engines))
+	for _, engine := range engines {
+		if engine.perEntry {
+			ids = append(ids, engine.id)
+		}
+	}
+	return ids
+}
+
+// ModelFlag is the flag cria composes this engine's models under. An engine the
+// tree does not know has no flag.
 func ModelFlag(backend Backend) string {
-	for _, declared := range backends {
-		if declared.id == backend {
-			return declared.modelFlag
+	for _, engine := range engines {
+		if engine.id == backend {
+			return engine.modelFlag
 		}
 	}
 	return ""
@@ -127,14 +153,28 @@ type Tools struct {
 	HF          string
 }
 
-// Tree is a loaded config tree: the entries cria can act on, plus the entry
-// files it had to disable and why. A broken entry disables only itself
-// (docs/specs/CONFIG.md), so both lists are part of a successful load.
+// RouterConfig is engines/router.toml: what this machine's one router process
+// runs as. The router is not an entry — no models/<id>.toml declares it — so its
+// port, its bind address and its flags live in its engine file and nowhere else
+// (docs/specs/CONFIG.md).
+type RouterConfig struct {
+	Path       string   // the file these came from, named by every refusal — set whether or not the file exists
+	Port       int      // 0 when the file sets none: the router has no port to serve on and cannot start
+	Host       string   // resolved: the file's own host, else default_host, else 0.0.0.0
+	Args       []string // what every model the router serves starts from: the composed preset's [*] block
+	RouterArgs []string // the router process's own flags, passed verbatim after the ones cria composes
+}
+
+// Tree is a loaded config tree: the entries cria can act on, the engine-level
+// configuration around them, plus the entry files it had to disable and why. A
+// broken entry disables only itself (docs/specs/CONFIG.md), so both lists are
+// part of a successful load.
 type Tree struct {
 	Root     string
 	Settings Settings
 	Entries  []Entry       // valid entries, ordered by id
 	Broken   []BrokenEntry // entry files that failed to load, ordered by id
+	Router   RouterConfig  // engines/router.toml, resolved; zero-valued when the file is absent
 }
 
 // BrokenEntry is an entry file cria refused. It is reported rather than

@@ -40,7 +40,7 @@ const (
 // page presents it: the server lifecycle, then the config tree, then the two
 // generators, then the binary's own upkeep. Bare `cria` opens the TUI instead
 // of naming a subcommand.
-var subcommands = []string{"start", "stop", "status", "validate", "bench", "list", "new", "edit", "docs", "wired-limit", "update"}
+var subcommands = []string{"start", "stop", "status", "router", "validate", "bench", "list", "new", "edit", "docs", "wired-limit", "update"}
 
 // The flags the surface has, all booleans (docs/specs/CLI.md). `cria new` takes
 // one per backend besides these; they are the engines' own ids rather than a
@@ -107,6 +107,14 @@ type servers interface {
 	Displace(holder serve.Record) (serve.Record, error)
 	Restore(tree *config.Tree, held serve.Record, report tools.Report) (serve.Record, error)
 	Prove(record serve.Record) error
+
+	// The router's own lifecycle (router.go). It is one process per host rather
+	// than one per entry, and its record lives with its engine's state, so it is
+	// read, started, stopped and observed by its own four calls.
+	RouterServer() (serve.Server, bool, error)
+	StartRouter(router config.RouterConfig, report tools.Report) (serve.Record, error)
+	StopRouter(record serve.Record) error
+	RouterSnapshot(record serve.Record) (serve.Status, error)
 }
 
 // updater is the part of selfupdate the update subcommand drives — named on the
@@ -197,6 +205,8 @@ func (a *app) run(args []string, version string) int {
 		return a.stop(args[1:])
 	case "status":
 		return a.status(args[1:])
+	case "router":
+		return a.router(args[1:])
 	case "validate":
 		return a.validate(args[1:])
 	case "bench":

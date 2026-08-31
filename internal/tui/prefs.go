@@ -8,11 +8,22 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"cria/internal/config"
-	"cria/internal/engine"
 )
+
+// backendIDs names the backends the lists can show, for the refusal a
+// preferences file naming something else gets.
+func backendIDs() []string {
+	backends := config.Backends()
+	ids := make([]string, 0, len(backends))
+	for _, backend := range backends {
+		ids = append(ids, string(backend))
+	}
+	return ids
+}
 
 // prefsFile holds the UI's own memory, next to the state records rather than in
 // the config tree: which backend the lists are showing, which entry was started
@@ -42,26 +53,30 @@ type entryGroup struct {
 	Entries []string `json:"entries"`
 }
 
-// defaultPrefs is a first launch: the first engine cria declares, and nothing
-// started yet. That order puts llama first because it is the backend that exists
-// on every host cria runs on — mlx_lm.server is Apple silicon only
+// defaultPrefs is a first launch: the first backend the tree declares, and
+// nothing started yet. That order puts llama first because it is the backend
+// that exists on every host cria runs on — mlx_lm.server is Apple silicon only
 // (docs/TECH-STACK.md).
-func defaultPrefs() prefs { return prefs{Backend: engine.All()[0].ID()} }
+func defaultPrefs() prefs { return prefs{Backend: config.Backends()[0]} }
 
-// next is the backend the toggle moves to: the engine after this one, wrapping
-// at the end, so every engine cria has is reachable by pressing the key again
-// and none of them is a dead end.
+// next is the backend the toggle moves to: the one after this one, wrapping at
+// the end, so every backend the lists can show is reachable by pressing the key
+// again and none of them is a dead end.
+//
+// The walk is over the backends an entry may declare rather than over every
+// engine cria has: this key changes which entries the lists show, and an engine
+// no entry declares has no list of its own to show (docs/specs/TUI.md).
 func (p prefs) next() config.Backend {
-	engines := engine.All()
-	for i, served := range engines {
-		if served.ID() == p.Backend {
-			return engines[(i+1)%len(engines)].ID()
+	backends := config.Backends()
+	for i, backend := range backends {
+		if backend == p.Backend {
+			return backends[(i+1)%len(backends)]
 		}
 	}
-	// Preferences naming a backend no engine claims are refused on read, so the
-	// walk always finds its place. Answering with the first engine keeps the
+	// Preferences naming something no entry may declare are refused on read, so
+	// the walk always finds its place. Answering with the first backend keeps the
 	// toggle a way out rather than a key that does nothing.
-	return engines[0].ID()
+	return backends[0]
 }
 
 // prefsPath is where one state root keeps the file.
@@ -106,8 +121,8 @@ func decodePrefs(data []byte) (prefs, error) {
 	if decoder.More() {
 		return prefs{}, errors.New("the file holds more than one JSON document")
 	}
-	if _, err := engine.For(saved.Backend); err != nil {
-		return prefs{}, fmt.Errorf("backend is %q, want one of: %s", saved.Backend, strings.Join(engine.IDs(), ", "))
+	if !slices.Contains(config.Backends(), saved.Backend) {
+		return prefs{}, fmt.Errorf("backend is %q, want one of: %s", saved.Backend, strings.Join(backendIDs(), ", "))
 	}
 	if err := validateGroups(saved.Groups); err != nil {
 		return prefs{}, err

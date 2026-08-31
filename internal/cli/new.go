@@ -2,30 +2,32 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
+	"slices"
 	"strings"
 
 	"cria/internal/config"
-	"cria/internal/engine"
 	"cria/internal/format"
 )
 
 // newUsage is the one line every refusal of this subcommand ends with. It names
-// one flag per engine, so the alternatives it offers are the backends cria
-// actually serves.
+// one flag per backend an entry may declare, so the alternatives it offers are
+// the entries cria can actually scaffold.
 var newUsage = "usage: cria new <id> [" + strings.Join(backendFlags(), "|") + "]"
 
-// backendFlag is the flag that scaffolds one engine's entry: the flag prefix and
-// the backend's own id. There is no table mapping flags to backends — a way of
-// serving cria has is one `cria new` can scaffold, spelled the way the entry
-// file spells it.
+// backendFlag is the flag that scaffolds one backend's entry: the flag prefix
+// and the backend's own id. There is no table mapping flags to backends — a
+// backend an entry may declare is one `cria new` can scaffold, spelled the way
+// the entry file spells it.
 func backendFlag(backend config.Backend) string { return "--" + string(backend) }
 
-// backendFlags names them all, in the order engines are declared in.
+// backendFlags names them all, in the order the tree declares them in.
 func backendFlags() []string {
-	flags := make([]string, 0, len(engine.All()))
-	for _, served := range engine.All() {
-		flags = append(flags, backendFlag(served.ID()))
+	declared := config.Backends()
+	flags := make([]string, 0, len(declared))
+	for _, backend := range declared {
+		flags = append(flags, backendFlag(backend))
 	}
 	return flags
 }
@@ -82,9 +84,9 @@ func (a *app) newEntry(args []string) int {
 }
 
 // parseNew reads the command line: one id, and at most one backend flag. Every
-// engine has one, the default included — the backend a bare invocation takes is
-// named as well as implied, so none of them is the unspoken one. refusal is
-// empty when the invocation is routable.
+// backend an entry may declare has one, the default included — the backend a
+// bare invocation takes is named as well as implied, so none of them is the
+// unspoken one. refusal is empty when the invocation is routable.
 func parseNew(args []string) (id string, backend config.Backend, refusal string) {
 	var ids []string
 	named := config.Backend("")
@@ -95,6 +97,9 @@ func parseNew(args []string) (id string, backend config.Backend, refusal string)
 		}
 		flagged, ok := backendNamedBy(arg)
 		if !ok {
+			if engine, asked := engineNamedBy(arg); asked {
+				return "", "", nothingToScaffold(engine)
+			}
 			return "", "", "unknown flag " + arg
 		}
 		if named != "" && named != flagged {
@@ -112,19 +117,42 @@ func parseNew(args []string) (id string, backend config.Backend, refusal string)
 	if named != "" {
 		return ids[0], named, ""
 	}
-	// A bare invocation scaffolds the first engine cria declares: the backend
-	// that exists on every host it runs on (docs/TECH-STACK.md).
-	return ids[0], engine.All()[0].ID(), ""
+	// A bare invocation scaffolds the first backend the tree declares: the one
+	// that exists on every host cria runs on (docs/TECH-STACK.md).
+	return ids[0], config.Backends()[0], ""
 }
 
 // backendNamedBy reads one flag as a backend choice.
 func backendNamedBy(flag string) (config.Backend, bool) {
-	for _, served := range engine.All() {
-		if flag == backendFlag(served.ID()) {
-			return served.ID(), true
+	for _, backend := range config.Backends() {
+		if flag == backendFlag(backend) {
+			return backend, true
 		}
 	}
 	return "", false
+}
+
+// engineNamedBy reads a flag that names an engine no entry may declare — the
+// router, whose models are ordinary entries. It is spotted rather than left to
+// the unknown-flag refusal because asking for it is a reasonable guess, and the
+// answer is a fact about how that engine is fed rather than a typo.
+func engineNamedBy(flag string) (config.Backend, bool) {
+	for _, id := range config.Engines() {
+		if flag == backendFlag(id) && !slices.Contains(config.Backends(), id) {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+// nothingToScaffold answers a flag naming an engine that has no entry file of
+// its own. There is no template to write: the models such an engine serves are
+// entries of the backends that do have one, and what makes them its own lives
+// outside the tree (docs/specs/CONFIG.md).
+func nothingToScaffold(engine config.Backend) string {
+	return fmt.Sprintf("the %q engine serves ordinary entries, so there is no %q entry file to scaffold; "+
+		"write the model's own entry (%s) and configure the engine in engines/%s.toml",
+		engine, engine, strings.Join(backendFlags(), " or "), engine)
 }
 
 // reportNewEntry says what the tree makes of the file the editor just closed:
