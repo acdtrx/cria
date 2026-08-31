@@ -1,6 +1,8 @@
 package serve
 
 import (
+	"encoding/json"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -104,6 +106,71 @@ func TestComposedCommand(t *testing.T) {
 			}
 			if !slices.Equal(got, test.want) {
 				t.Errorf("composed\n  %v\nwant\n  %v", got, test.want)
+			}
+		})
+	}
+}
+
+// The argv a start spawned is what its record file holds: the file is where a
+// later invocation reads back what is running (docs/specs/SERVE.md), so the
+// composition reaches the outside as bytes on disk rather than as a return
+// value. Both backends launch by Hub reference and differ only in how that
+// reference is spelled — llama qualifies the repo with the quantization behind
+// -hf, an mlx quantization is its own repo behind --model.
+func TestTheRecordFileHoldsTheArgvThatWasSpawned(t *testing.T) {
+	cases := []struct {
+		name  string
+		entry config.Entry
+		pid   int
+		want  []string
+	}{
+		{
+			name:  "a llama server carries the quantization on its hub reference",
+			entry: llamaEntry(),
+			pid:   4242,
+			want: []string{
+				"/opt/homebrew/bin/llama-server",
+				"-hf", "unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL",
+				"--host", "0.0.0.0",
+				"--port", "8080",
+				"--ctx-size", "16384",
+			},
+		},
+		{
+			name:  "an mlx server is launched by the repo that is already the quantization",
+			entry: mlxEntry(),
+			pid:   4243,
+			want: []string{
+				"/opt/homebrew/bin/mlx_lm.server",
+				"--model", "mlx-community/Qwen3-30B-A3B-4bit",
+				"--host", "0.0.0.0",
+				"--port", "8080",
+			},
+		},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			host := &fakeHost{}
+			manager := newManager(t, host)
+			_, spawner := startOne(t, manager, host, test.entry, test.pid)
+
+			if !slices.Equal(spawner.last().Command, test.want) {
+				t.Errorf("the launch ran\n  %v\nwant\n  %v", spawner.last().Command, test.want)
+			}
+
+			written, err := os.ReadFile(manager.recordPath(test.entry.ID))
+			if err != nil {
+				t.Fatalf("reading the record file: %v", err)
+			}
+			var file struct {
+				Command []string `json:"command"`
+			}
+			if err := json.Unmarshal(written, &file); err != nil {
+				t.Fatalf("the record file is not the JSON a later invocation reads: %v", err)
+			}
+			if !slices.Equal(file.Command, test.want) {
+				t.Errorf("the record file holds\n  %v\nwant\n  %v", file.Command, test.want)
 			}
 		})
 	}

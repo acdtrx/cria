@@ -104,6 +104,34 @@ func TestWarmingARealServer(t *testing.T) {
 	}
 }
 
+// The path a real server is asked for, spelled out rather than composed from
+// the constant the code builds the URL from: what reaches the wire is what a
+// server has to answer on, and both servers document this one endpoint
+// (docs/specs/SERVE.md).
+func TestTheWarmReachesTheDocumentedCompletionPath(t *testing.T) {
+	var asked string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		asked = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"choices":[{"text":","}]}`)
+	}))
+	defer server.Close()
+
+	manager := newManager(t, &fakeHost{})
+	manager.complete = newHTTPCompletion()
+
+	if err := manager.Warm(recordAt(t, mlxEntry(), server.URL)); err != nil {
+		t.Fatalf("warming a server that answered: %v", err)
+	}
+	if asked != "/v1/completions" {
+		t.Errorf("the warm was sent to %q, want the documented completion endpoint /v1/completions", asked)
+	}
+}
+
 // A backend that loads its model before it answers has nothing to warm, and cria
 // sends it nothing: the rule lives in serve rather than in each caller.
 func TestALlamaServerIsNeverWarmed(t *testing.T) {

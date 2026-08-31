@@ -127,6 +127,52 @@ func TestEntryListShowsTheActiveBackend(t *testing.T) {
 	}
 }
 
+// What "on disk" means differs by backend, and the dots are where a user reads
+// the answer (docs/specs/TUI.md). A llama entry serves one quantization out of a
+// repo that may hold several, so a whole repo holding a different quant is not
+// its model; an mlx quantization is its own repo (docs/cria.md, principle 2), so
+// the repo being whole is the whole answer and nothing inside it is named.
+func TestTheCachedMarkReadsEachBackendsModel(t *testing.T) {
+	frame, world, _ := testFrameOn(t, newTestHost(&fakeServers{}))
+	world.tree = testTree()
+	world.cache = &hubcache.Cache{
+		Root: "/home/u/.cache/huggingface/hub",
+		Repos: []hubcache.Repo{
+			{
+				ID: "unsloth/Qwen3-30B-A3B-GGUF", Type: hubcache.RepoModel, Kind: hubcache.KindGGUF,
+				Complete: true, Bytes: 18 << 30,
+				Items: []hubcache.Item{{Label: "UD-Q4_K_XL", Bytes: 18 << 30, Complete: true}},
+			},
+			{
+				// Whole, and none of it is the quantization gemma names.
+				ID: "unsloth/gemma-3-27b-it-GGUF", Type: hubcache.RepoModel, Kind: hubcache.KindGGUF,
+				Complete: true, Bytes: 15 << 30,
+				Items: []hubcache.Item{{Label: "Q8_0", Bytes: 15 << 30, Complete: true}},
+			},
+			{
+				// No items: an mlx repo holds one quantization, itself.
+				ID: "mlx-community/Qwen3-30B-A3B-4bit", Type: hubcache.RepoModel, Kind: hubcache.KindMLX,
+				Complete: true, Bytes: 17 << 30,
+			},
+		},
+	}
+	frame = load(t, frame)
+
+	llama := list(frame, 10)
+	if want := absentMark + "  gemma"; !strings.Contains(llama[0], want) {
+		t.Errorf("the gemma row reads %q, want %q — the repo is whole but holds another quantization", llama[0], want)
+	}
+	if want := cachedMark + "  qwen"; !strings.Contains(llama[1], want) {
+		t.Errorf("the qwen row reads %q, want %q — the quantization it names is on disk", llama[1], want)
+	}
+
+	frame, _ = press(t, frame, tea.KeyPressMsg{Code: tea.KeyTab})
+	mlx := list(frame, 10)
+	if want := cachedMark + "  mlx-qwen"; !strings.Contains(mlx[0], want) {
+		t.Errorf("the mlx-qwen row reads %q, want %q — its repo is the quantization, and it is whole", mlx[0], want)
+	}
+}
+
 // With no groups defined the list is the drawing it always was: the rows
 // themselves, in order, with nothing over them and no shift in their spacing.
 // Groups are opt-in, so this is the pane most sessions see (docs/specs/TUI.md).
@@ -418,6 +464,32 @@ func TestDetailPaneCarriesTheWholeEntry(t *testing.T) {
 		if !strings.Contains(detail, fact) {
 			t.Errorf("the detail pane does not carry %q:\n%s", fact, detail)
 		}
+	}
+}
+
+// The pane draws whichever backend's entry is selected, and the command it shows
+// is the one that backend's server takes: an mlx quantization is its own repo,
+// so there is no quantization to qualify a reference with and nothing for the
+// pane to draw a quant row from (docs/specs/CONFIG.md).
+func TestDetailPaneCarriesAnMLXEntry(t *testing.T) {
+	frame, _ := serveFrame(t)
+	frame, _ = press(t, frame, tea.KeyPressMsg{Code: tea.KeyTab})
+	frame = frame.reselect(0) // mlx-qwen, the mlx tab's only entry
+
+	detail := plain(strings.Join(frame.detailLines(200, 30), "\n"))
+	for _, fact := range []string{
+		"mlx qwen",
+		"/home/u/.config/cria/models/mlx-qwen.toml",
+		"mlx",
+		"mlx-community/Qwen3-30B-A3B-4bit",
+		"/opt/homebrew/bin/mlx_lm.server --model mlx-community/Qwen3-30B-A3B-4bit --host 127.0.0.1 --port 8080",
+	} {
+		if !strings.Contains(detail, fact) {
+			t.Errorf("the detail pane does not carry %q:\n%s", fact, detail)
+		}
+	}
+	if strings.Contains(detail, "-hf ") {
+		t.Errorf("the mlx pane draws a llama hub reference:\n%s", detail)
 	}
 }
 

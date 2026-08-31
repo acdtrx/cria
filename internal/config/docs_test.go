@@ -207,6 +207,30 @@ func TestDocsExamplesLoadAsAConfigTree(t *testing.T) {
 	}
 }
 
+// Each backend's example teaches that backend's model. The values are the
+// schema's to choose — nothing here spells one — but an example that fell back
+// to the shared one would hand an agent a repo the backend it names cannot
+// serve, and the two examples reading alike is how that shows.
+func TestEachBackendsExampleTeachesItsOwnModel(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		path.Join(entriesDir, "llama-example.toml"): ExampleEntry(BackendLlama),
+		path.Join(entriesDir, "mlx-example.toml"):   ExampleEntry(BackendMLX),
+	})
+
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatalf("loading the examples: %v", err)
+	}
+	if len(tree.Entries) != 2 {
+		t.Fatalf("the examples loaded as %d entries, want 2", len(tree.Entries))
+	}
+
+	llama, mlx := tree.Entries[0], tree.Entries[1]
+	if llama.Repo == mlx.Repo {
+		t.Errorf("both examples name the repo %q; each backend's example teaches a model that backend can serve", llama.Repo)
+	}
+}
+
 // The page is read in a terminal and pasted into an agent's context; nothing on it
 // runs off the edge.
 func TestDocsFitsTheWidth(t *testing.T) {

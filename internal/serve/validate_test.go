@@ -483,6 +483,29 @@ func TestGeneratingReadsTheSlotsOfALlamaServer(t *testing.T) {
 	}
 }
 
+// The path the gate is sent to, spelled out rather than composed from the
+// constant: /slots is llama-server's documented endpoint, and what reaches the
+// wire is what that server has to answer on (docs/specs/SERVE.md).
+func TestTheGenerationGateReachesTheDocumentedSlotPath(t *testing.T) {
+	var asked string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `[{"id":0,"is_processing":false}]`)
+	}))
+	defer server.Close()
+
+	manager := newManager(t, &fakeHost{})
+	manager.slots = newHTTPSlots()
+
+	if generation := manager.Generating(recordAt(t, llamaEntry(), server.URL)); generation.Busy != BusyIdle {
+		t.Fatalf("the gate reads %q over an idle listing, want %q", generation.Busy, BusyIdle)
+	}
+	if asked != "/slots" {
+		t.Errorf("the gate asked %q, want llama-server's documented /slots", asked)
+	}
+}
+
 // A signal that is not there is unverifiable, never idle: a build that does not
 // publish the endpoint, an answer that is not a slot listing, and a listing with
 // nothing in it all leave the gate with no evidence, and each says so.
