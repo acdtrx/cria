@@ -132,9 +132,11 @@ jinja = true
   parser, which fails startup loudly on a line it does not accept — a courtesy
   line for a human reader is a line that parser has to accept. `server.json` beside
   it says what the file is.
-- An empty `args` still writes `[*]` alone. Whether upstream accepts a preset whose
-  only section is `[*]` is **not verified** — the STEP-9 smoke is where it is
-  proved (see Deferred, below).
+- An empty `args` still writes `[*]` alone. A preset whose only section is
+  `[*]` is accepted by upstream's parser — verified live at review
+  (2026-08-31, build 10450, port 11437): the supervisor started, `/health`
+  answered, and `GET /models` listed the 12 cache-discovered models. The
+  STEP-9 smoke's remaining jobs are the composed file and the record.
 
 ### The state layout
 
