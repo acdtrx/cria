@@ -24,13 +24,12 @@ rewrite with eyes on it.
   (candidates from the backlog's original entry: `ngl = 99`, `fa = on`;
   what else is uniform emerges from the survey — extraction is only for
   params that are genuinely machine-stable, not a dedup crusade).
-- **Context rewrite**: profiles state per-conversation `context` per
-  STEP-4's ruling (qwen's current file: `context = 262144`, engine
-  `parallel = 1` as it stands today — the layout comment simplifies).
+- **Context stays literal** (OVERVIEW ruling 3): profiles keep the exact
+  `c` and `parallel` values llama receives (qwen: `c = 262144`,
+  `parallel = 1` as it stands today); layout comments remain the human's
+  division notes.
 - **Proof is a diff**: for every profile, the composed command line before
-  vs after migration (captured pre-edit) — identical argv modulo the ruled
-  context/parallel spelling, which is diffed against its documented
-  expectation instead.
+  vs after migration (captured pre-edit) — identical argv, no exceptions.
 - **Live smoke**: qwen started from the migrated profile, `/slots` layout
   verified, one real completion; one mlx entry likewise (its first
   engine-config read). Backups of the pre-migration tree go to the user's

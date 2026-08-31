@@ -111,16 +111,14 @@ Group entries under headings as themes emerge.
   send. (Router half-fired 2026-08-23: pi-llama-cpp *requires* router mode —
   it manages models via `GET /models` + load/unload, which single-model
   servers lack.)
-  **Context semantics** (open — user still pondering 2026-08-27;
-  recommendation recorded): the model profile declares *per-conversation*
-  context, the engine declares parallelism, and the engine's composer
-  computes the pool (`-c = context × parallel`) — not llama's pool-spelling:
-  the written number should be what a client experiences (the current tree
-  needs comments to explain the division), and raising parallel then costs
-  memory loudly at start (validate's exact job) instead of silently halving
-  every conversation. `context`/`parallel` would join `host`/`port` as
-  schema fields composed by the engine module — not an exception but the
-  layer's job (ruled 2026-08-27, user): cria is a llama-and-mlx runner, not
+  **Context semantics** (settled 2026-08-31, user, at plan review): `c` and
+  `parallel` stay passthrough keys carrying the literal values llama
+  receives — cria computes nothing, the human divides, layout comments
+  carry the note. Rejected: the engine-composed pool recommendation of
+  2026-08-27 (`-c = context × parallel`) — simplicity won and
+  flag-agnosticism stays total; `host`/`port` remain the only
+  schema-composed fields. Engine knowledge is elsewhere — not an exception
+  but the layer's job (ruled 2026-08-27, user): cria is a llama-and-mlx runner, not
   a generic process manager. The *tree's* args stay flag-agnostic
   passthrough; each **engine module knows its engine by design** — schema
   fields, endpoint knowledge (`/health`, `/slots`, the completion shape —

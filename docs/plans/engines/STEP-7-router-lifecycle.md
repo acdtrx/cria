@@ -23,6 +23,14 @@ supervisor itself.
 - **The preset file is runtime state**, composed at start into the state
   dir the way argv is composed today — the tree stays human-owned; the
   composed preset is regenerated every start, never edited.
+- **State is organized per engine** (OVERVIEW ruling 2): a subfolder per
+  engine under `~/.local/state/cria/` holds engine-scoped state — the
+  router's folder gets the composed preset, its inclusion + router picks
+  (STEP-8), and its records. The exact layout (and whether existing
+  llama-engine state moves under its own folder now or stays put) is
+  settled in this step's design and recorded here; feature-building mode
+  applies if anything moves — loud refusal of the old location, manual fix
+  named.
 - **Engine config** (`engines/router.toml`): the router port, `models-max`,
   autoload, sleep, and the `[*]` block's keys. Bind rule follows the same
   host doctrine as entries.

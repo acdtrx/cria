@@ -20,8 +20,11 @@ API.
 ## Decisions made during planning
 
 - **Inclusion is state, edited like picks** (user ruling 2026-08-23,
-  reconfirmed at plan review): config declares what can vary, state holds
-  what is chosen. One combo per included entry.
+  reconfirmed and refined at plan review 2026-08-31): config declares what
+  can vary, state holds what is chosen. One combo per included entry, held
+  in the router's per-engine state subfolder (STEP-7's layout) — router
+  picks for an entry may differ from the llama engine's picks for the same
+  entry, by design.
 - **Section names / client naming** per STEP-4's alias ruling: entry ids
   become the `model` field if the alias lever holds; otherwise the recorded
   fallback mapping.

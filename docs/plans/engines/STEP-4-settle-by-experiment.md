@@ -1,48 +1,45 @@
-# STEP 4 — settle by experiment: context semantics and the alias lever
+# STEP 4 — settle by experiment: the alias lever
 
 Status: not started
 
 ## Intent
 
-Two confined live probes, no cria code, whose outcomes become rulings the
-rest of phase 2 encodes. Both were flagged by the 2026-08-31 router probe.
+One confined live probe, no cria code, whose outcome becomes the ruling
+STEP-8 encodes: how router-included entries get their client-facing names.
 
-## The experiments
+(As planned this step also carried a context-semantics experiment; dropped
+2026-08-31 by OVERVIEW ruling 3 — context and parallel are passthrough
+keys, so cria has no emit rule to verify. The auto-parallel observation from
+the router probe stays in the backlog's git history as author guidance.)
 
-1. **Context × parallel on this build.** Same model, three runs, `/slots`
-   read each time: explicit `-c C --parallel N` (probe showed divide:
-   C/N per slot); `-c C` with no parallel (probe showed 4 slots × full C —
-   multiply-up?); and whatever the build's unified-KV switch is, if
-   documented. The ruling to settle: what cria's `context` (per-conversation)
-   and `parallel` schema fields compose into `-c`/`--parallel`, per engine,
-   on the build cria requires — and what the engine composer must do when
-   upstream's default shifts under it (the engine module owns the mapping;
-   the profile's per-conversation meaning must survive either way).
-2. **The alias lever.** A preset section carrying `alias = <entry-id>`:
-   does `GET /models` list it, does the `model` field route by it, does
-   `?model=` accept it? If yes, router-included entries are addressed by
-   entry id and the quant-tag normalization wrinkle is closed. If no, the
-   fallback is recorded: cria's router state maps entry id → listed id, and
-   clients send the listed id (pi's config names the model string anyway).
+## The experiment
+
+**The alias lever.** A preset section carrying `alias = <entry-id>`: does
+`GET /models` list it, does the `model` field route by it, does `?model=`
+accept it? Background (probe 2026-08-31): section quant tags normalize
+(`UD-Q4_K_XL` → listed id `Q4_K_XL`), so section names are not verbatim
+client names, and each child already receives `--alias <id>`.
+
+- If yes: router-included entries are addressed by entry id — section name
+  stays the model reference, `alias` carries the entry id, clients (pi)
+  send entry ids. The normalization wrinkle closes.
+- If no: the fallback is recorded — cria's router state maps entry id →
+  listed id, and clients send the listed id (pi's config names the model
+  string anyway).
 
 ## Files likely touched
 
-- This file (the record), `docs/plans/engines/OVERVIEW.md` (rulings
-  restated), possibly `docs/specs/CONFIG.md` notes staged for STEP-5.
-- Scratch preset files only; no repo code.
+- This file (the record) and `docs/plans/engines/OVERVIEW.md` (the ruling
+  restated). Scratch preset files only; no repo code.
 
 ## Decisions made during planning
 
-- Machine time: small models on a spare port, same care protocol as the
-  router probe (qwen stopped if headroom demands, restored after; user
-  cleared or present).
-- The context ruling is the user's to confirm once the data is in — the
-  recommendation on record (multiply-up, engine-composed) stands unless the
-  experiment contradicts it.
+- Machine time: one small model on a spare port, same care protocol as the
+  router probe (user cleared or present); minutes, not hours.
 
 ## Acceptance criteria
 
-- Both experiments run, raw observations recorded here (commands, `/slots`
-  and `/models` outputs summarized).
-- The two rulings written, dated, user-confirmed; STEP-5 unblocked.
+- The probe run, raw observations recorded here (`/models` listing, a
+  routed completion, `?model=` by alias).
+- The naming ruling written, dated; STEP-8 unblocked.
 - Machine restored; scratch files cleaned.

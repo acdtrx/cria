@@ -13,9 +13,8 @@ construction.
 ## Files likely touched
 
 - `internal/config/`: schema (args as ordered key=value pairs; the
-  key-exact collision rule replacing token heuristics; `context`/`parallel`
-  schema fields per STEP-4's ruling), loading of `engines/<engine>.toml`,
-  docs generation.
+  key-exact collision rule replacing token heuristics), loading of
+  `engines/<engine>.toml`, docs generation.
 - `internal/engine/`: composition — merged keys → argv (llama, mlx) with
   the boolean rule mirroring upstream (`key = true` → bare flag), and the
   same merge → preset text (router, consumed in phase 3).
@@ -44,8 +43,9 @@ construction.
 - **Repeatable flags**: inexpressible by design; the schema refuses a
   duplicate key in one part loudly. STEP-6's survey confirms no real
   profile needs repetition (none known at planning time).
-- `host`/`port` stay schema fields as today; `context`/`parallel` join them
-  exactly as STEP-4 ruled.
+- `host`/`port` stay the ONLY schema-composed fields (OVERVIEW ruling 3):
+  `c`, `parallel` and everything else are ordinary passthrough keys — cria
+  computes nothing from them.
 - Feature-building mode: the old `args` token-list shape is refused loudly
   with the manual fix named ("rewrite args as key = value lines; see
   cria docs"), no dual-read.
@@ -53,8 +53,8 @@ construction.
 ## Acceptance criteria
 
 - Component tests: merge precedence, key collisions (within-level loud,
-  cross-level override), boolean spelling, context/parallel composition per
-  engine, engine-config absence, old-shape refusal message.
+  cross-level override), boolean spelling, engine-config absence, old-shape
+  refusal message.
 - `cria docs` and the schema render from one source, showing the new shape
   with both engines' examples.
 - The composed argv for a representative migrated profile is byte-identical

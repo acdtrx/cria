@@ -59,18 +59,24 @@ findings bind this plan and are restated where they decide something.
   names (`alias` is the untested lever for entry-id naming); auto-parallel
   appearing to multiply context up while explicit `--parallel` divides.
 
-## Open rulings to confirm at plan review
+## Rulings settled at plan review (2026-08-31, user)
 
-1. **Router inclusion lives in router-scoped state** (user ruling
-   2026-08-23, pre-engines) — which entries are included, each with its own
-   combo, edited like picks. Confirm now that engine configs exist as an
-   alternative home. The plan assumes the ruling stands.
-2. **Context semantics**: model profile declares per-conversation context,
-   engine declares parallelism, engine composes the pool (`context ×
-   parallel`) — recommendation recorded 2026-08-27, still open, gated on
-   STEP-4's verification of the auto-parallel wrinkle.
-3. **Repeatable flags are inexpressible as keys** — accepted as a limit
-   (upstream's preset shares it) unless STEP-5's migration survey finds a
+1. **TOML stays the tree's syntax**; args become key=value inside it, and
+   the upstream ini is composed output only — never the tree's format.
+2. **Router inclusion lives in router-scoped state**, organized as a
+   **subfolder per engine** under the state dir: the router's folder holds
+   which profiles are active under it and their router picks, which may
+   differ from the llama engine's picks for the same entries.
+3. **Context and parallel stay passthrough keys.** The profile carries the
+   literal values llama receives (`c`, `parallel`); cria computes nothing
+   and the human divides when reading — layout comments carry that note, as
+   qwen's already does. Rejected: engine-composed pool (`context ×
+   parallel`, the 2026-08-27 recommendation) — simplicity won, and this
+   keeps cria's flag-agnosticism total; `host`/`port` remain the only
+   schema-composed fields. The auto-parallel probe wrinkle is thereby
+   informational for profile authors, not load-bearing for cria.
+4. **Repeatable flags are inexpressible as keys** — accepted as a limit
+   (upstream's preset shares it) unless STEP-6's migration survey finds a
    real profile needing repetition.
 
 ## Scope
@@ -129,11 +135,12 @@ mlx only, suite validates the extraction).
 
 **Phase 2 — the config cut** (steps 4–6).
 
-- STEP-4 — settle by experiment: the auto-parallel/context wrinkle and the
-  `alias` lever, two confined live probes; outcomes recorded as rulings.
+- STEP-4 — settle by experiment: the `alias` lever, one confined live
+  probe; outcome recorded as a ruling. (The context experiment was dropped
+  2026-08-31 with ruling 3 — passthrough needs no emit rule verified.)
 - STEP-5 — ini-keyed profiles and engine configs: schema, key-exact
-  collisions, upstream precedence, context/parallel schema fields per the
-  ruling; `cria docs` follows by construction; CONFIG.md same-edit.
+  collisions, upstream precedence; `cria docs` follows by construction;
+  CONFIG.md same-edit.
 - STEP-6 — the migration session: the real tree rewritten (~15 profiles +
   engines/*.toml), user reviews; live smoke on the dev Mac. Phase end.
 
