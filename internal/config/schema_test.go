@@ -58,7 +58,7 @@ func TestEntryRulesAccept(t *testing.T) {
 			name:     "every key set at once",
 			settings: "default_port = 9000\ndefault_host = \"127.0.0.1\"\n",
 			entry: "backend = \"llama\"\nrepo = \"unsloth/Qwen3-30B-A3B-GGUF\"\nquant = \"Q4_K_M\"\n" +
-				"port = 8080\nhost = \"192.168.1.10\"\nname = \"Qwen3 30B\"\nargs = [\"ctx-size = 16384\"]\n",
+				"port = 8080\nhost = \"192.168.1.10\"\nname = \"Qwen3 30B\"\nargs = [\"--ctx-size\", \"16384\"]\n",
 			want: Entry{
 				ID:      "demo",
 				Backend: BackendLlama,
@@ -67,7 +67,7 @@ func TestEntryRulesAccept(t *testing.T) {
 				Port:    8080,
 				Host:    "192.168.1.10",
 				Name:    "Qwen3 30B",
-				Args:    []Arg{{Key: "ctx-size", Value: "16384"}},
+				Args:    []string{"--ctx-size", "16384"},
 			},
 		},
 		{
@@ -110,9 +110,8 @@ func TestEntryRulesAccept(t *testing.T) {
 			},
 		},
 		{
-			name: "args keep the file's order, and both halves of a line as written",
-			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\n" +
-				"args = [\"ctx-size = 16384\", \"flash-attn = on\", \"jinja = true\"]\n",
+			name:  "args that name no composed flag pass through verbatim",
+			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--ctx-size\", \"16384\", \"--flash-attn\", \"-ngl\", \"99\"]\n",
 			want: Entry{
 				ID:      "demo",
 				Backend: BackendLlama,
@@ -120,17 +119,15 @@ func TestEntryRulesAccept(t *testing.T) {
 				Port:    8080,
 				Host:    "0.0.0.0",
 				Name:    "demo",
-				Args: []Arg{
-					{Key: "ctx-size", Value: "16384"},
-					{Key: "flash-attn", Value: "on"},
-					{Key: "jinja", Value: "true"},
-				},
+				Args:    []string{"--ctx-size", "16384", "--flash-attn", "-ngl", "99"},
 			},
 		},
 		{
-			name: "the spaces around the '=' are the author's, and the value keeps its own",
-			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\n" +
-				"args = [\"c=262144\", \"chat-template-kwargs = {\\\"a\\\": 1}\"]\n",
+			// A repeated flag is a command line llama takes, and cria is not the
+			// one to know that: within one list there is nothing more specific to
+			// override it, so the list stands as it is written.
+			name:  "one list may pass a flag more than once",
+			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--override-kv\", \"a=b\", \"--override-kv\", \"c=d\"]\n",
 			want: Entry{
 				ID:      "demo",
 				Backend: BackendLlama,
@@ -138,10 +135,7 @@ func TestEntryRulesAccept(t *testing.T) {
 				Port:    8080,
 				Host:    "0.0.0.0",
 				Name:    "demo",
-				Args: []Arg{
-					{Key: "c", Value: "262144"},
-					{Key: "chat-template-kwargs", Value: `{"a": 1}`},
-				},
+				Args:    []string{"--override-kv", "a=b", "--override-kv", "c=d"},
 			},
 		},
 		{
@@ -154,7 +148,7 @@ func TestEntryRulesAccept(t *testing.T) {
 				Port:    8080,
 				Host:    "0.0.0.0",
 				Name:    "demo",
-				Args:    []Arg{},
+				Args:    []string{},
 			},
 		},
 		{
@@ -172,13 +166,13 @@ func TestEntryRulesAccept(t *testing.T) {
 		{
 			name: "an entry that varies on two axes",
 			entry: "backend = \"llama\"\nrepo = \"unsloth/Qwen3-30B-A3B-GGUF\"\nquant = \"UD-Q4_K_XL\"\nport = 8080\n" +
-				"args = [\"jinja = true\"]\n" +
+				"args = [\"--jinja\"]\n" +
 				"[[choice]]\nname = \"quant\"\n" +
-				"  [[choice.option]]\n  name = \"q4\"\n  quant = \"UD-Q4_K_XL\"\n  args = [\"ctx-size = 32768\"]\n" +
-				"  [[choice.option]]\n  name = \"q8\"\n  quant = \"Q8_0\"\n  args = [\"ctx-size = 16384\"]\n" +
+				"  [[choice.option]]\n  name = \"q4\"\n  quant = \"UD-Q4_K_XL\"\n  args = [\"--ctx-size\", \"32768\"]\n" +
+				"  [[choice.option]]\n  name = \"q8\"\n  quant = \"Q8_0\"\n  args = [\"--ctx-size\", \"16384\"]\n" +
 				"[[choice]]\nname = \"slots\"\n" +
 				"  [[choice.option]]\n  name = \"one\"\n" +
-				"  [[choice.option]]\n  name = \"four\"\n  args = [\"parallel = 4\"]\n",
+				"  [[choice.option]]\n  name = \"four\"\n  args = [\"--parallel\", \"4\"]\n",
 			want: Entry{
 				ID:      "demo",
 				Backend: BackendLlama,
@@ -187,20 +181,20 @@ func TestEntryRulesAccept(t *testing.T) {
 				Port:    8080,
 				Host:    "0.0.0.0",
 				Name:    "demo",
-				Args:    []Arg{{Key: "jinja", Value: "true"}},
+				Args:    []string{"--jinja"},
 				Choices: []Choice{
 					{
 						Name: "quant",
 						Options: []ChoiceOption{
-							{Name: "q4", Quant: "UD-Q4_K_XL", Args: []Arg{{Key: "ctx-size", Value: "32768"}}},
-							{Name: "q8", Quant: "Q8_0", Args: []Arg{{Key: "ctx-size", Value: "16384"}}},
+							{Name: "q4", Quant: "UD-Q4_K_XL", Args: []string{"--ctx-size", "32768"}},
+							{Name: "q8", Quant: "Q8_0", Args: []string{"--ctx-size", "16384"}},
 						},
 					},
 					{
 						Name: "slots",
 						Options: []ChoiceOption{
 							{Name: "one"},
-							{Name: "four", Args: []Arg{{Key: "parallel", Value: "4"}}},
+							{Name: "four", Args: []string{"--parallel", "4"}},
 						},
 					},
 				},
@@ -209,7 +203,7 @@ func TestEntryRulesAccept(t *testing.T) {
 		{
 			name: "a one-option choice is a named block of args",
 			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\n" +
-				"[[choice]]\nname = \"debug\"\n  [[choice.option]]\n  name = \"verbose\"\n  args = [\"verbose = true\"]\n",
+				"[[choice]]\nname = \"debug\"\n  [[choice.option]]\n  name = \"verbose\"\n  args = [\"--verbose\"]\n",
 			want: Entry{
 				ID:      "demo",
 				Backend: BackendLlama,
@@ -219,7 +213,7 @@ func TestEntryRulesAccept(t *testing.T) {
 				Name:    "demo",
 				Choices: []Choice{{
 					Name:    "debug",
-					Options: []ChoiceOption{{Name: "verbose", Args: []Arg{{Key: "verbose", Value: "true"}}}},
+					Options: []ChoiceOption{{Name: "verbose", Args: []string{"--verbose"}}},
 				}},
 			},
 		},
@@ -246,11 +240,11 @@ func TestEntryRulesAccept(t *testing.T) {
 			},
 		},
 		{
-			name: "options of one choice share keys freely — they are alternatives",
+			name: "options of one choice share flags freely — they are alternatives",
 			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\n" +
 				"[[choice]]\nname = \"ctx\"\n" +
-				"  [[choice.option]]\n  name = \"short\"\n  args = [\"ctx-size = 8192\"]\n" +
-				"  [[choice.option]]\n  name = \"long\"\n  args = [\"ctx-size = 65536\"]\n",
+				"  [[choice.option]]\n  name = \"short\"\n  args = [\"--ctx-size\", \"8192\"]\n" +
+				"  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n",
 			want: Entry{
 				ID:      "demo",
 				Backend: BackendLlama,
@@ -261,16 +255,16 @@ func TestEntryRulesAccept(t *testing.T) {
 				Choices: []Choice{{
 					Name: "ctx",
 					Options: []ChoiceOption{
-						{Name: "short", Args: []Arg{{Key: "ctx-size", Value: "8192"}}},
-						{Name: "long", Args: []Arg{{Key: "ctx-size", Value: "65536"}}},
+						{Name: "short", Args: []string{"--ctx-size", "8192"}},
+						{Name: "long", Args: []string{"--ctx-size", "65536"}},
 					},
 				}},
 			},
 		},
 		{
-			name: "the same value under two keys is nothing to collide over; only keys are compared",
-			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"seed = -1\"]\n" +
-				"[[choice]]\nname = \"sampling\"\n  [[choice.option]]\n  name = \"greedy\"\n  args = [\"top-k = -1\"]\n",
+			name: "the same value in two axes is not a collision; only flags are compared",
+			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--seed\", \"-1\"]\n" +
+				"[[choice]]\nname = \"sampling\"\n  [[choice.option]]\n  name = \"greedy\"\n  args = [\"--top-k\", \"-1\"]\n",
 			want: Entry{
 				ID:      "demo",
 				Backend: BackendLlama,
@@ -278,17 +272,17 @@ func TestEntryRulesAccept(t *testing.T) {
 				Port:    8080,
 				Host:    "0.0.0.0",
 				Name:    "demo",
-				Args:    []Arg{{Key: "seed", Value: "-1"}},
+				Args:    []string{"--seed", "-1"},
 				Choices: []Choice{{
 					Name:    "sampling",
-					Options: []ChoiceOption{{Name: "greedy", Args: []Arg{{Key: "top-k", Value: "-1"}}}},
+					Options: []ChoiceOption{{Name: "greedy", Args: []string{"--top-k", "-1"}}},
 				}},
 			},
 		},
 		{
-			name: "an option may set a key the entry sets: that is the override it is for",
-			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"ctx-size = 16384\"]\n" +
-				"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"ctx-size = 65536\"]\n",
+			name: "an option may set a flag the entry sets: that is the override it is for",
+			entry: "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--ctx-size\", \"16384\"]\n" +
+				"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n",
 			want: Entry{
 				ID:      "demo",
 				Backend: BackendLlama,
@@ -296,10 +290,10 @@ func TestEntryRulesAccept(t *testing.T) {
 				Port:    8080,
 				Host:    "0.0.0.0",
 				Name:    "demo",
-				Args:    []Arg{{Key: "ctx-size", Value: "16384"}},
+				Args:    []string{"--ctx-size", "16384"},
 				Choices: []Choice{{
 					Name:    "ctx",
-					Options: []ChoiceOption{{Name: "long", Args: []Arg{{Key: "ctx-size", Value: "65536"}}}},
+					Options: []ChoiceOption{{Name: "long", Args: []string{"--ctx-size", "65536"}}},
 				}},
 			},
 		},
@@ -409,67 +403,47 @@ func TestEntryRulesReject(t *testing.T) {
 		},
 		{
 			name:    "args must be a list",
-			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = \"ctx-size = 16384\"\n",
+			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = \"--ctx-size 16384\"\n",
 			wantKey: "args",
 		},
 		{
 			name:    "args elements must be strings",
-			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"ctx-size = 16384\", 16384]\n",
+			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--ctx-size\", 16384]\n",
 			wantKey: "args",
 		},
 		{
-			name:    "an args element that names no key is not a line cria can read",
-			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--ctx-size\", \"16384\"]\n",
+			name:    "args may not restate -hf",
+			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"-hf\", \"other/repo\"]\n",
 			wantKey: "args",
 		},
 		{
-			name:    "a key written as a flag is refused, dashes and all",
-			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--ctx-size = 16384\"]\n",
+			name:    "args may not restate --model",
+			entry:   "backend = \"mlx\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--model\", \"other/repo\"]\n",
 			wantKey: "args",
 		},
 		{
-			name:    "a key written as a flag is refused in the --flag=value form too",
-			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--ctx-size=16384\"]\n",
+			name:    "args may not restate --port",
+			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--port\", \"9090\"]\n",
 			wantKey: "args",
 		},
 		{
-			name:    "a key outside the charset is a mistake, not a flag with a strange name",
-			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"ctx size = 16384\"]\n",
+			name:    "args may not restate --host",
+			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--host\", \"127.0.0.1\"]\n",
 			wantKey: "args",
 		},
 		{
-			name:    "a key with no value behind it says nothing",
-			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"jinja =\"]\n",
+			name:    "args may not restate a composed flag in --flag=value form",
+			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--port=9090\"]\n",
 			wantKey: "args",
 		},
 		{
-			name:    "one args list may not set a key twice",
-			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"ctx-size = 16384\", \"ctx-size = 32768\"]\n",
+			name:    "args may not restate --model in --flag=value form",
+			entry:   "backend = \"mlx\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--model=other/repo\"]\n",
 			wantKey: "args",
 		},
 		{
-			name:    "args may not restate hf",
-			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"hf = other/repo\"]\n",
-			wantKey: "args",
-		},
-		{
-			name:    "args may not restate model",
-			entry:   "backend = \"mlx\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"model = other/repo\"]\n",
-			wantKey: "args",
-		},
-		{
-			name:    "args may not restate port",
-			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"port = 9090\"]\n",
-			wantKey: "args",
-		},
-		{
-			name:    "args may not restate host",
-			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"host = 127.0.0.1\"]\n",
-			wantKey: "args",
-		},
-		{
-			name:    "the model key of the other backend is refused too, on either backend",
-			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"model = other/repo\"]\n",
+			name:    "the model flag of the other backend is refused too, on either backend",
+			entry:   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--model\", \"other/repo\"]\n",
 			wantKey: "args",
 		},
 		{
@@ -568,19 +542,14 @@ func TestEntryRulesReject(t *testing.T) {
 			wantKey: "choice.option.repo",
 		},
 		{
-			name:    "an option may not restate a key cria composes",
-			entry:   entryWith("[[choice]]\nname = \"quant\"\n  [[choice.option]]\n  name = \"q4\"\n  args = [\"port = 9090\"]\n"),
+			name:    "an option may not restate a flag cria composes",
+			entry:   entryWith("[[choice]]\nname = \"quant\"\n  [[choice.option]]\n  name = \"q4\"\n  args = [\"--port\", \"9090\"]\n"),
 			wantKey: "choice.option.args",
 		},
 		{
-			name:    "an option's args are held to the same shape as the entry's",
-			entry:   entryWith("[[choice]]\nname = \"quant\"\n  [[choice.option]]\n  name = \"q4\"\n  args = [\"--n-cpu-moe\", \"24\"]\n"),
-			wantKey: "choice.option.args",
-		},
-		{
-			name: "options of two different choices may not set the same key",
-			entry: entryWith("[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"ctx-size = 65536\"]\n" +
-				"[[choice]]\nname = \"offload\"\n  [[choice.option]]\n  name = \"cpu\"\n  args = [\"ctx-size = 8192\"]\n"),
+			name: "options of two different choices may not set the same flag",
+			entry: entryWith("[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n" +
+				"[[choice]]\nname = \"offload\"\n  [[choice.option]]\n  name = \"cpu\"\n  args = [\"--ctx-size\", \"8192\"]\n"),
 			wantKey: "choice.option.args",
 		},
 	}
@@ -602,66 +571,69 @@ func TestEntryRulesReject(t *testing.T) {
 	}
 }
 
-// A collision is about two places at once, so the refusal names both: the key
+// A collision is about two places at once, so the refusal names both: the flag
 // and each option that sets it, which is what the author has to go and edit.
-func TestKeyCollisionNamesBothOptions(t *testing.T) {
-	entry := entryWith("[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"ctx-size = 65536\"]\n" +
-		"[[choice]]\nname = \"offload\"\n  [[choice.option]]\n  name = \"cpu\"\n  args = [\"ctx-size = 8192\"]\n")
+// The comparison is by flag token, so the two spellings of one flag are the
+// same flag.
+func TestFlagCollisionNamesBothOptions(t *testing.T) {
+	entry := entryWith("[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n" +
+		"[[choice]]\nname = \"offload\"\n  [[choice.option]]\n  name = \"cpu\"\n  args = [\"--ctx-size=8192\"]\n")
 
 	loaded, err := loadOne(t, "", entry)
 	if err == nil {
 		t.Fatalf("entry was accepted as %+v, want the collision refused", loaded)
 	}
-	for _, want := range []string{"ctx-size", `option "long" of choice "ctx"`, `option "cpu" of choice "offload"`} {
+	for _, want := range []string{"--ctx-size", `option "long" of choice "ctx"`, `option "cpu" of choice "offload"`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal is %q, want it to name %s", err, want)
 		}
 	}
 }
 
-// A key set twice inside one list is refused where it is written, and the
-// refusal names the key: within one level there is no more specific side to
-// take, which is what makes it a mistake rather than an override.
-func TestOneListMayNotSetAKeyTwice(t *testing.T) {
-	entry, err := loadOne(t, "", "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\n"+
-		"args = [\"ctx-size = 16384\", \"ctx-size = 32768\"]\n")
-	if err == nil {
-		t.Fatalf("entry was accepted as %+v, want the repeated key refused", entry)
+// The levels an author is entitled to override load without a word. A flag the
+// entry's own args set and a pick replaces is the whole point of the levels, and
+// so is a flag the engine file sets and the entry replaces — the refusal is for
+// two options that are picked at once, and for nothing else
+// (docs/specs/CONFIG.md).
+func TestOverridingALevelIsNotACollision(t *testing.T) {
+	trees := []struct {
+		name  string
+		files map[string]string
+	}{
+		{
+			name: "an option over the entry's own args",
+			files: map[string]string{
+				"models/demo.toml": "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--ctx-size\", \"16384\"]\n" +
+					"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n",
+			},
+		},
+		{
+			name: "the entry over its engine file",
+			files: map[string]string{
+				"engines/llama.toml": "args = [\"-ngl\", \"99\"]\n",
+				"models/demo.toml":   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"-ngl\", \"40\"]\n",
+			},
+		},
+		{
+			name: "the same flag with the same value, which is still two levels",
+			files: map[string]string{
+				"engines/llama.toml": "args = [\"--ctx-size\", \"16384\"]\n",
+				"models/demo.toml":   "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--ctx-size\", \"16384\"]\n",
+			},
+		},
 	}
-	for _, want := range []string{"ctx-size", "twice"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the refusal is %q, want it to name %s", err, want)
-		}
-	}
-}
 
-// The shape that is gone is refused with the one edit that fixes it, on every
-// spelling of it — a bare flag, its value on its own, and the two glued
-// together. An author reading the refusal has to be told what to write, not
-// only that this is wrong.
-func TestTheOldArgsShapeIsRefusedWithTheEditThatFixesIt(t *testing.T) {
-	for _, args := range []string{
-		`["--ctx-size", "16384"]`,
-		`["--jinja"]`,
-		`["--ctx-size=16384"]`,
-		`["-ngl", "99"]`,
-	} {
-		t.Run(args, func(t *testing.T) {
-			entry, err := loadOne(t, "", "backend = \"llama\"\nrepo = \"org/name\"\nport = 8080\nargs = "+args+"\n")
-			if err == nil {
-				t.Fatalf("entry was accepted as %+v, want the old args shape refused", entry)
+	for _, tree := range trees {
+		t.Run(tree.name, func(t *testing.T) {
+			loaded, err := Load(writeTree(t, tree.files))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
 			}
-			var keyErr *KeyError
-			if !errors.As(err, &keyErr) {
-				t.Fatalf("error is %T (%v), want a *KeyError naming args", err, err)
+			if len(loaded.Broken) != 0 {
+				t.Fatalf("the entry was refused: %v", loaded.Broken[0].Err)
 			}
-			if keyErr.Key != "args" {
-				t.Errorf("error names key %q, want %q", keyErr.Key, "args")
-			}
-			for _, want := range []string{`write args as "key = value" lines`, "cria docs"} {
-				if !strings.Contains(err.Error(), want) {
-					t.Errorf("the refusal is %q, want it to say %s", err, want)
-				}
+			if len(loaded.Entries) != 1 {
+				t.Fatalf("the tree loaded %d entries, want one", len(loaded.Entries))
 			}
 		})
 	}
@@ -841,21 +813,21 @@ func TestSchemaDefinitionsCarryTheirDocs(t *testing.T) {
 	t.Run("config.toml", func(t *testing.T) { walk(t, treeSchema, "") })
 }
 
-// Every backend the tree may declare answers for the key cria composes its model
-// reference with. Without one, an args list could restate the flag cria builds
-// itself and silently win the command line (schema.go, composedKeys).
-func TestEveryBackendNamesItsModelKey(t *testing.T) {
+// Every backend the tree may declare answers for the flag cria composes its
+// model reference under. Without one, an args list could restate the flag cria
+// builds itself and silently win the command line (schema.go, composedFlags).
+func TestEveryBackendNamesItsModelFlag(t *testing.T) {
 	for _, backend := range Backends() {
-		key := ModelKey(backend)
-		if key == "" {
-			t.Errorf("backend %q names no model key, so args restating it would not be refused", backend)
+		flag := ModelFlag(backend)
+		if flag == "" {
+			t.Errorf("backend %q names no model flag, so args restating it would not be refused", backend)
 		}
-		if strings.HasPrefix(key, "-") {
-			t.Errorf("backend %q spells its model key %q; a key is the flag without its dashes", backend, key)
+		if !strings.HasPrefix(flag, "-") {
+			t.Errorf("backend %q spells its model flag %q; it is the flag a command line carries", backend, flag)
 		}
 	}
-	if key := ModelKey("nothing-serves-this"); key != "" {
-		t.Errorf("a backend the tree does not declare answered with model key %q", key)
+	if flag := ModelFlag("nothing-serves-this"); flag != "" {
+		t.Errorf("a backend the tree does not declare answered with model flag %q", flag)
 	}
 }
 
@@ -866,7 +838,7 @@ func TestKindNames(t *testing.T) {
 	}{
 		{kindString, "string"},
 		{kindInteger, "integer"},
-		{kindArgs, "string[]"},
+		{kindStringList, "string[]"},
 		{kindTable, "table"},
 		{kindTableArray, "table[]"},
 	}

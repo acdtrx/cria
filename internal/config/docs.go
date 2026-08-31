@@ -30,7 +30,7 @@ func Docs() string {
 		keyTable(entrySchema),
 		keyTable(engineSchema),
 		keyTable(treeSchema),
-		composedKeysNote(),
+		composedFlagsNote(),
 		entryExamples(),
 		engineExamples(),
 		exampleSettings(),
@@ -64,15 +64,15 @@ const (
 	exampleEngineSection = "EXAMPLE — engines/%s.toml\n\n%s\n"
 )
 
-// composedKeysNote lists the args keys cria composes itself, each with the
-// backend it belongs to. It reads the same registry the parser refuses them
-// from, so the page cannot name a different set than the one a file is held to.
-func composedKeysNote() string {
+// composedFlagsNote lists the flags cria composes itself, each with the backend
+// it belongs to. It reads the same registry the parser refuses them from, so the
+// page cannot name a different set than the one a file is held to.
+func composedFlagsNote() string {
 	named := make([]string, 0, len(backends)+2)
 	for _, backend := range backends {
-		named = append(named, fmt.Sprintf("%s (%s)", backend.modelKey, backend.id))
+		named = append(named, fmt.Sprintf("%s (%s)", backend.modelFlag, backend.id))
 	}
-	return strings.Join(append(named, "host", "port"), ", ")
+	return strings.Join(append(named, "--host", "--port"), ", ")
 }
 
 const docsPage = `cria config — the tree at ~/.config/cria
@@ -106,31 +106,33 @@ ENGINE KEYS — engines/<engine>.toml
 TREE KEYS — config.toml
 
 %s
-ARGS ARE KEYS
+ARGS ARE THE SERVER'S OWN FLAGS
 
-  - One element of an args list is one flag: "key = value", where the key is the
-    server's own long option written without its dashes. cria splits on the first
-    '=' and passes both halves on untouched.
-  - A one-letter key is spelled with one dash and anything longer with two, so
-    write the long option: "gpu-layers = 99" rather than the "-ngl" alias, which
-    would reach the server as "--ngl" and be refused by name at startup.
-  - "key = true" is a flag that takes no value. Every other value is passed
-    exactly as written, so a flag with an off switch takes the word the server
-    itself takes for it: "flash-attn = off".
-  - Write the list one line to a key when a value deserves a comment:
+  - An args list is the command line the server takes, token for token: what you
+    would type after the program name, as TOML strings. Copy the flags out of the
+    server's own --help — cria reads none of them and reformats nothing.
+  - Write one flag to a line when a value deserves a comment:
 
       args = [
+        "-ngl", "99",
         # 262144 tokens, the whole window for a single slot
-        "c = 262144",
-        "parallel = 1",
+        "-c", "262144",
+        "--jinja",
       ]
 
-  - One list may not set a key twice. Across levels the same key is an override
-    and the more specific level wins: engines/<engine>.toml first, then the
-    entry, then the options its picks land on. Two options of different choices
-    may not set one key — both are picked at once, so there is no winner.
+  - Three levels compose into one command line, least specific first:
+    engines/<engine>.toml, then the entry, then the options its picks land on. A
+    flag written at a more specific level replaces every occurrence of it in the
+    levels below and keeps the place of the first one, so an override changes
+    what is passed and not the order the files read in.
+  - A flag takes the value tokens that follow it with it: overriding "-c 262144"
+    with "-c 65536" replaces both tokens. Passing one flag twice inside one list
+    is yours to mean — cria hands the list on as written.
+  - Two options of different choices may not set the same flag: both are picked
+    at once, so there is no winner. Options of one choice share flags freely —
+    only one of them is ever picked.
   - cria composes the model reference, the host and the port itself from the keys
-    above, so args may not set them: %s.
+    above, so args may not restate them: %s.
 
 HOW THE TREE IS READ
 
@@ -139,9 +141,9 @@ HOW THE TREE IS READ
   - An entry file cria refuses disables only itself; the report names the file and
     the offending key. config.toml and the engine files are read by every entry
     they govern, so a broken one is reported and nothing loads until it is fixed.
-  - Everything a server takes beyond the composed keys belongs in args. cria types
-    no server flags of its own, so read the server's own --help for what goes
-    there.
+  - Everything a server takes beyond the composed flags belongs in args, passed
+    verbatim. cria types no server flags of its own, so read the server's own
+    --help for what goes there.
 
 %s%sEXAMPLE — config.toml
 

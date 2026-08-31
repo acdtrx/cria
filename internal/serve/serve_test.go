@@ -179,7 +179,7 @@ func llamaEntry() config.Entry {
 		Host:    "0.0.0.0",
 		Port:    8080,
 		Name:    "Qwen3 30B",
-		Args:    []config.Arg{{Key: "ctx-size", Value: "16384"}},
+		Args:    []string{"--ctx-size", "16384"},
 	}
 }
 
@@ -192,11 +192,11 @@ func choicesEntry() config.Entry {
 	entry.Choices = []config.Choice{
 		{Name: "quant", Options: []config.ChoiceOption{
 			{Name: "q4", Quant: "UD-Q4_K_XL"},
-			{Name: "q6", Quant: "UD-Q6_K_XL", Args: []config.Arg{{Key: "n-cpu-moe", Value: "12"}}},
+			{Name: "q6", Quant: "UD-Q6_K_XL", Args: []string{"--n-cpu-moe", "12"}},
 		}},
 		{Name: "context", Options: []config.ChoiceOption{
-			{Name: "short", Args: []config.Arg{{Key: "cache-type-k", Value: "q8_0"}}},
-			{Name: "long", Args: []config.Arg{{Key: "cache-type-k", Value: "f16"}}},
+			{Name: "short", Args: []string{"--cache-type-k", "q8_0"}},
+			{Name: "long", Args: []string{"--cache-type-k", "f16"}},
 		}},
 	}
 	return entry

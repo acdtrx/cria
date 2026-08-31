@@ -101,7 +101,11 @@ Group entries under headings as themes emerge.
   global, they were engine-scoped, which also settles that entry's
   per-backend-scoping question.
   **Args become ini-style keys** (`key = value`, upstream's own preset
-  spelling): key→argv is mechanical without arity knowledge (`c = 65536` →
+  spelling) — **reversed 2026-08-31 by the user; the tree's args stay
+  verbatim argv tokens** and the preset is derived by dash-stripping flag
+  groups at composition time (reasoning: `docs/plans/engines/OVERVIEW.md`
+  ruling 1, `docs/specs/CONFIG.md`). What was argued for it: key→argv is
+  mechanical without arity knowledge (`c = 65536` →
   `-c 65536`, `jinja = true` → `--jinja`), composition is order-independent
   with exact key collisions (retiring the token heuristics), override
   precedence is upstream's documented model-section > engine `[*]` rather

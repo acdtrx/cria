@@ -52,6 +52,28 @@ func TestTheEnginesAreExactlyTheBackendsTheTreeMayDeclare(t *testing.T) {
 	}
 }
 
+// The flag an args list may not restate is the flag its engine actually
+// composes. config declares it — it is what a file is refused against — and each
+// engine passes the model under it; this is the one place both are in view, so
+// the two cannot drift into an args flag that silently overrides the composed
+// model reference.
+func TestEveryEnginesModelFlagIsTheFlagTheTreeRefuses(t *testing.T) {
+	launch := config.Launch{Repo: "org/repo", Quant: "Q4"}
+
+	for _, engine := range All() {
+		t.Run(string(engine.ID()), func(t *testing.T) {
+			args := engine.ModelArgs(launch)
+			if len(args) == 0 {
+				t.Fatal("the engine names no model on the command line it composes")
+			}
+			if flag, refused := args[0], config.ModelFlag(engine.ID()); flag != refused {
+				t.Errorf("the engine composes %q while the tree refuses %q; args may set %q and win the command line",
+					flag, refused, flag)
+			}
+		})
+	}
+}
+
 // A backend nothing claims is refused, and the refusal names the ones that
 // exist. The default it must never take is another engine's answers: a stranger
 // inheriting llama's endpoints and warm rule would show up as a server that

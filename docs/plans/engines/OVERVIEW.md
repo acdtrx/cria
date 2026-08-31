@@ -4,7 +4,7 @@ Cria stops being two backends if'd through the code and becomes what it
 already is in practice: a llama-and-mlx runner with per-engine knowledge —
 now given a named home. One Engine interface, three implementations (llama,
 mlx, router), engine config files beside shared model profiles, and profile
-args as ini-style keys the engines compose deterministically.
+args that stay the server's own flags, composed across those levels.
 
 Origin: `docs/BACKLOG.md`, Engines — direction, build shape, refactor
 discipline and probe findings all recorded there (2026-08-27..31); the entry
@@ -37,10 +37,11 @@ findings bind this plan and are restated where they decide something.
   replacement. Contract tests keep the full never-delete protection.
 - **The cut** (2026-08-27): model profiles shared verbatim between llama and
   router engines; separate router profiles rejected (fork-and-drift).
-- **Ini-style keys** (2026-08-27): key=value args; key→argv is mechanical;
-  composition order-independent with exact key collisions; precedence is
-  upstream's own (model section > engine `[*]`), argv composition and preset
-  composition are two spellings of one merge.
+- **Ini-style keys** (2026-08-27) — **reversed 2026-08-31, see ruling 1**. What
+  survives of it: the router's preset is still upstream's ini, and precedence
+  is still least-specific-first across engine → entry → picks. What is gone:
+  the tree's args are argv tokens again, and there is no key dialect to
+  compose from.
 
 ## Probe findings that decide things (2026-08-31, build 10450)
 
@@ -61,8 +62,23 @@ findings bind this plan and are restated where they decide something.
 
 ## Rulings settled at plan review (2026-08-31, user)
 
-1. **TOML stays the tree's syntax**; args become key=value inside it, and
-   the upstream ini is composed output only — never the tree's format.
+1. **TOML stays the tree's syntax, and args stay verbatim argv tokens**
+   (amended 2026-08-31, user, reversing the key=value shape ruled the same
+   day at plan review and built in STEP-5). `args = ["-ngl", "99", "-fa",
+   "on", "-c", "262144", …]` — exactly what the server binary takes, copied
+   in and out without translation. Reasons on record: `"key = value"` is a
+   third dialect only cria speaks, it forces author-side translation of every
+   profile, it bans the short aliases the real tree uses (`-ngl`, `-fa`) and
+   it makes a repeated flag inexpressible. The router preset — the whole
+   reason the key shape was attractive — needs nothing from the tree:
+   upstream canonicalizes its own aliases (probe-proven 2026-08-31: `ngl`,
+   `fa`, `c`, `temp`, `ctk` all echo back long), so a preset line is a flag
+   group with its dashes stripped, derived at composition time in phase 3.
+   The upstream ini remains composed output only — never the tree's format.
+   Consequences: cross-level override works at **flag-group** granularity
+   (a flag plus the tokens after it), repetition inside one list stays legal,
+   and the cross-part collision refusal narrows to options of two different
+   choices. STEP-6 shrinks to an extraction session.
 2. **Router inclusion lives in router-scoped state**, organized as a
    **subfolder per engine** under the state dir: the router's folder holds
    which profiles are active under it and their router picks, which may
@@ -75,9 +91,10 @@ findings bind this plan and are restated where they decide something.
    keeps cria's flag-agnosticism total; `host`/`port` remain the only
    schema-composed fields. The auto-parallel probe wrinkle is thereby
    informational for profile authors, not load-bearing for cria.
-4. **Repeatable flags are inexpressible as keys** — accepted as a limit
-   (upstream's preset shares it) unless STEP-6's migration survey finds a
-   real profile needing repetition.
+4. **Repeatable flags are expressible again** (amended 2026-08-31 with
+   ruling 1): a list is a command line, so a flag written twice is passed
+   twice. The limit this ruling was about belongs to the router's preset
+   alone, and only phase 3 has to answer for it.
 
 ## Scope
 
@@ -85,14 +102,15 @@ findings bind this plan and are restated where they decide something.
   implementations. Serve, hubcache/hubapi, cli and tui consume engines
   through it; the import graph stays acyclic (engine imports config+tools,
   nothing imports back into it).
-- `internal/config`: ini-keyed args/options, engine config files, the
-  key-exact collision rule, context/parallel schema fields (per ruling).
+- `internal/config`: engine config files, the flag-group merge across the
+  three levels, the narrowed collision rule (per ruling 1).
 - `internal/serve`: lifecycle generalized over engines; router process +
   child records/status/phases.
 - `internal/tui` + `internal/cli`: engine toggle, router view, surfaces.
 - `docs/specs/`: CONFIG.md and SERVE.md updated in the same edits that
   change their contracts; ARCHITECTURE.md when the module shape lands.
-- The user's real tree: migrated by hand in one session (STEP-6).
+- The user's real tree: the machine-wide flags extracted by hand in one
+  session (STEP-6).
 
 ## Out of scope
 
@@ -105,9 +123,10 @@ findings bind this plan and are restated where they decide something.
 
 ## Constraints & risks
 
-- **Biggest schema change since choices.** Feature-building mode: no
-  dual-read of the old args shape — old profiles fail loudly with the
-  manual fix named; the migration session (STEP-6) is part of the plan.
+- **The tree's args shape is unchanged** after ruling 1's reversal, so no
+  profile has to be rewritten to keep loading. STEP-6 is an extraction
+  session, not a migration: what moves to `engines/<engine>.toml` moves
+  by hand, with the argv proven identical.
 - **The refactor discipline binds phase 1** (and its spirit binds the rest).
 - Upstream context semantics are moving (unified KV, auto-parallel): the
   engine module contains the blast radius; STEP-4 verifies before STEP-5
@@ -138,11 +157,12 @@ mlx only, suite validates the extraction).
 - STEP-4 — settle by experiment: the `alias` lever, one confined live
   probe; outcome recorded as a ruling. (The context experiment was dropped
   2026-08-31 with ruling 3 — passthrough needs no emit rule verified.)
-- STEP-5 — ini-keyed profiles and engine configs: schema, key-exact
-  collisions, upstream precedence; `cria docs` follows by construction;
-  CONFIG.md same-edit.
-- STEP-6 — the migration session: the real tree rewritten (~15 profiles +
-  engines/*.toml), user reviews; live smoke on the dev Mac. Phase end.
+- STEP-5 — engine config files and the three-level merge: verbatim argv
+  args, override by flag group, the narrowed collision rule; `cria docs`
+  follows by construction; CONFIG.md same-edit.
+- STEP-6 — the extraction session: the machine's own flags lifted out of
+  ~15 profiles into engines/*.toml, user reviews; live smoke on the dev
+  Mac. Phase end.
 
 **Phase 3 — the router engine** (steps 7–9).
 
@@ -160,9 +180,9 @@ mlx only, suite validates the extraction).
 - Full suite green at each phase end; phase 1 additionally proves the
   extraction changed no behavior (contract tests untouched and green
   throughout).
-- Phase 2 ends with the real tree migrated and a live smoke: qwen serving
-  from the migrated profile with identical composed argv (diffed against
-  pre-migration).
+- Phase 2 ends with the real tree's machine-wide flags extracted and a live
+  smoke: qwen serving from the edited profile with identical composed argv
+  (diffed against the line captured before the edit).
 - Phase 3 ends with the real goal: pi-llama-cpp driving a cria-managed
   router — models listed, loaded, swapped by request — while `cria` shows
   the router's state; llama and mlx engines still serving their entries

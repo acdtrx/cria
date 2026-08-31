@@ -16,7 +16,7 @@ type kind int
 const (
 	kindString kind = iota
 	kindInteger
-	kindArgs
+	kindStringList
 	kindTable
 	kindTableArray
 )
@@ -28,7 +28,7 @@ func (k kind) String() string {
 		return "string"
 	case kindInteger:
 		return "integer"
-	case kindArgs:
+	case kindStringList:
 		return "string[]"
 	case kindTable:
 		return "table"
@@ -187,18 +187,18 @@ var entrySchema = schema{
 	},
 	{
 		name:  "args",
-		kind:  kindArgs,
-		rules: `what this model is served with, one "key = value" line per flag: the server's own long option written without its dashes, and the value it takes. They override the keys engines/<backend>.toml sets for every entry`,
+		kind:  kindStringList,
+		rules: "what this model is served with: the server's own flags, token for token, passed verbatim. They override the flags engines/<backend>.toml sets for every entry, and cria composes the model, port and host flags itself",
 		examples: map[Backend]string{
-			BackendLlama: `["ctx-size = 16384", "jinja = true"]`,
-			BackendMLX:   `["max-tokens = 32768"]`,
+			BackendLlama: `["--ctx-size", "16384", "--jinja"]`,
+			BackendMLX:   `["--max-tokens", "32768"]`,
 		},
 		check: checkArgs,
 	},
 	{
 		name:  "choice",
 		kind:  kindTableArray,
-		rules: "a pick-one axis this entry varies on: the [[choice.option]] tables under it are the picks, and cria folds the picked one into the launch without reading what its keys mean — so keys that must vary together belong in the same option",
+		rules: "a pick-one axis this entry varies on: the [[choice.option]] tables under it are the picks, and cria folds the picked one into the launch without reading its flags — so flags that must vary together belong in the same option",
 		keys:  choiceSchema,
 	},
 }
@@ -259,11 +259,11 @@ var choiceOptionSchema = schema{
 	},
 	{
 		name:  "args",
-		kind:  kindArgs,
-		rules: "merged over the entry's args when this option is picked, so a key set here is what that pick changes; another choice's options may not set the same key, since those two compose into one launch",
+		kind:  kindStringList,
+		rules: "merged over the entry's args when this option is picked, so a flag set here is what that pick changes; another choice's options may not set the same flag, since those two compose into one launch",
 		examples: map[Backend]string{
-			BackendLlama: `["n-cpu-moe = 24"]`,
-			BackendMLX:   `["temp = 0.7"]`,
+			BackendLlama: `["--n-cpu-moe", "24"]`,
+			BackendMLX:   `["--temp", "0.7"]`,
 		},
 		check: checkArgs,
 	},
@@ -275,11 +275,11 @@ var choiceOptionSchema = schema{
 var engineSchema = schema{
 	{
 		name:  "args",
-		kind:  kindArgs,
-		rules: `what every entry this engine serves starts from, one "key = value" line per flag — the machine's own defaults, not the model's; an entry that sets the same key overrides it`,
+		kind:  kindStringList,
+		rules: "what every entry this engine serves starts from — the machine's own flags, not the model's; an entry that sets the same flag overrides it",
 		examples: map[Backend]string{
-			BackendLlama: `["gpu-layers = 99", "flash-attn = on"]`,
-			BackendMLX:   `["log-level = INFO"]`,
+			BackendLlama: `["-ngl", "99", "-fa", "on"]`,
+			BackendMLX:   `["--log-level", "INFO"]`,
 		},
 		check: checkArgs,
 	},
@@ -332,18 +332,18 @@ var treeSchema = schema{
 	},
 }
 
-// composedKeys are the args keys cria builds itself out of an entry's own keys
-// (docs/specs/CONFIG.md): the bind address, the port, and the key each backend's
-// model reference is spelled with. An args list restating one of them would
-// fight the composed command line, so it is refused instead of silently
-// overriding — and every backend's model key is refused under every backend,
-// since a key one server does not take is a mistake either way.
-func composedKeys() []string {
-	keys := make([]string, 0, len(backends)+2)
+// composedFlags are the flags cria builds itself out of an entry's own keys
+// (docs/specs/CONFIG.md): the bind address, the port, and the flag each
+// backend's model reference is passed under. An args list restating one of them
+// would fight the composed command line, so it is refused instead of silently
+// overriding — and every backend's model flag is refused under every backend,
+// since a flag one server does not take is a mistake either way.
+func composedFlags() []string {
+	flags := make([]string, 0, len(backends)+2)
 	for _, backend := range backends {
-		keys = append(keys, backend.modelKey)
+		flags = append(flags, backend.modelFlag)
 	}
-	return append(keys, "host", "port")
+	return append(flags, "--host", "--port")
 }
 
 // check validates a parsed TOML table against the schema. An unknown key, a wrong
@@ -438,7 +438,7 @@ func (k kind) match(value any) error {
 		if _, ok := value.(int64); !ok {
 			return typeMismatch(k, value)
 		}
-	case kindArgs:
+	case kindStringList:
 		list, ok := value.([]any)
 		if !ok {
 			return typeMismatch(k, value)
@@ -568,64 +568,22 @@ func checkAbsPath(value any) error {
 	return nil
 }
 
-// argsShapeFix is the one edit that turns a refused args list into a valid one.
-// It rides every refusal parseArg makes, because each of them is a line written
-// in some other shape than the one this schema takes.
-const argsShapeFix = `write args as "key = value" lines — the server's own long option without its dashes, then the value it takes (see cria docs)`
-
-// checkArgs holds the args contract: every element is one key and the value it
-// carries, no key twice, and none of the keys cria composes itself. The rules
-// that need more than one args list in view — a key an option and a choice both
-// set, a key an entry overrides — live in load.go and resolve.go.
+// checkArgs refuses args that restate a flag cria composes itself, in both the
+// separate-value and --flag=value spellings. Everything else in a list is the
+// server's business: the rules that need more than one list in view — a flag two
+// axes both set — live in load.go.
 func checkArgs(value any) error {
-	composed := composedKeys()
-	seen := map[string]bool{}
+	composed := composedFlags()
 	for i, element := range value.([]any) {
-		arg, err := parseArg(element.(string))
-		if err != nil {
-			return fmt.Errorf("element %d: %w", i, err)
+		flag, ok := flagToken(element.(string))
+		if !ok {
+			continue
 		}
-		if seen[arg.Key] {
-			return fmt.Errorf("element %d: this list sets %q twice, and one key carries one value; a key is overridden from another level, never from the same one", i, arg.Key)
-		}
-		seen[arg.Key] = true
-		if slices.Contains(composed, arg.Key) {
-			return fmt.Errorf("element %d: cria composes %s itself from this entry's keys; remove it from args", i, arg.Key)
+		if slices.Contains(composed, flag) {
+			return fmt.Errorf("element %d: cria composes %s itself from this entry's keys; remove it from args", i, flag)
 		}
 	}
 	return nil
-}
-
-// parseArg reads one args element: the key before the first '=' and the value
-// after it, each trimmed of the spaces around it. The value is otherwise left
-// exactly as written — a value holding an '=' of its own keeps it, and nothing
-// about it is interpreted here (docs/specs/CONFIG.md).
-func parseArg(element string) (Arg, error) {
-	name, value, split := strings.Cut(element, "=")
-	if !split {
-		return Arg{}, fmt.Errorf("%q carries no '=', so it names no key; %s", element, argsShapeFix)
-	}
-	arg := Arg{Key: strings.TrimSpace(name), Value: strings.TrimSpace(value)}
-	if strings.HasPrefix(arg.Key, "-") {
-		return Arg{}, fmt.Errorf("%q is a flag, not a key; %s", arg.Key, argsShapeFix)
-	}
-	if !isName(arg.Key) {
-		return Arg{}, fmt.Errorf("%q is not a key: a key holds letters, digits, '-', '_' and '.'; %s", arg.Key, argsShapeFix)
-	}
-	if arg.Value == "" {
-		return Arg{}, fmt.Errorf("key %q carries no value; a flag that takes none is written %q", arg.Key, arg.Key+" = true")
-	}
-	return arg, nil
-}
-
-// argKeys lists the keys an args list sets, for the rules that compare two lists
-// (docs/specs/CONFIG.md).
-func argKeys(args []Arg) []string {
-	keys := make([]string, 0, len(args))
-	for _, arg := range args {
-		keys = append(keys, arg.Key)
-	}
-	return keys
 }
 
 // isName reports whether s is spelled with the characters cria allows in an entry

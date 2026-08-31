@@ -53,7 +53,7 @@ func TestComposedCommand(t *testing.T) {
 			entry: config.Entry{
 				ID: "qwen-mlx", Backend: config.BackendMLX,
 				Repo: "mlx-community/Qwen3-30B-A3B-4bit", Host: "0.0.0.0", Port: 8080,
-				Args: []config.Arg{{Key: "max-tokens", Value: "4096"}},
+				Args: []string{"--max-tokens", "4096"},
 			},
 			want: []string{
 				"/opt/homebrew/bin/mlx_lm.server",
@@ -112,31 +112,27 @@ func TestComposedCommand(t *testing.T) {
 	}
 }
 
-// A profile written as keys serves the model it served as a list of flags. The
-// argv below is the one the same profile composed when its args were the flags
-// themselves — every token in the order it stood — and a tree written the way
-// the schema takes it now has to reach exactly that command line, or a migrated
-// profile is a differently-served model wearing its name (docs/plans/engines).
+// A real profile's flags reach the server exactly as its files wrote them. The
+// argv below is one the user's own tree serves today, token for token, aliases
+// and all — nothing on it is a spelling cria chose (docs/plans/engines).
 //
-// A key spells one flag, so a line is migrated to the key of the flag it
-// carried: "-c 262144" becomes "c = 262144" and "--gpu-layers 99" becomes
-// "gpu-layers = 99". A short alias of more than one letter has no key of its
-// own, and migrating it to the long option is the one place a token on the line
-// legitimately changes (internal/engine, Flags).
+// The second tree is that same profile with the machine's own flags lifted into
+// engines/llama.toml, one of them (-c) overridden by the entry: extraction moves
+// where a flag is written, never what the server receives. Both trees compose
+// the identical line, which is what makes an extraction safe to do by hand.
 //
-// It goes through the real loader rather than a built entry: the file, the
-// merge and the flag spelling are all part of what has to still add up.
-func TestAProfileWrittenAsKeysComposesTheArgvItComposedAsFlags(t *testing.T) {
+// It goes through the real loader rather than a built entry: the files, the
+// merge and the composition are all part of what has to add up.
+func TestAProfilesArgsReachTheServerVerbatim(t *testing.T) {
 	// llama-server -hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL --host 0.0.0.0
-	//   --port 8080 --gpu-layers 99 --flash-attn on -c 262144 --parallel 1
-	//   --jinja --n-cpu-moe 24
-	composedBefore := []string{
+	//   --port 8080 -ngl 99 -fa on -c 262144 --parallel 1 --jinja --n-cpu-moe 24
+	served := []string{
 		"/opt/homebrew/bin/llama-server",
 		"-hf", "unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL",
 		"--host", "0.0.0.0",
 		"--port", "8080",
-		"--gpu-layers", "99",
-		"--flash-attn", "on",
+		"-ngl", "99",
+		"-fa", "on",
 		"-c", "262144",
 		"--parallel", "1",
 		"--jinja",
@@ -148,50 +144,48 @@ func TestAProfileWrittenAsKeysComposesTheArgvItComposedAsFlags(t *testing.T) {
 		files map[string]string
 	}{
 		{
-			// The profile migrated key for key: every flag it carried is a line of
-			// its own args, in the order it stood on the command line.
-			name: "a profile that kept all its keys",
+			// One file, every flag where the author typed it.
+			name: "a profile that carries all its own flags",
 			files: map[string]string{
 				"models/qwen.toml": `backend = "llama"
 repo = "unsloth/Qwen3-30B-A3B-GGUF"
 quant = "UD-Q4_K_XL"
 port = 8080
 args = [
-  "gpu-layers = 99",
-  "flash-attn = on",
+  "-ngl", "99",
+  "-fa", "on",
   # 262144 tokens, the whole window for a single slot
-  "c = 262144",
-  "parallel = 1",
-  "jinja = true",
+  "-c", "262144",
+  "--parallel", "1",
+  "--jinja",
 ]
 
 [[choice]]
 name = "offload"
   [[choice.option]]
   name = "cpu"
-  args = ["n-cpu-moe = 24"]
+  args = ["--n-cpu-moe", "24"]
 `,
 			},
 		},
 		{
-			// The same profile with the machine's own keys lifted into the engine
-			// file. They compose first, which is where they already stood here —
-			// an extraction that moves a key past another changes the order of the
-			// two and nothing else, since no key is passed twice.
-			name: "a profile whose machine-wide keys moved to the engine file",
+			// The machine's flags in the engine file, including a -c this model
+			// overrides: the entry's value lands where the engine's stood, so the
+			// line reads the same as the flat profile's.
+			name: "a profile whose machine-wide flags moved to the engine file",
 			files: map[string]string{
-				"engines/llama.toml": "args = [\"gpu-layers = 99\", \"flash-attn = on\"]\n",
+				"engines/llama.toml": "args = [\"-ngl\", \"99\", \"-fa\", \"on\", \"-c\", \"8192\"]\n",
 				"models/qwen.toml": `backend = "llama"
 repo = "unsloth/Qwen3-30B-A3B-GGUF"
 quant = "UD-Q4_K_XL"
 port = 8080
-args = ["c = 262144", "parallel = 1", "jinja = true"]
+args = ["-c", "262144", "--parallel", "1", "--jinja"]
 
 [[choice]]
 name = "offload"
   [[choice.option]]
   name = "cpu"
-  args = ["n-cpu-moe = 24"]
+  args = ["--n-cpu-moe", "24"]
 `,
 			},
 		},
@@ -212,14 +206,14 @@ name = "offload"
 
 			tree, err := config.Load(root)
 			if err != nil {
-				t.Fatalf("loading the migrated tree: %v", err)
+				t.Fatalf("loading the tree: %v", err)
 			}
 			if len(tree.Broken) != 0 {
-				t.Fatalf("the migrated profile was refused: %v", tree.Broken[0].Err)
+				t.Fatalf("the profile was refused: %v", tree.Broken[0].Err)
 			}
 			entry, found := tree.Entry("qwen")
 			if !found {
-				t.Fatalf("the migrated tree holds %+v, want the qwen entry", tree.Entries)
+				t.Fatalf("the tree holds %+v, want the qwen entry", tree.Entries)
 			}
 
 			launch, err := config.Resolve(entry, config.DefaultSelection(entry))
@@ -230,8 +224,8 @@ name = "offload"
 			if err != nil {
 				t.Fatalf("composing: %v", err)
 			}
-			if !slices.Equal(got, composedBefore) {
-				t.Errorf("the migrated profile composes\n  %v\nwant the line it composed before\n  %v", got, composedBefore)
+			if !slices.Equal(got, served) {
+				t.Errorf("the profile composes\n  %v\nwant the line its files wrote\n  %v", got, served)
 			}
 		})
 	}

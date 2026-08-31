@@ -14,16 +14,13 @@ type Selection map[string]string
 
 // Launch is what an entry actually runs under one selection: the repo and quant
 // after the picked options replaced them, and the args the levels merged to.
-// cria reads none of those args — it merges them by key and leaves both halves
-// of every line alone (docs/specs/CONFIG.md).
-//
-// The merge is one composition with two spellings: the flags a process engine's
-// command line takes, and the config format a server reads a section from
-// (internal/engine).
+// cria reads none of those args — it pairs each flag with the tokens after it,
+// so a level can replace a flag the level under it set, and passes every token
+// on as written (docs/specs/CONFIG.md).
 type Launch struct {
 	Repo  string
 	Quant string
-	Args  []Arg
+	Args  []string
 }
 
 // DefaultSelection is the entry's config default: each choice's first option
@@ -56,9 +53,9 @@ func Resolve(entry Entry, selection Selection) (Launch, error) {
 
 	launch := Launch{Repo: entry.Repo, Quant: entry.Quant}
 	// The picked options are one level between them: two axes may not set the
-	// same key (load.go, refuseKeyCollisions), so nothing here has to decide
+	// same flag (load.go, refuseFlagCollisions), so nothing here has to decide
 	// which of two picks wins.
-	var picked []Arg
+	var picked []string
 	for _, choice := range entry.Choices {
 		option, err := pickedOption(entry, choice, selection)
 		if err != nil {
@@ -76,31 +73,6 @@ func Resolve(entry Entry, selection Selection) (Launch, error) {
 	}
 	launch.Args = mergeArgs(entry.EngineArgs, entry.Args, picked)
 	return launch, nil
-}
-
-// mergeArgs composes the levels of one launch, least specific first: what the
-// engine serves everything with, what the entry declares, what the picks change
-// (docs/specs/CONFIG.md). A key set at more than one level takes the value of
-// the last level that sets it and keeps the place of the first, so overriding a
-// default changes the value and not the order the file is read in.
-//
-// It builds a new list rather than appending into any level's own slice:
-// appending would write one launch's composition into the loaded tree, and the
-// next launch would read it back.
-func mergeArgs(levels ...[]Arg) []Arg {
-	var merged []Arg
-	at := map[string]int{}
-	for _, level := range levels {
-		for _, arg := range level {
-			if i, set := at[arg.Key]; set {
-				merged[i] = arg
-				continue
-			}
-			at[arg.Key] = len(merged)
-			merged = append(merged, arg)
-		}
-	}
-	return merged
 }
 
 // refuseUnknownPicks answers a selection naming something the entry does not

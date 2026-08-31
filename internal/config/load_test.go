@@ -100,10 +100,10 @@ func TestLoadIsolatesABrokenChoice(t *testing.T) {
 		settingsFile:      "default_port = 8080\n",
 		"models/aaa.toml": "backend = \"llama\"\nrepo = \"org/aaa\"\n",
 		"models/broken.toml": "backend = \"llama\"\nrepo = \"org/broken\"\n" +
-			"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"ctx-size = 65536\"]\n" +
-			"[[choice]]\nname = \"offload\"\n  [[choice.option]]\n  name = \"cpu\"\n  args = [\"ctx-size = 8192\"]\n",
+			"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n" +
+			"[[choice]]\nname = \"offload\"\n  [[choice.option]]\n  name = \"cpu\"\n  args = [\"--ctx-size\", \"8192\"]\n",
 		"models/zzz.toml": "backend = \"llama\"\nrepo = \"org/zzz\"\n" +
-			"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"ctx-size = 65536\"]\n",
+			"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n",
 	})
 
 	tree, err := Load(root)
@@ -136,7 +136,7 @@ func TestLoadIsolatesABrokenChoice(t *testing.T) {
 func TestEngineArgsReachTheEntriesOfTheirOwnBackend(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		settingsFile:         "default_port = 8080\n",
-		"engines/llama.toml": "args = [\"gpu-layers = 99\", \"flash-attn = on\"]\n",
+		"engines/llama.toml": "args = [\"-ngl\", \"99\", \"-fa\", \"on\"]\n",
 		"models/one.toml":    "backend = \"llama\"\nrepo = \"org/one\"\n",
 		"models/two.toml":    "backend = \"mlx\"\nrepo = \"org/two\"\n",
 	})
@@ -150,7 +150,7 @@ func TestEngineArgsReachTheEntriesOfTheirOwnBackend(t *testing.T) {
 	}
 
 	llama, mlx := tree.Entries[0], tree.Entries[1]
-	if want := args("gpu-layers = 99", "flash-attn = on"); !reflect.DeepEqual(llama.EngineArgs, want) {
+	if want := []string{"-ngl", "99", "-fa", "on"}; !reflect.DeepEqual(llama.EngineArgs, want) {
 		t.Errorf("the llama entry carries engine args %v, want %v", llama.EngineArgs, want)
 	}
 	if len(mlx.EngineArgs) != 0 {
@@ -166,7 +166,7 @@ func TestEngineArgsReachTheEntriesOfTheirOwnBackend(t *testing.T) {
 func TestATreeWithoutEngineFilesLoads(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		settingsFile:      "default_port = 8080\n",
-		"models/one.toml": "backend = \"llama\"\nrepo = \"org/one\"\nargs = [\"ctx-size = 16384\"]\n",
+		"models/one.toml": "backend = \"llama\"\nrepo = \"org/one\"\nargs = [\"--ctx-size\", \"16384\"]\n",
 	})
 
 	tree, err := Load(root)
@@ -192,17 +192,17 @@ func TestABrokenEngineFileFailsTheLoad(t *testing.T) {
 	}{
 		{
 			name:    "an unknown key is a typo",
-			file:    "arg = [\"gpu-layers = 99\"]\n",
+			file:    "arg = [\"-ngl\", \"99\"]\n",
 			wantKey: "arg",
 		},
 		{
-			name:    "args is held to the same shape as an entry's",
-			file:    "args = [\"--gpu-layers\", \"99\"]\n",
+			name:    "args must be a list of strings, as everywhere else",
+			file:    "args = [\"-ngl\", 99]\n",
 			wantKey: "args",
 		},
 		{
-			name:    "an engine may not compose what cria composes",
-			file:    "args = [\"port = 9090\"]\n",
+			name:    "an engine's args are held to the entry's rules: it may not compose what cria composes",
+			file:    "args = [\"--port\", \"9090\"]\n",
 			wantKey: "args",
 		},
 	}
@@ -243,7 +243,7 @@ func TestOnlyTheEnginesOwnFilesAreRead(t *testing.T) {
 		settingsFile:         "default_port = 8080\n",
 		"engines/vllm.toml":  "nonsense = true\n",
 		"engines/README.md":  "# what this machine serves each engine with\n",
-		"engines/llama.toml": "args = [\"gpu-layers = 99\"]\n",
+		"engines/llama.toml": "args = [\"-ngl\", \"99\"]\n",
 		"models/one.toml":    "backend = \"llama\"\nrepo = \"org/one\"\n",
 	})
 
@@ -254,7 +254,7 @@ func TestOnlyTheEnginesOwnFilesAreRead(t *testing.T) {
 	if len(tree.Entries) != 1 {
 		t.Fatalf("entries are %+v, want one", tree.Entries)
 	}
-	if want := args("gpu-layers = 99"); !reflect.DeepEqual(tree.Entries[0].EngineArgs, want) {
+	if want := []string{"-ngl", "99"}; !reflect.DeepEqual(tree.Entries[0].EngineArgs, want) {
 		t.Errorf("the entry carries engine args %v, want %v", tree.Entries[0].EngineArgs, want)
 	}
 }

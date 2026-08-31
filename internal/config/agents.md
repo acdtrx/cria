@@ -19,18 +19,15 @@ learn the schema from this page.
   scratch; both end at the same schema.
 - Another model is another entry file. One model run in variations — quants,
   context sizes, feature toggles — declares them as `[[choice]]` axes inside its
-  own file, one axis per thing that varies, and keys that must vary together in
+  own file, one axis per thing that varies, and flags that must vary together in
   the same option.
-- Server flags are keys: each element of `args` is one `"key = value"` line,
-  where the key is the server's own long option written without its dashes
-  (`"ctx-size = 16384"`, `"jinja = true"` for a flag that takes no value). cria
-  splits on the first `=` and passes both halves on untouched, so check the
-  server's own `--help` for what belongs there.
-- cria composes the model reference, the host and the port itself, so `args` may
-  not set those keys.
+- cria composes the model, port and host flags itself. Every other server flag
+  goes in `args`, verbatim — the tokens you would type on the command line;
+  check the server's own `--help` for what belongs there, since cria does not
+  validate them.
 - What this machine serves *every* entry of one backend with goes in
-  `engines/<backend>.toml` — the same `args` shape. An entry's own keys override
-  it, and a picked option's override both.
+  `engines/<backend>.toml` — an `args` list like an entry's. A flag the entry
+  sets overrides it, and a picked option's overrides both.
 - Take parameters from the model provider's own recommendation and note the source
   in a comment.
 - Tree-wide settings live in `config.toml`: `default_port`, `default_host`, and

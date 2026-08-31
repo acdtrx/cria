@@ -223,7 +223,7 @@ func testTree() *config.Tree {
 			{
 				ID: "qwen", Path: root + "/models/qwen.toml", Backend: config.BackendLlama,
 				Repo: "unsloth/Qwen3-30B-A3B-GGUF", Quant: "UD-Q4_K_XL", Port: 8080, Host: "0.0.0.0",
-				Name: "qwen 30b", Args: []config.Arg{{Key: "ctx-size", Value: "16384"}, {Key: "jinja", Value: "true"}},
+				Name: "qwen 30b", Args: []string{"--ctx-size", "16384", "--jinja"},
 			},
 		},
 		Broken: []config.BrokenEntry{{
@@ -249,8 +249,8 @@ func choicesTree() *config.Tree {
 			{Name: "q8", Quant: "UD-Q8_K_XL"},
 		}},
 		{Name: "layout", Options: []config.ChoiceOption{
-			{Name: "coding", Args: []config.Arg{{Key: "parallel", Value: "2"}}},
-			{Name: "chat", Args: []config.Arg{{Key: "parallel", Value: "1"}}},
+			{Name: "coding", Args: []string{"--parallel", "2"}},
+			{Name: "chat", Args: []string{"--parallel", "1"}},
 		}},
 	}
 	return tree

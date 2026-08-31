@@ -48,7 +48,7 @@ carries the reality.
 | `port`    | integer  | optional when `config.toml` sets `default_port`, required otherwise       |
 | `host`    | string   | optional; bind address, default `0.0.0.0` (via `config.toml` `default_host` if set) |
 | `name`    | string   | optional display name; defaults to the id                                 |
-| `args`    | string[] | optional; one `"key = value"` line per flag (below)                       |
+| `args`    | string[] | optional; the server's own flags, token for token, passed verbatim        |
 
 **Args are passthrough, not schema** (settled 2026-08-18). cria types only what it
 must understand to do its job — backend, repo, quant, port — and hands `args` to the
@@ -58,45 +58,43 @@ principle 6). Rejected: typed per-backend keys (`ctx = 16384`, …) — validata
 prettier, but every upstream flag change would need a cria release, and
 unknown-key-is-error would make new upstream flags unusable until then.
 
-**Args are keys, in TOML** (settled 2026-08-31). Each element of an `args` list is
-one `"key = value"` line: the server's own long option written without its dashes,
-and the value it takes. TOML stays the tree's syntax — the servers' own ini config
-format is something cria *composes*, never something a human writes here. The shape
-is an array of strings rather than a `[args]` table because a table loses two things
-the tree needs: the author's order (an array keeps it, and the composed command line
-is diffable against the one before it) and the value as written (a TOML table would
-retype `0.70` or `1e5` and hand the server a number cria reformatted). An array is
-also where a comment can sit beside the value it explains — the reason context-size
-arithmetic is written down at all.
+**Args are verbatim argv tokens** (settled 2026-08-31, user, reversing the
+`"key = value"` shape agreed on 2026-08-27 and built the same day). An `args`
+element is one token of the command line the server takes — exactly what a person
+would type after the program name, copy-pasteable in both directions. Rejected:
+`key = value` lines (the server's long option without its dashes). It read well,
+but it is a third dialect between the file and the server: every profile has to be
+*translated* by its author, short aliases (`-ngl`, `-fa`) become unwritable, and a
+flag passed twice becomes inexpressible — all so cria can hold a shape no server
+speaks. The router's ini preset, the reason the shape was proposed, needs no help
+from the tree: upstream canonicalizes its own alias zoo (probe-proven 2026-08-31 —
+`ngl`, `fa`, `c`, `temp`, `ctk` all echoed back long), so a preset line is a flag
+group with its dashes stripped, derived where the preset is composed.
 
-- The key is spelled without dashes; cria adds them: one dash for a one-letter key,
-  two for anything longer. A short alias of more than one letter (`-ngl`, `-fa`) has
-  no spelling — write the long option (`gpu-layers`, `flash-attn`). cria owns no
-  alias table, so a key the server does not know is refused by the server, by name,
-  at startup.
-- `key = true` is a flag that takes no value. Every other value is passed exactly as
-  written, `false` included — a flag with an off switch takes the word the server
-  itself takes for it (`flash-attn = off`).
-- Values are never reinterpreted: the split is on the first `=`, both halves are
-  trimmed of the spaces around them, and a value keeps any `=` of its own. A value
-  reaches the server as one argument, spaces and all.
-- **One list may not set a key twice** — within one list there is no more specific
-  side to take, so it is a loud load error. Repeating a flag is therefore
-  inexpressible; accepted as a limit (the servers' own config format shares it).
-- The old shape — a token list, `["--ctx-size", "16384"]` — is refused loudly with
-  the one edit that fixes it (feature-building mode: no dual-read).
+- Tokens pass through untouched: nothing is reinterpreted, reformatted or split.
+  A value with spaces is one TOML string and reaches the server as one argument.
+- cria reads exactly one thing in a list: where each flag's tokens begin and end.
+  A **flag group** is a flag token — leading dashes then a letter (amended
+  2026-08-22: `-1` and `-0.5` are values, not flags) — plus the tokens after it
+  until the next flag. It is the unit an override replaces and the unit the TUI
+  draws one to a line, and `config.FlagGroups` is the one implementation of it.
+- **A list may pass one flag twice.** It is a command line, and llama takes
+  repeated flags (`--override-kv`); within one list there is no more specific side
+  to prefer, so the list stands as written.
 - cria composes the model-reference, port and host flags itself (`-hf repo[:quant]` /
-  `--model repo`, `--port N`, `--host A`); `args` restating a cria-owned key (`hf`,
-  `model`, `host`, `port`) is a loud error, never a silent override. Which key spells
-  a backend's model reference is declared in the schema beside the backend set; the
-  engine spells the flag, and `internal/engine`'s test holds the two together.
+  `--model repo`, `--port N`, `--host A`); `args` restating a cria-owned flag
+  (`-hf`, `--model`, `--host`, `--port`, in either the separate-value or
+  `--flag=value` spelling) is a loud error, never a silent override. Which flag
+  carries a backend's model reference is declared in the schema beside the backend
+  set; the engine passes it, and `internal/engine`'s test holds the two together.
 - The bind default is `0.0.0.0` (settled 2026-08-18): servers are reachable from the
   rest of the LAN out of the box — both backends default to loopback on their own,
   so cria always passes the flag. A host that should stay private sets
   `default_host = "127.0.0.1"` or a per-entry `host`. cria probes health on
   loopback when the bind is `0.0.0.0`, on the bound address otherwise.
-- Display follows the same rule: the TUI shows the files' own `args` lines and the
-  full composed command line verbatim — that *is* the entry's documentation.
+- Display follows the same rule: the TUI shows the files' own `args`, one flag
+  group to a line, and the full composed command line verbatim — that *is* the
+  entry's documentation.
 
 ## Choices — variations inside one entry (settled 2026-08-22)
 
@@ -119,27 +117,30 @@ next to the options, where fit measurements already live.
 
 - A choice needs at least one option, and the **first option is the config
   default**. A one-option choice is legal: a named, always-on block of args.
-- **Composition is a merge by key** (settled 2026-08-31, replacing the 2026-08-22
-  append): the levels are the engine's `args`, then the entry's, then the picked
-  options' — least specific first. A key set at more than one level takes the
-  value of the most specific level that sets it and keeps the place of the first
-  line that mentioned it, so an override changes the value and not the order the
-  file reads in. The effective `repo`/`quant` are the entry's unless a picked
-  option replaces them.
-- **Cross-level override is legal and explicit**; a collision *within* one level
-  is loud, at load (settled 2026-08-31, amending 2026-08-22, whose "two parts of
-  one launch" rule counted the entry's args and an option's as equals):
-  - one `args` list setting a key twice — refused where it is written;
-  - options of two **different** choices setting the same key — both are picked
-    at once, so there is no winner; refused, naming the key and both options;
-  - options of the **same** choice share keys freely: they are alternatives, and
+- **Composition is a merge by flag group across three levels** (settled
+  2026-08-31, replacing the 2026-08-22 append): `engines/<engine>.toml`, then the
+  entry's `args`, then the picked options' — least specific first. A flag written
+  at a more specific level replaces **every** group carrying that flag in the
+  levels beneath it, at the place the first of them stood; a flag the level
+  introduces follows at the end. An override therefore changes what the server
+  receives, not the order the files read in — which is what makes lifting a flag
+  into the engine file a safe, argv-preserving edit. The effective `repo`/`quant`
+  are the entry's unless a picked option replaces them.
+- **Cross-level override is legal and silent; the one collision left is loud, at
+  load** (settled 2026-08-31, narrowing 2026-08-22, whose "two parts of one
+  launch" rule counted the entry's args and an option's as equals):
+  - options of two **different** choices setting the same flag — both are picked
+    at once, so there is no winner; refused, naming the flag and both options;
+  - options of the **same** choice share flags freely: they are alternatives, and
     forcing the overlap apart is what keeps the axes orthogonal;
-  - the entry overriding a key its engine file sets, and a picked option
-    overriding a key the entry sets, are the point of the levels.
-  The comparison is by key, values ignored — the same key twice with equal values
-  is still two homes at one level. For the same reason `quant` may be set by only
-  one choice's options, and likewise `repo`. An option restating a cria-owned key
-  is refused exactly as entry `args` are.
+  - the entry overriding a flag its engine file sets, and a picked option
+    overriding a flag the entry sets, are the point of the levels;
+  - a list repeating a flag is the author's own command line, not a mistake.
+  The comparison is by flag token, values ignored — two options setting one flag
+  to the same value still have no winner, and `--ctx-size 8192` collides with
+  `--ctx-size=8192`. For the same reason `quant` may be set by only one choice's
+  options, and likewise `repo`. An option restating a cria-owned flag is refused
+  exactly as entry `args` are.
 - **Picks are state, not config** (settled 2026-08-22): the current pick per
   entry per choice lives in `~/.local/state/cria/choices.json` — cria-owned,
   strict-decoded; a broken file is reported and the config defaults used; a pick
@@ -161,7 +162,7 @@ there rather than repeated in fifteen profiles.
 
 | key    | type     | rules                                                              |
 | ------ | -------- | ------------------------------------------------------------------ |
-| `args` | string[] | optional; the same `"key = value"` shape entries use, and the level they override |
+| `args` | string[] | optional; the same verbatim-token shape entries use, and the level they override |
 
 - One file per backend, named after it (`engines/llama.toml`, `engines/mlx.toml`).
   Both the directory and every file in it are optional: an engine with no file
@@ -201,8 +202,8 @@ on the same port (settled 2026-08-18, `docs/cria.md`, v1 surface).
   the templates agents copy from.
 - **The backend set and its per-key metadata live in the schema** (settled
   2026-08-31): which backends a file may declare, which keys each of them takes,
-  the value each key carries in that backend's example, and the args key that
-  backend's model reference is composed from. A key states one example that holds
+  the value each key carries in that backend's example, and the flag that
+  backend's model reference is composed under. A key states one example that holds
   under every backend or one per backend — never one backend's value standing in
   for another's, which would hand an agent a repo the backend it names cannot
   serve. `cria docs` walks that set, so a backend cria serves is a backend the

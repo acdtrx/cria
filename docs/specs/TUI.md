@@ -150,18 +150,18 @@ keybinds get detailed as they are built.
     outgrows the pane loses fact lines behind an ellipsis, never the command
     (settled 2026-08-25).
   - The pane's facts are the launch's, not the file's: the args block reads as
-    the entry's own lines first, then what the current picks contribute, each
-    key spelled the way its file spells it — and repo and quant are the pair a
-    start would use, shown even when the declared value lives only in the
-    options. Everything a pick sourced is drawn in the pick's ink — mauve
-    means sourced-from-the-current-pick wherever it appears (settled
-    2026-08-25, user-requested: choices had made their args and quant
+    the effective args — the file's own lines first, then what the current
+    picks contribute, in composition order, one flag group to a line — and repo
+    and quant are the pair a start would use, shown even when the declared
+    value lives only in the options. Everything a pick sourced is drawn in the
+    pick's ink — mauve means sourced-from-the-current-pick wherever it appears
+    (settled 2026-08-25, user-requested: choices had made their args and quant
     invisible outside the command line).
-  - The block is the entry's two files, not the merge (settled 2026-08-31, when
-    args became keys and gained an engine-wide level): what the machine serves
-    every entry of that backend with, and which of two lines for one key wins,
-    are read off the command line under it — the one place the effective launch
-    is spelled out in full.
+  - The block is the entry's own files, not the merge (settled 2026-08-31, when
+    args gained an engine-wide level): what the machine serves every entry of
+    that backend with, and which of two lines for one flag wins, are read off
+    the command line under it — the one place the effective launch is spelled
+    out in full.
   - Start launches the stored picks; restart-last replays the *record's* picks,
     not the current defaults — a swap-back reproduces what ran, records being
     self-contained (`docs/specs/SERVE.md`). The status box names the running

@@ -10,22 +10,8 @@ import (
 // here rather than loaded from a file: Resolve reads an entry the loader has
 // already validated, and a case then reads as the axes it is about.
 
-// args spells an args list the way a file writes it, so a case reads as the
-// lines its entry holds.
-func args(lines ...string) []Arg {
-	list := make([]Arg, 0, len(lines))
-	for _, line := range lines {
-		arg, err := parseArg(line)
-		if err != nil {
-			panic("test wrote an args line the schema refuses: " + err.Error())
-		}
-		list = append(list, arg)
-	}
-	return list
-}
-
 // entryVaryingOn is a launchable flat entry plus the axes a case tests.
-func entryVaryingOn(entryArgs []Arg, choices ...Choice) Entry {
+func entryVaryingOn(args []string, choices ...Choice) Entry {
 	return Entry{
 		ID:      "demo",
 		Backend: BackendLlama,
@@ -34,7 +20,7 @@ func entryVaryingOn(entryArgs []Arg, choices ...Choice) Entry {
 		Port:    8080,
 		Host:    defaultBindHost,
 		Name:    "demo",
-		Args:    entryArgs,
+		Args:    args,
 		Choices: choices,
 	}
 }
@@ -43,22 +29,22 @@ func entryVaryingOn(entryArgs []Arg, choices ...Choice) Entry {
 // adding args only, one whose first option adds nothing at all.
 func quantAxis() Choice {
 	return Choice{Name: "quant", Options: []ChoiceOption{
-		{Name: "q4", Quant: "UD-Q4_K_XL", Args: args("ctx-size = 32768")},
-		{Name: "q8", Quant: "Q8_0", Args: args("ctx-size = 16384")},
+		{Name: "q4", Quant: "UD-Q4_K_XL", Args: []string{"--ctx-size", "32768"}},
+		{Name: "q8", Quant: "Q8_0", Args: []string{"--ctx-size", "16384"}},
 	}}
 }
 
 func slotsAxis() Choice {
 	return Choice{Name: "slots", Options: []ChoiceOption{
 		{Name: "one"},
-		{Name: "four", Args: args("parallel = 4")},
+		{Name: "four", Args: []string{"--parallel", "4"}},
 	}}
 }
 
 func offloadAxis() Choice {
 	return Choice{Name: "offload", Options: []ChoiceOption{
-		{Name: "gpu", Args: args("n-cpu-moe = 0")},
-		{Name: "cpu", Args: args("n-cpu-moe = 24")},
+		{Name: "gpu", Args: []string{"--n-cpu-moe", "0"}},
+		{Name: "cpu", Args: []string{"--n-cpu-moe", "24"}},
 	}}
 }
 
@@ -101,7 +87,7 @@ func TestDefaultSelectionPicksTheFirstOption(t *testing.T) {
 // The config default is a selection like any other: resolving under it composes
 // the first option of every axis.
 func TestResolveUnderTheDefaultSelection(t *testing.T) {
-	entry := entryVaryingOn(args("jinja = true"), quantAxis(), slotsAxis())
+	entry := entryVaryingOn([]string{"--jinja"}, quantAxis(), slotsAxis())
 
 	launch, err := Resolve(entry, DefaultSelection(entry))
 	if err != nil {
@@ -110,7 +96,7 @@ func TestResolveUnderTheDefaultSelection(t *testing.T) {
 	want := Launch{
 		Repo:  "unsloth/Qwen3-30B-A3B-GGUF",
 		Quant: "UD-Q4_K_XL",
-		Args:  args("jinja = true", "ctx-size = 32768"),
+		Args:  []string{"--jinja", "--ctx-size", "32768"},
 	}
 	if !reflect.DeepEqual(launch, want) {
 		t.Errorf("the default launch is\n  %+v\nwant\n  %+v", launch, want)
@@ -126,12 +112,12 @@ func TestResolveComposes(t *testing.T) {
 	}{
 		{
 			name:      "a flat entry resolves to itself under no selection",
-			entry:     entryVaryingOn(args("jinja = true", "ctx-size = 16384")),
+			entry:     entryVaryingOn([]string{"--jinja", "--ctx-size", "16384"}),
 			selection: nil,
 			want: Launch{
 				Repo:  "unsloth/Qwen3-30B-A3B-GGUF",
 				Quant: "UD-Q4_K_XL",
-				Args:  args("jinja = true", "ctx-size = 16384"),
+				Args:  []string{"--jinja", "--ctx-size", "16384"},
 			},
 		},
 		{
@@ -144,13 +130,13 @@ func TestResolveComposes(t *testing.T) {
 			},
 		},
 		{
-			name:      "three axes follow the entry's own keys, in file order",
-			entry:     entryVaryingOn(args("jinja = true"), quantAxis(), slotsAxis(), offloadAxis()),
+			name:      "three axes append in file order, after the entry's own args",
+			entry:     entryVaryingOn([]string{"--jinja"}, quantAxis(), slotsAxis(), offloadAxis()),
 			selection: Selection{"quant": "q8", "slots": "four", "offload": "cpu"},
 			want: Launch{
 				Repo:  "unsloth/Qwen3-30B-A3B-GGUF",
 				Quant: "Q8_0",
-				Args:  args("jinja = true", "ctx-size = 16384", "parallel = 4", "n-cpu-moe = 24"),
+				Args:  []string{"--jinja", "--ctx-size", "16384", "--parallel", "4", "--n-cpu-moe", "24"},
 			},
 		},
 		{
@@ -160,7 +146,7 @@ func TestResolveComposes(t *testing.T) {
 			want: Launch{
 				Repo:  "unsloth/Qwen3-30B-A3B-GGUF",
 				Quant: "UD-Q4_K_XL",
-				Args:  args("ctx-size = 32768", "parallel = 4", "n-cpu-moe = 0"),
+				Args:  []string{"--ctx-size", "32768", "--parallel", "4", "--n-cpu-moe", "0"},
 			},
 		},
 		{
@@ -170,7 +156,7 @@ func TestResolveComposes(t *testing.T) {
 			want: Launch{
 				Repo:  "unsloth/Qwen3-30B-A3B-GGUF",
 				Quant: "Q8_0",
-				Args:  args("ctx-size = 16384"),
+				Args:  []string{"--ctx-size", "16384"},
 			},
 		},
 		{
@@ -187,25 +173,25 @@ func TestResolveComposes(t *testing.T) {
 		},
 		{
 			name: "an option may replace the repo and the quant at once",
-			entry: entryVaryingOn(args("jinja = true"), Choice{Name: "context", Options: []ChoiceOption{
+			entry: entryVaryingOn([]string{"--jinja"}, Choice{Name: "context", Options: []ChoiceOption{
 				{Name: "short"},
-				{Name: "long", Repo: "unsloth/Qwen3-30B-A3B-128K-GGUF", Quant: "Q8_0", Args: args("ctx-size = 131072")},
+				{Name: "long", Repo: "unsloth/Qwen3-30B-A3B-128K-GGUF", Quant: "Q8_0", Args: []string{"--ctx-size", "131072"}},
 			}}),
 			selection: Selection{"context": "long"},
 			want: Launch{
 				Repo:  "unsloth/Qwen3-30B-A3B-128K-GGUF",
 				Quant: "Q8_0",
-				Args:  args("jinja = true", "ctx-size = 131072"),
+				Args:  []string{"--jinja", "--ctx-size", "131072"},
 			},
 		},
 		{
 			name:      "an option that only names itself changes nothing",
-			entry:     entryVaryingOn(args("jinja = true"), slotsAxis()),
+			entry:     entryVaryingOn([]string{"--jinja"}, slotsAxis()),
 			selection: Selection{"slots": "one"},
 			want: Launch{
 				Repo:  "unsloth/Qwen3-30B-A3B-GGUF",
 				Quant: "UD-Q4_K_XL",
-				Args:  args("jinja = true"),
+				Args:  []string{"--jinja"},
 			},
 		},
 		{
@@ -214,7 +200,7 @@ func TestResolveComposes(t *testing.T) {
 			selection: Selection{"slots": "four"},
 			want: Launch{
 				Repo: "org/name",
-				Args: args("parallel = 4"),
+				Args: []string{"--parallel", "4"},
 			},
 		},
 	}
@@ -275,7 +261,7 @@ func TestResolveRefuses(t *testing.T) {
 		},
 		{
 			name:      "a flat entry has nothing to pick",
-			entry:     entryVaryingOn(args("jinja = true")),
+			entry:     entryVaryingOn([]string{"--jinja"}),
 			selection: Selection{"quant": "q8"},
 			want:      []string{"demo", "has no choices", "quant"},
 		},
@@ -316,8 +302,8 @@ func TestResolveRefuses(t *testing.T) {
 func TestResolveLeavesTheEntryUntouched(t *testing.T) {
 	// Spare capacity is what makes the aliasing possible: appending into it writes
 	// past the entry's own length instead of allocating.
-	own := make([]Arg, 0, 8)
-	own = append(own, args("jinja = true")...)
+	own := make([]string, 0, 8)
+	own = append(own, "--jinja")
 	entry := entryVaryingOn(own, slotsAxis())
 
 	four, err := Resolve(entry, Selection{"slots": "four"})
@@ -329,71 +315,106 @@ func TestResolveLeavesTheEntryUntouched(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 
-	if want := args("jinja = true", "parallel = 4"); !reflect.DeepEqual(four.Args, want) {
+	if want := []string{"--jinja", "--parallel", "4"}; !reflect.DeepEqual(four.Args, want) {
 		t.Errorf("the first launch's args became %v, want %v", four.Args, want)
 	}
-	if want := args("jinja = true"); !reflect.DeepEqual(one.Args, want) {
+	if want := []string{"--jinja"}; !reflect.DeepEqual(one.Args, want) {
 		t.Errorf("the second launch's args are %v, want %v", one.Args, want)
 	}
-	if want := args("jinja = true"); !reflect.DeepEqual(entry.Args, want) {
+	if want := []string{"--jinja"}; !reflect.DeepEqual(entry.Args, want) {
 		t.Errorf("the entry's own args became %v, want %v", entry.Args, want)
 	}
 }
 
 // The levels of one launch, least specific first: what the engine serves
-// everything with, what the entry declares, what the picks change. A key set at
-// more than one level takes the most specific value and keeps the place of the
-// first line that mentioned it, so an override changes the value and not the
-// order the file is read in (docs/specs/CONFIG.md).
+// everything with, what the entry declares, what the picks change. A flag set at
+// more than one level is passed as the most specific level writes it, at the
+// place the first one stood, so an override changes what the server receives and
+// not the order the files read in (docs/specs/CONFIG.md).
 func TestResolveMergesTheLevelsBySpecificity(t *testing.T) {
 	tests := []struct {
 		name       string
-		engineArgs []Arg
-		entryArgs  []Arg
+		engineArgs []string
+		entryArgs  []string
 		choices    []Choice
 		selection  Selection
-		want       []Arg
+		want       []string
 	}{
 		{
-			name:       "an engine's keys come first, and the entry's follow",
-			engineArgs: args("gpu-layers = 99", "flash-attn = on"),
-			entryArgs:  args("ctx-size = 16384"),
-			want:       args("gpu-layers = 99", "flash-attn = on", "ctx-size = 16384"),
+			name:       "an engine's flags come first, and the entry's follow",
+			engineArgs: []string{"-ngl", "99", "-fa", "on"},
+			entryArgs:  []string{"--ctx-size", "16384"},
+			want:       []string{"-ngl", "99", "-fa", "on", "--ctx-size", "16384"},
 		},
 		{
-			name:       "the entry overrides a key its engine sets",
-			engineArgs: args("gpu-layers = 99", "flash-attn = on"),
-			entryArgs:  args("gpu-layers = 40"),
-			want:       args("gpu-layers = 40", "flash-attn = on"),
+			name:       "the entry overrides a flag its engine sets",
+			engineArgs: []string{"-ngl", "99", "-fa", "on"},
+			entryArgs:  []string{"-ngl", "40"},
+			want:       []string{"-ngl", "40", "-fa", "on"},
 		},
 		{
-			name:      "a picked option overrides a key the entry sets",
-			entryArgs: args("ctx-size = 16384", "jinja = true"),
+			name:      "a picked option overrides a flag the entry sets",
+			entryArgs: []string{"--ctx-size", "16384", "--jinja"},
 			choices: []Choice{{Name: "ctx", Options: []ChoiceOption{
-				{Name: "long", Args: args("ctx-size = 65536")},
+				{Name: "long", Args: []string{"--ctx-size", "65536"}},
 			}}},
 			selection: Selection{"ctx": "long"},
-			want:      args("ctx-size = 65536", "jinja = true"),
+			want:      []string{"--ctx-size", "65536", "--jinja"},
 		},
 		{
 			name:       "a pick outranks the entry, which outranks the engine",
-			engineArgs: args("ctx-size = 4096"),
-			entryArgs:  args("ctx-size = 16384"),
+			engineArgs: []string{"--ctx-size", "4096"},
+			entryArgs:  []string{"--ctx-size", "16384"},
 			choices: []Choice{{Name: "ctx", Options: []ChoiceOption{
-				{Name: "long", Args: args("ctx-size = 65536")},
+				{Name: "long", Args: []string{"--ctx-size", "65536"}},
 			}}},
 			selection: Selection{"ctx": "long"},
-			want:      args("ctx-size = 65536"),
+			want:      []string{"--ctx-size", "65536"},
 		},
 		{
-			name:       "an engine's keys reach an entry that declares none of its own",
-			engineArgs: args("log-level = INFO"),
-			want:       args("log-level = INFO"),
+			name:       "an engine's flags reach an entry that declares none of its own",
+			engineArgs: []string{"--log-level", "INFO"},
+			want:       []string{"--log-level", "INFO"},
 		},
 		{
 			name:      "an entry with no engine file carries only its own",
-			entryArgs: args("ctx-size = 16384"),
-			want:      args("ctx-size = 16384"),
+			entryArgs: []string{"--ctx-size", "16384"},
+			want:      []string{"--ctx-size", "16384"},
+		},
+		{
+			// The override takes the whole group: a flag's value tokens leave with
+			// the flag they belonged to, or the server would read the old value
+			// under the new flag.
+			name:       "a flag arrives with the values written after it",
+			engineArgs: []string{"--cache-type-k", "q8_0", "--jinja"},
+			entryArgs:  []string{"--cache-type-k", "f16"},
+			want:       []string{"--cache-type-k", "f16", "--jinja"},
+		},
+		{
+			// A level that sets a flag settles it: every occurrence below goes,
+			// or the server would still receive the value the entry replaced.
+			name:       "an override replaces every occurrence of the flag beneath it",
+			engineArgs: []string{"--override-kv", "a=b", "--jinja", "--override-kv", "c=d"},
+			entryArgs:  []string{"--override-kv", "e=f"},
+			want:       []string{"--override-kv", "e=f", "--jinja"},
+		},
+		{
+			// Within one list a repeat is what the author wrote — llama takes
+			// several --override-kv — so the list is passed on as it stands, and
+			// all of it lands where the level it overrides stood.
+			name:       "a level may pass one flag more than once",
+			engineArgs: []string{"--override-kv", "a=b", "--jinja"},
+			entryArgs:  []string{"--override-kv", "c=d", "--override-kv", "e=f"},
+			want:       []string{"--override-kv", "c=d", "--override-kv", "e=f", "--jinja"},
+		},
+		{
+			// A value that opens with a dash is a value, not a flag (schema.go,
+			// flagToken): two levels passing -1 to different flags override
+			// nothing of each other's.
+			name:       "a negative value is not a flag two levels share",
+			engineArgs: []string{"--seed", "-1"},
+			entryArgs:  []string{"--top-k", "-1"},
+			want:       []string{"--seed", "-1", "--top-k", "-1"},
 		},
 	}
 
@@ -413,21 +434,21 @@ func TestResolveMergesTheLevelsBySpecificity(t *testing.T) {
 	}
 }
 
-// An override reads one value; the level it came from is not smuggled along
-// beside it. Resolving twice under different picks proves the merge holds no
-// state from the launch before.
-func TestAnOverriddenKeyIsOneKey(t *testing.T) {
-	entry := entryVaryingOn(args("ctx-size = 16384"), Choice{Name: "ctx", Options: []ChoiceOption{
+// An overridden flag is passed once; the value it replaced is not smuggled
+// along beside it. Resolving twice under different picks proves the merge holds
+// no state from the launch before.
+func TestAnOverriddenFlagIsPassedOnce(t *testing.T) {
+	entry := entryVaryingOn([]string{"--ctx-size", "16384"}, Choice{Name: "ctx", Options: []ChoiceOption{
 		{Name: "short"},
-		{Name: "long", Args: args("ctx-size = 65536")},
+		{Name: "long", Args: []string{"--ctx-size", "65536"}},
 	}})
-	entry.EngineArgs = args("ctx-size = 4096")
+	entry.EngineArgs = []string{"--ctx-size", "4096"}
 
 	long, err := Resolve(entry, Selection{"ctx": "long"})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if want := args("ctx-size = 65536"); !reflect.DeepEqual(long.Args, want) {
+	if want := []string{"--ctx-size", "65536"}; !reflect.DeepEqual(long.Args, want) {
 		t.Errorf("the picked launch's args are %v, want %v", long.Args, want)
 	}
 
@@ -435,10 +456,10 @@ func TestAnOverriddenKeyIsOneKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if want := args("ctx-size = 16384"); !reflect.DeepEqual(short.Args, want) {
+	if want := []string{"--ctx-size", "16384"}; !reflect.DeepEqual(short.Args, want) {
 		t.Errorf("the unpicked launch's args are %v, want %v", short.Args, want)
 	}
-	if want := args("ctx-size = 4096"); !reflect.DeepEqual(entry.EngineArgs, want) {
+	if want := []string{"--ctx-size", "4096"}; !reflect.DeepEqual(entry.EngineArgs, want) {
 		t.Errorf("the engine's own args became %v, want %v", entry.EngineArgs, want)
 	}
 }

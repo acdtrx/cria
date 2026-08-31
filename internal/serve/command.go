@@ -17,10 +17,10 @@ import (
 const hfTokenVar = "HF_TOKEN"
 
 // ComposedCommand builds the argv that serves one entry, program first. cria owns
-// exactly four flags — the model reference, the host and the port — and spells
-// the launch's own args out of the keys the tree merged for it
+// exactly four flags — the model reference, the host and the port — and hands
+// everything else through verbatim in the order the launch's levels merged to
 // (docs/specs/CONFIG.md); the entry loader has already refused an args list that
-// restates one of the four.
+// restates one of them.
 //
 // How the model is named is the engine's knowledge (internal/engine) and the
 // rest of the line is not: the flags cria owns and the args the launch composed
@@ -49,7 +49,7 @@ func ComposedCommand(entry config.Entry, launch config.Launch, report tools.Repo
 
 	command := append([]string{tool.Path}, served.ModelArgs(launch)...)
 	command = append(command, "--host", entry.Host, "--port", strconv.Itoa(entry.Port))
-	return append(command, engine.Flags(launch.Args)...), nil
+	return append(command, launch.Args...), nil
 }
 
 // launchEnv is the environment a server is spawned with: cria's own — the server
