@@ -132,8 +132,10 @@ func TestTheWarmReachesTheDocumentedCompletionPath(t *testing.T) {
 	}
 }
 
-// A backend that loads its model before it answers has nothing to warm, and cria
-// sends it nothing: the rule lives in serve rather than in each caller.
+// An engine whose server loads its model before it answers has nothing to warm,
+// and cria sends it nothing: the gate is asked in serve rather than in each
+// caller. Which engines those are is the engines' own knowledge, tested where it
+// lives (internal/engine).
 func TestALlamaServerIsNeverWarmed(t *testing.T) {
 	asked := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -150,9 +152,6 @@ func TestALlamaServerIsNeverWarmed(t *testing.T) {
 	}
 	if asked != 0 {
 		t.Errorf("cria sent %d request(s) to a llama server, want none", asked)
-	}
-	if LoadsLazily(config.BackendLlama) || !LoadsLazily(config.BackendMLX) {
-		t.Error("the lazy-loading rule names the wrong backend")
 	}
 }
 
@@ -255,8 +254,9 @@ func TestAWarmWaitsForTheServerToAnswer(t *testing.T) {
 	if atWarm != 4 {
 		t.Errorf("the completion went after %d probe(s), want it held until the server answered (4)", atWarm)
 	}
-	if probed != probeURL(record) {
-		t.Errorf("the wait asked %q, want the backend's own health endpoint (%q)", probed, probeURL(record))
+	want := probeURL(engineOf(t, record.Backend), record)
+	if probed != want {
+		t.Errorf("the wait asked %q, want the engine's own health endpoint (%q)", probed, want)
 	}
 }
 

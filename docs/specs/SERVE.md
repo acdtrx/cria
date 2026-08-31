@@ -5,6 +5,14 @@ spawns them detached, records what it did, and any later cria invocation re-atta
 by reading those records back. This spec owns the lifecycle contract — start,
 observe, stop, re-attach — and the runtime state records behind it.
 
+**Per-engine knowledge is not the lifecycle's** (settled 2026-08-31): which
+program serves an entry, how its model is named on that program's command line,
+which endpoints it publishes, whether a green server has already loaded its
+weights, and whether a quantization qualifies its model reference are one
+implementation per way of serving in `internal/engine`. The lifecycle asks; it
+never branches on the backend, and a backend no engine claims is refused at the
+first question rather than answered with another engine's endpoints.
+
 ## Process model (settled 2026-08-18)
 
 - A server is spawned detached in its own session, stdout and stderr to its log
@@ -106,7 +114,7 @@ failure states.
    was loading fine); a pid that dies during the wait ends it silently — the
    box shows exited, the log is the evidence. The TUI fires the same warm in
    the background after an mlx start. llama loads at startup and is never
-   warmed; which backends load lazily is one rule in serve. A no-wait start
+   warmed; which backends load lazily is their engine's own answer. A no-wait start
    cannot carry the request and says so in a note.
 
 ## Stop

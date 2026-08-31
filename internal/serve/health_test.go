@@ -67,7 +67,7 @@ func TestProbeURL(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := probeURL(test.record); got != test.want {
+			if got := probeURL(engineOf(t, test.record.Backend), test.record); got != test.want {
 				t.Errorf("the probe goes to %q, want %q", got, test.want)
 			}
 		})

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 	"cria/internal/procs"
 )
 
@@ -166,18 +167,25 @@ func readRecord(path, id string) (Record, error) {
 // validate holds every rule a record must satisfy to be acted on. A record is
 // read to signal a pid and to render a status, so each field it drives is
 // checked here rather than at the moment it is used.
+//
+// The engine comes first because the rest of the record is read through it: a
+// backend cria has no engine for is refused here, which is what keeps a record
+// of some stranger from being probed, warmed and stopped as though it were a
+// llama server (internal/engine).
 func (r Record) validate(id string) error {
+	served, err := engine.For(r.Backend)
+	if err != nil {
+		return err
+	}
 	switch {
 	case r.EntryID == "":
 		return missing("entry_id")
 	case r.EntryID != id:
 		return fmt.Errorf("entry_id is %q, but the file is named after entry %q", r.EntryID, id)
-	case r.Backend != config.BackendLlama && r.Backend != config.BackendMLX:
-		return fmt.Errorf("backend is %q, want %q or %q", r.Backend, config.BackendLlama, config.BackendMLX)
 	case r.Repo == "":
 		return missing("repo")
-	case r.Quant != "" && r.Backend != config.BackendLlama:
-		return fmt.Errorf("quant is set on a %q server; only %q servers take one", r.Backend, config.BackendLlama)
+	case r.Quant != "" && !served.TakesQuant():
+		return fmt.Errorf("quant is %q, but a %q server takes no quantization: its model reference is the repo alone", r.Quant, r.Backend)
 	case r.Host == "":
 		return missing("host")
 	case r.Port < 1 || r.Port > 65535:

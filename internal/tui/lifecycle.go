@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 	"cria/internal/picks"
 	"cria/internal/serve"
 	"cria/internal/tools"
@@ -180,8 +181,12 @@ func startEntry(entry config.Entry, selection config.Selection, settings config.
 		return startedMsg{entry: entry, err: managedRefusal(entry, held)}
 	}
 
+	served, err := engine.For(entry.Backend)
+	if err != nil {
+		return startedMsg{entry: entry, err: err}
+	}
 	report := check(settings)
-	if _, err := serve.LaunchTool(entry.Backend, report); err != nil {
+	if _, err := engine.LaunchTool(served, report); err != nil {
 		return startedMsg{entry: entry, err: err}
 	}
 
@@ -260,10 +265,15 @@ func (m model) started(msg startedMsg) (model, tea.Cmd) {
 // has no readiness of its own to track and no second observer of a phase the
 // ticker already watches.
 //
-// A backend that loads at startup has nothing to warm and gets no command at
-// all; which those are is serve's rule, not the frame's.
+// An engine whose server loads at startup has nothing to warm and gets no
+// command at all; which those are is the engine's own knowledge, not the
+// frame's (internal/engine).
 func (m model) warmStarted(record serve.Record) tea.Cmd {
-	if !serve.LoadsLazily(record.Backend) {
+	served, err := engine.For(record.Backend)
+	if err != nil {
+		return func() tea.Msg { return warmedMsg{entryID: record.EntryID, err: err} }
+	}
+	if !served.LoadsLazily() {
 		return nil
 	}
 	servers := m.host.servers

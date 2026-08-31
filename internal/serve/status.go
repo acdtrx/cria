@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 	"cria/internal/hubapi"
 	"cria/internal/hubcache"
 	"cria/internal/procs"
@@ -124,7 +125,11 @@ func (m *Manager) observe(server Server, cache cacheReader) (Status, error) {
 		status.Stats = stats
 	}
 
-	status.Health = m.probe(probeURL(server.Record))
+	served, err := engine.For(server.Backend)
+	if err != nil {
+		return Status{}, err
+	}
+	status.Health = m.probe(probeURL(served, server.Record))
 	seen := observation{
 		live:     true,
 		green:    status.Health.Green,

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"cria/internal/config"
+	"cria/internal/engine"
 )
 
 // probeTimeout bounds one health probe. The probe sits on the TUI's refresh tick
@@ -16,15 +16,6 @@ import (
 // that has not answered within a second is not answering, and waiting longer
 // would only hold the display.
 const probeTimeout = time.Second
-
-// The documented endpoints cria asks each backend about (docs/specs/SERVE.md).
-// Both are part of their server's published API, which is the whole reason the
-// phase can be read from them rather than mined out of a log (docs/cria.md,
-// principle 6).
-const (
-	llamaHealthPath = "/health"    // llama-server's own: 200 once the model is loaded, 503 while it still is
-	mlxHealthPath   = "/v1/models" // mlx_lm.server publishes no health endpoint; its model listing is the documented proof of life
-)
 
 // Health is what one probe came back with: where cria asked, whether the answer
 // was the server serving, and the answer itself for display. It is one probe's
@@ -44,8 +35,10 @@ type Health struct {
 type prober func(url string) Health
 
 // probeURL is the endpoint cria asks about one record's server: the address it
-// can be reached at, and the documented path for its backend.
-func probeURL(record Record) string { return serverURL(record, healthPath(record.Backend)) }
+// can be reached at, and the documented health path its engine answers on.
+func probeURL(served engine.Engine, record Record) string {
+	return serverURL(record, served.HealthPath())
+}
 
 // serverURL is where cria reaches one record's server at a given path. Every
 // request cria makes to a managed server goes through here, so the probe and the
@@ -67,16 +60,6 @@ func probeTarget(host string) string {
 		return "::1"
 	}
 	return host
-}
-
-// healthPath is the endpoint a backend answers on. A record carries one of the
-// two backends — nothing else survives its validation — and llama's is the one
-// the spec names first, so it is also the fallback.
-func healthPath(backend config.Backend) string {
-	if backend == config.BackendMLX {
-		return mlxHealthPath
-	}
-	return llamaHealthPath
 }
 
 // newHTTPProbe builds the real prober: one GET per observation, no retry. A

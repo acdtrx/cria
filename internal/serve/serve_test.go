@@ -8,9 +8,31 @@ import (
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 	"cria/internal/procs"
 	"cria/internal/tools"
 )
+
+// The documented endpoints a stand-in server has to answer on, spelled out
+// rather than read back from the engines (internal/engine): what reaches the
+// wire is what a real llama-server or mlx_lm.server has to answer
+// (docs/specs/SERVE.md), so a test that composed them from the same knowledge it
+// is checking would agree with any drift.
+const (
+	mlxHealthPath = "/v1/models" // mlx_lm.server's model listing, its documented proof of life
+	slotsPath     = "/slots"     // llama-server's per-slot endpoint
+)
+
+// engineOf is the engine one backend is served by, for the tests that ask a
+// seam a question about a specific one.
+func engineOf(t *testing.T, backend config.Backend) engine.Engine {
+	t.Helper()
+	served, err := engine.For(backend)
+	if err != nil {
+		t.Fatalf("looking up the engine of %s: %v", backend, err)
+	}
+	return served
+}
 
 // fakeHost is the process table a component test drives: which pids exist, what
 // each of them is running, and every signal cria asked it to deliver, in order.

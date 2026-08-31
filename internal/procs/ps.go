@@ -6,6 +6,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"cria/internal/engine"
+	"cria/internal/tools"
 )
 
 // psProgram is resolved on PATH like every other tool cria drives; unlike those
@@ -42,10 +45,6 @@ const psStatsColumns = "pid=,rss=,%cpu="
 // those words can be separated by two spaces; counting words rather than
 // columns is what makes the split exact either way.
 const lstartWords = 5
-
-// serverPrograms are the two programs whose processes serve wants to hear about
-// (docs/specs/SERVE.md).
-var serverPrograms = []string{"llama-server", "mlx_lm.server"}
 
 // Identify asks `ps` what one pid is running:
 //
@@ -187,9 +186,13 @@ func isManagedServer(command string) bool {
 	return len(args) > 1 && strings.ContainsRune(args[1], filepath.Separator) && isServerProgram(args[1])
 }
 
-// isServerProgram reports whether one argument names a managed server.
+// isServerProgram reports whether one argument names a server cria manages. The
+// programs whose processes serve wants to hear about are the engines' own
+// (internal/engine): cria looks for the servers it knows how to run, so a way of
+// serving cria has cannot be a process it fails to recognise
+// (docs/specs/SERVE.md).
 func isServerProgram(arg string) bool {
-	return slices.Contains(serverPrograms, filepath.Base(arg))
+	return slices.Contains(engine.Programs(), tools.Name(filepath.Base(arg)))
 }
 
 // cutFields takes count whitespace-separated words off the front of a line and

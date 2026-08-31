@@ -15,13 +15,14 @@ the command line to `cli`, passing `tui.Run` as the program bare `cria` opens.
 | --- | --- | --- | --- |
 | `internal/config` | the config tree, its schema, and the schema's own documentation (`specs/CONFIG.md`) | `Load(root)` | — |
 | `internal/format` | how a size, a duration and a Hub reference are spelled | `Bytes`, `HubReference`, … | — |
-| `internal/procs` | every `ps`/`lsof` exec and every signal cria sends (`specs/SERVE.md`) | `System{}` (a `Host`) | — |
 | `internal/tools` | which managed programs the host has and what each one's state disables (`specs/TOOLS.md`) | `Check(settings)` | `config` |
+| `internal/engine` | what cria knows about each way of serving: the program, the model reference, the endpoints, the warm and slot rules (`specs/SERVE.md`) | `For(backend)`, `All()` | `config`, `tools` |
+| `internal/procs` | every `ps`/`lsof` exec and every signal cria sends (`specs/SERVE.md`) | `System{}` (a `Host`) | `engine`, `tools` |
 | `internal/hubcache` | the cache walk, true blob-deduped sizes, entry presence, and the delete plans (`specs/CACHE.md`) | `Read(root)`, `Plan*`/`Execute` | `config` |
 | `internal/hubapi` | what a model comes to when complete, and the HF token | `New()`, `Token()` | `config`, `hubcache` |
-| `internal/serve` | a managed server's life: compose, spawn detached, record, observe, stop (`specs/SERVE.md`) | `New(root, host)` | `config`, `tools`, `procs`, `hubcache`, `hubapi` |
-| `internal/cli` | parsing, ordering and output for the subcommands (`specs/CLI.md`) | `Dispatch(args, version, tui)` | `config`, `tools`, `procs`, `serve`, `format` |
-| `internal/tui` | the program frame and its screens (`specs/TUI.md`) | `Run()` | `config`, `tools`, `procs`, `serve`, `hubcache`, `format` |
+| `internal/serve` | a managed server's life: compose, spawn detached, record, observe, stop (`specs/SERVE.md`) | `New(root, host)` | `config`, `tools`, `engine`, `procs`, `hubcache`, `hubapi` |
+| `internal/cli` | parsing, ordering and output for the subcommands (`specs/CLI.md`) | `Dispatch(args, version, tui)` | `config`, `tools`, `engine`, `procs`, `serve`, `format` |
+| `internal/tui` | the program frame and its screens (`specs/TUI.md`) | `Run()` | `config`, `tools`, `engine`, `procs`, `serve`, `hubcache`, `format` |
 
 The graph is acyclic and layered — leaves that only read the world, then the
 lifecycle over them, then the two faces (CODING-RULES §7). Two rules hold it that
@@ -33,6 +34,12 @@ way:
 - **Judgement belongs to the layer that owns the question.** `procs` reports what
   the operating system said; `serve` decides live versus exited. `hubcache` and
   `tools` report data; `cli` and `tui` decide how it reads.
+- **Per-engine knowledge lives in one place.** `engine` answers what differs
+  between ways of serving — the program to run, how a model is named on its
+  command line, which endpoints it publishes, whether a green server has loaded
+  its weights — and does none of it: `serve` spawns, probes and requests.
+  Everything else asks rather than branching, and the lookup refuses a backend no
+  engine claims instead of defaulting to one.
 
 `serve` never imports `hubcache`'s delete side and `hubcache` never imports
 `serve`: the surgery guard takes the running servers as a list its caller
@@ -44,6 +51,7 @@ graph BT
     format[format]
     procs[procs]
     tools[tools]
+    engine[engine]
     hubcache[hubcache]
     hubapi[hubapi]
     serve[serve]
@@ -52,12 +60,16 @@ graph BT
     main["main.go"]
 
     tools --> config
+    engine --> config
+    engine --> tools
+    procs --> engine
     hubcache --> config
     hubapi --> config
     hubapi --> hubcache
 
     serve --> config
     serve --> tools
+    serve --> engine
     serve --> procs
     serve --> hubcache
     serve --> hubapi
@@ -65,12 +77,14 @@ graph BT
     cli --> serve
     cli --> config
     cli --> tools
+    cli --> engine
     cli --> procs
     cli --> format
 
     tui --> serve
     tui --> config
     tui --> tools
+    tui --> engine
     tui --> procs
     tui --> hubcache
     tui --> format
@@ -108,8 +122,9 @@ display its percentage and nothing else, and never blocks a start.
 **`ps` and `lsof` → identity and attribution.** `procs` is the single route to the
 process table. It answers four questions: is this pid the process cria recorded
 (command arguments and start time, so a recycled pid cannot impersonate a dead
-server), what does it cost, which `llama-server`/`mlx_lm.server` processes exist
-(the foreign scan), and who holds a port (the attributed refusal).
+server), what does it cost, which server processes exist — the foreign scan,
+looking for the programs the engines name — and who holds a port (the attributed
+refusal).
 
 **Server logs flow one way: to the screen.** They are tailed raw and never parsed
 for data (`docs/cria.md`, principle 6).

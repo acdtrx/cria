@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 	"cria/internal/picks"
 	"cria/internal/serve"
 )
@@ -140,10 +141,18 @@ func (a *app) startEntry(tree *config.Tree, entry config.Entry, selection config
 			id, held.EntryID, held.PID, held.Port)
 	}
 
+	// A backend cria has no engine for is refused here, before the host is asked
+	// anything: the entry names a way of serving that does not exist, and no
+	// tool check or port has an answer to that (internal/engine).
+	served, err := engine.For(entry.Backend)
+	if err != nil {
+		return a.fail("start %s: %v", id, err)
+	}
+
 	// The tool gate before the port check: a host without llama-server has to
 	// hear about llama-server, not about a busy port (docs/specs/SERVE.md).
 	report := a.tools(tree.Settings)
-	if _, err := serve.LaunchTool(entry.Backend, report); err != nil {
+	if _, err := engine.LaunchTool(served, report); err != nil {
 		return a.fail("start %s: %v", id, err)
 	}
 
@@ -405,14 +414,18 @@ func listenerPIDs(pids []int) string {
 // about this says the process died — so the refusal reports what happened and
 // where the log is rather than claiming the server is gone.
 func (a *app) loadRefusal(manager servers, record serve.Record, began time.Time) string {
-	if !serve.LoadsLazily(record.Backend) {
+	served, err := engine.For(record.Backend)
+	if err != nil {
+		return err.Error()
+	}
+	if !served.LoadsLazily() {
 		return ""
 	}
 
 	// Said before the wait rather than after it, and on stderr: this is what
 	// cria is doing while a caller sits there, not the answer they asked for.
 	a.waiting("loading model weights (mlx loads lazily; this can take a while)…")
-	err := manager.Warm(record)
+	err = manager.Warm(record)
 	if err == nil {
 		return ""
 	}
@@ -424,7 +437,11 @@ func (a *app) loadRefusal(manager servers, record serve.Record, began time.Time)
 // started, and the weights are not loaded until something asks it for a
 // completion. The note names the one command that loads them now.
 func (a *app) noteLazyLoad(record serve.Record) {
-	if !serve.LoadsLazily(record.Backend) {
+	// A record cria has no engine for gets no note: it could not have been
+	// started at all (serve.ComposedCommand refuses first), and a note beside a
+	// successful start is not where that would be reported.
+	served, err := engine.For(record.Backend)
+	if err != nil || !served.LoadsLazily() {
 		return
 	}
 	a.note("mlx loads model weights on the first request; `cria start %s %s` loads them now",

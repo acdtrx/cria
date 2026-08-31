@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 	"cria/internal/tools"
 )
 
@@ -21,6 +22,11 @@ const hfTokenVar = "HF_TOKEN"
 // (docs/specs/CONFIG.md); the entry loader has already refused an args list that
 // restates one of them.
 //
+// How the model is named is the engine's knowledge (internal/engine) and the
+// rest of the line is not: the flags cria owns and the args the launch composed
+// are one tail for every engine, which is what stops each new way of serving
+// from respelling them.
+//
 // What varies between launches of one entry arrives resolved, in the launch: the
 // repo, the quant and the args a selection composed (config.Resolve). This
 // composition knows nothing about choices — it spells a command line out of facts
@@ -32,63 +38,18 @@ const hfTokenVar = "HF_TOKEN"
 // shows it by asking for the same composition Start spawns, so the two can never
 // drift apart.
 func ComposedCommand(entry config.Entry, launch config.Launch, report tools.Report) ([]string, error) {
-	tool, err := LaunchTool(entry.Backend, report)
+	served, err := engine.For(entry.Backend)
+	if err != nil {
+		return nil, fmt.Errorf("entry %s: %w", entry.ID, err)
+	}
+	tool, err := engine.LaunchTool(served, report)
 	if err != nil {
 		return nil, err
 	}
 
-	var command []string
-	switch entry.Backend {
-	case config.BackendLlama:
-		// Launch by Hub reference: llama-server fetches what it needs into the
-		// Hugging Face cache itself, which is why the tool check refuses a build
-		// old enough to keep a private one (docs/specs/TOOLS.md).
-		command = []string{tool.Path, "-hf", hubReference(launch)}
-	case config.BackendMLX:
-		// An mlx quantization is its own repo, so there is nothing to qualify the
-		// reference with.
-		command = []string{tool.Path, "--model", launch.Repo}
-	default:
-		return nil, fmt.Errorf("entry %s names backend %q, which cria cannot launch", entry.ID, entry.Backend)
-	}
-
+	command := append([]string{tool.Path}, served.ModelArgs(launch)...)
 	command = append(command, "--host", entry.Host, "--port", strconv.Itoa(entry.Port))
 	return append(command, launch.Args...), nil
-}
-
-// hubReference spells the model a llama launch serves the way llama-server takes
-// it: the repo, qualified by the quantization when there is one. Without a quant
-// the server picks the repo's default (docs/specs/CONFIG.md).
-func hubReference(launch config.Launch) string {
-	if launch.Quant == "" {
-		return launch.Repo
-	}
-	return launch.Repo + ":" + launch.Quant
-}
-
-// LaunchTool is the start gate: an entry can only be launched by a tool the host
-// has and cria may use (docs/specs/TOOLS.md). The refusal carries the tool's own
-// verdict — what its state disables and the one action that clears it — because
-// the tool check already phrased both.
-//
-// It is exported because the gate comes before the port check in a start
-// (docs/specs/SERVE.md), and both callers of that sequence — the CLI and, later,
-// the TUI — have to ask it in that order rather than discover the missing tool
-// from a refused spawn.
-func LaunchTool(backend config.Backend, report tools.Report) (tools.Tool, error) {
-	var tool tools.Tool
-	switch backend {
-	case config.BackendLlama:
-		tool = report.LlamaServer
-	case config.BackendMLX:
-		tool = report.MLXLMServer
-	default:
-		return tools.Tool{}, fmt.Errorf("backend %q has no server program", backend)
-	}
-	if !tool.Usable() {
-		return tools.Tool{}, fmt.Errorf("%s is %s, which disables %s; %s", tool.Name, tool.Status, tool.Disables, tool.Fix)
-	}
-	return tool, nil
 }
 
 // launchEnv is the environment a server is spawned with: cria's own — the server

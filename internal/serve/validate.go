@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 	"cria/internal/tools"
 )
 
@@ -24,10 +25,6 @@ import (
 // else runs on the host, and a server on another port cannot be touched at all.
 
 const (
-	// slotsPath is llama-server's documented per-slot endpoint, and the only
-	// place either backend publishes what a server is doing right now.
-	slotsPath = "/slots"
-
 	// slotsTimeout bounds the one look the gate takes. A server worth asking is
 	// busy answering somebody else, so it is given more patience than a display
 	// probe (health.go) — and still only one look, because a gate that waits is
@@ -170,26 +167,25 @@ type slotsReader func(url string) Generation
 // caller about to displace a server is holding an idle keep-alive socket to it,
 // and counting connections would answer with the caller's own ghost.
 //
-// A backend that publishes no such signal is not asked at all. mlx_lm.server
-// documents no equivalent, and deriving one from something adjacent would hand
-// back a guess spelled like a measurement.
+// An engine that publishes no such signal is not asked at all: deriving one
+// from something adjacent would hand back a guess spelled like a measurement.
+// The refusal names the program whose signal is missing, because that is what
+// whoever reads it has to go and check.
+//
+// The address rule is the one the probe and the warm follow — loopback for a
+// wildcard bind, the bound address otherwise (docs/specs/CONFIG.md); only the
+// path is the engine's.
 func (m *Manager) Generating(record Record) Generation {
-	if !publishesSlots(record.Backend) {
-		return unverifiable("mlx_lm.server publishes no per-slot signal, so cria cannot tell whether it is generating")
+	served, err := engine.For(record.Backend)
+	if err != nil {
+		return unverifiable(err.Error())
 	}
-	return m.slots(slotsURL(record))
+	path, published := served.SlotsPath()
+	if !published {
+		return unverifiable(fmt.Sprintf("%s publishes no per-slot signal, so cria cannot tell whether it is generating", served.Program()))
+	}
+	return m.slots(serverURL(record, path))
 }
-
-// publishesSlots reports whether a backend says what its slots are doing.
-// llama-server publishes it at /slots; mlx_lm.server documents nothing of the
-// kind. A record carries one of the two backends and nothing else survives its
-// validation (record.go), so llama is the whole of the yes.
-func publishesSlots(backend config.Backend) bool { return backend == config.BackendLlama }
-
-// slotsURL is where the gate asks: the same address rule the probe and the warm
-// follow — loopback for a wildcard bind, the bound address otherwise
-// (docs/specs/CONFIG.md) — at the slot endpoint.
-func slotsURL(record Record) string { return serverURL(record, slotsPath) }
 
 // slot is the one thing cria reads of a llama-server slot. The endpoint
 // publishes far more per slot — context sizes, token counts, sampler settings —

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"cria/internal/config"
+	"cria/internal/engine"
 )
 
 // A server that answers is not always a server that can serve. mlx_lm.server
@@ -85,13 +85,6 @@ type completionRequest struct {
 // with no server and no port.
 type completer func(url, model string, within time.Duration) error
 
-// LoadsLazily reports whether a backend's server goes green before it has loaded
-// any weights. mlx_lm.server does — its model listing answers immediately and
-// the load happens on the first completion — while llama-server answers 503 at
-// /health until its model is in memory, so a green llama server has nothing left
-// to load (docs/specs/SERVE.md).
-func LoadsLazily(backend config.Backend) bool { return backend == config.BackendMLX }
-
 // ErrServerGone is a warm that had nothing left to warm: the process died while
 // cria was waiting for its port to answer. It is named so a caller can tell it
 // apart from a server that is up and would not answer — the state records
@@ -100,9 +93,9 @@ func LoadsLazily(backend config.Backend) bool { return backend == config.Backend
 var ErrServerGone = errors.New("it exited before it answered")
 
 // Warm makes a server load its weights now, so the first request a caller sends
-// meets a model that is ready. A backend that loads at startup has nothing to
-// warm and Warm does nothing for it — the rule lives here rather than in each
-// caller.
+// meets a model that is ready. An engine whose server loads at startup has
+// nothing to warm and Warm does nothing for it — the gate is asked here rather
+// than in each caller.
 //
 // It waits for the server to answer before asking it for anything. A start
 // returns as soon as the record is written (start.go) and the port comes up
@@ -114,10 +107,14 @@ var ErrServerGone = errors.New("it exited before it answered")
 // says the completion did not come back, and the server may well still be
 // serving. Its caller decides what that is worth.
 func (m *Manager) Warm(record Record) error {
-	if !LoadsLazily(record.Backend) {
+	served, err := engine.For(record.Backend)
+	if err != nil {
+		return err
+	}
+	if !served.LoadsLazily() {
 		return nil
 	}
-	if err := m.awaitAnswer(record); err != nil {
+	if err := m.awaitAnswer(served, record); err != nil {
 		return fmt.Errorf("%s did not load its weights: %w", record.EntryID, err)
 	}
 	if err := m.complete(completionURL(record), record.Repo, m.completionWithin); err != nil {
@@ -132,15 +129,15 @@ func (m *Manager) Warm(record Record) error {
 // mlx_lm.server binds its port seconds after the spawn, and the request lands
 // in that gap as "connection refused" — a load that is going perfectly well,
 // reported as a server that did not load. The signal waited on is the one a
-// phase is read from (health.go), which for a lazily-loading backend goes green
+// phase is read from (health.go), which for a lazily-loading engine goes green
 // before a single weight is read: exactly the moment there is something to warm.
 //
 // The wait ends on the pid as well as on the clock. A server that has died has
 // nothing left to answer, and sitting out a budget measured in minutes to say so
 // would delay the truth rather than establish it.
-func (m *Manager) awaitAnswer(record Record) error {
+func (m *Manager) awaitAnswer(served engine.Engine, record Record) error {
 	deadline := time.Now().Add(m.completionWithin)
-	url := probeURL(record)
+	url := probeURL(served, record)
 	for {
 		if health := m.probe(url); health.Green {
 			return nil

@@ -150,12 +150,13 @@ func (f *fakeServers) ListensOn(record serve.Record) (bool, []int, error) {
 }
 
 // Warm answers the way a loaded server does — the completion came back — unless
-// a test scripted otherwise. Only the mlx records reach it: the rule about which
-// backends are warmed is serve's (docs/specs/SERVE.md).
+// a test scripted otherwise, and records every server it was asked to load.
+//
+// It judges nothing. Whether an engine's server has weights left to warm is
+// cria's own gate (internal/engine, docs/specs/SERVE.md): a fake that asked the
+// same question would answer with its own copy of the rule, and a start that
+// stopped consulting it would still look right here.
 func (f *fakeServers) Warm(record serve.Record) error {
-	if !serve.LoadsLazily(record.Backend) {
-		return nil
-	}
 	f.warmed = append(f.warmed, record.EntryID)
 	if f.onWarm != nil {
 		f.onWarm()

@@ -397,8 +397,10 @@ func treeOf(entry config.Entry) *config.Tree {
 
 // Where the gate asks, for every shape a bind address takes: a wildcard on
 // loopback, anything else exactly where the server listens
-// (docs/specs/CONFIG.md), at llama-server's slot endpoint.
-func TestSlotsURL(t *testing.T) {
+// (docs/specs/CONFIG.md), at the slot endpoint the record's engine publishes.
+// The address rule is serve's and the path is the engine's, and this is the
+// composition of the two that reaches the wire.
+func TestTheGateAsksWhereTheServerListens(t *testing.T) {
 	tests := []struct {
 		name   string
 		record Record
@@ -423,8 +425,16 @@ func TestSlotsURL(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := slotsURL(test.record); got != test.want {
-				t.Errorf("the gate asks %q, want %q", got, test.want)
+			var asked string
+			manager := newManager(t, &fakeHost{})
+			manager.slots = func(url string) Generation {
+				asked = url
+				return Generation{Busy: BusyIdle}
+			}
+
+			manager.Generating(test.record)
+			if asked != test.want {
+				t.Errorf("the gate asks %q, want %q", asked, test.want)
 			}
 		})
 	}
@@ -586,7 +596,8 @@ func TestGeneratingCannotVerifyAServerThatIsNotAnswering(t *testing.T) {
 
 // mlx_lm.server documents no per-slot signal, so cria asks it nothing at all:
 // the answer is unverifiable, named as such, without a request leaving the
-// machine.
+// machine. Which engines publish that signal is tested where that knowledge
+// lives (internal/engine).
 func TestGeneratingNeverAsksAnMLXServer(t *testing.T) {
 	manager := newManager(t, &fakeHost{})
 	manager.slots = func(url string) Generation {
@@ -605,8 +616,5 @@ func TestGeneratingNeverAsksAnMLXServer(t *testing.T) {
 	}
 	if !strings.Contains(generation.Detail, "mlx_lm.server") {
 		t.Errorf("the gate says %q, want it to name the server whose signal is missing", generation.Detail)
-	}
-	if publishesSlots(config.BackendMLX) || !publishesSlots(config.BackendLlama) {
-		t.Error("the slot-signal rule names the wrong backend")
 	}
 }

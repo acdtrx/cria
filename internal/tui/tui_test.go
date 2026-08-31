@@ -110,13 +110,14 @@ func (f *fakeServers) Dismiss(record serve.Record) error {
 	return f.dismissErr
 }
 
-// Warm answers the way a server that loaded its weights does, and records the
-// entry it was asked to load. A backend that loads at startup never reaches
-// here: which those are is serve's rule (docs/specs/SERVE.md).
+// Warm answers the way a server that loaded its weights does, and records every
+// entry it was asked to load.
+//
+// It judges nothing. Whether an engine's server has weights left to warm is
+// cria's own gate (internal/engine, docs/specs/SERVE.md): a fake that asked the
+// same question would answer with its own copy of the rule, and a frame that
+// stopped consulting it would still look right here.
 func (f *fakeServers) Warm(record serve.Record) error {
-	if !serve.LoadsLazily(record.Backend) {
-		return nil
-	}
 	f.warmed = append(f.warmed, record.EntryID)
 	return f.warmErr
 }

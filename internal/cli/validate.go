@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 	"cria/internal/serve"
 	"cria/internal/tools"
 )
@@ -90,8 +91,12 @@ func (a *app) validate(args []string) int {
 	if err != nil {
 		return a.failWith(exitRefused, "validate %s: %v", id, err)
 	}
+	served, err := engine.For(entry.Backend)
+	if err != nil {
+		return a.failWith(exitRefused, "validate %s: %v", id, err)
+	}
 	report := a.tools(tree.Settings)
-	if _, err := serve.LaunchTool(entry.Backend, report); err != nil {
+	if _, err := engine.LaunchTool(served, report); err != nil {
 		return a.failWith(exitRefused, "validate %s: %v", id, err)
 	}
 
