@@ -1,6 +1,33 @@
 # STEP 5 — the contract in SERVE.md and the live proof
 
-Status: docs half done (2026-08-25) — the live proof is pending the user's go
+Status: done (2026-08-31) — live proof passed; plan complete
+
+## Live proof record (2026-08-31, user cleared the machine)
+
+Before: `qwen38-27` live on 11434, pid 96789, launched 2026-08-25T00:13:19,
+up 6d08h. Binary: the branch build at `9215d26`.
+
+1. `cria start lfm25-26b-q8 --wait` → green in 4m13s, exit 0 — including a
+   surprise full 2.7 GiB download with progress (the cached repo did not hold
+   the Q8_0 blob), exercising the downloading phase live.
+2. `cria validate lfm25-26b-q8` → **exit 0**. All six stage lines in order:
+   stop-holding, start, prove, stop, restore (new pid), verdict
+   "validated lfm25-26b-q8: it served on port 11436 and answered a completion".
+3. `cria validate lfm25-26b-q8 nosuch=thing` → **exit 2**, schema's own
+   refusal text; LFM's pid verified untouched after.
+4. Scratch entry `scratch-validate-fail` (port 11436, an arg llama-server
+   refuses) → `cria validate scratch-validate-fail` → **exit 1**: LFM
+   displaced, target exited after 2s, LFM restored, reason line names the
+   crash log. Scratch entry and its logs deleted after.
+5. After: qwen38-27 record byte-identical (pid 96789, same launch timestamp,
+   6d08h29m up), and a completion against 11434 answered — three validates on
+   the neighbor port, the main server never in scope.
+6. `cria stop lfm25-26b-q8` → only qwen's record remains; machine as found.
+7. `~/.config/cria/AGENTS.md` moved aside; the new binary re-created it on
+   first run — the tree now teaches `cria validate` with the exit codes.
+
+Exit 3 was not arranged live (it needs a stop that fails mid-protocol);
+covered by the component tests, as this file anticipated.
 
 ## Intent
 
