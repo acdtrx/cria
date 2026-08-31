@@ -1,6 +1,26 @@
 # STEP 4 — settle by experiment: the alias lever
 
-Status: not started
+Status: done (2026-08-31) — the lever holds; ruling below
+
+## Probe record (2026-08-31, build 10450, port 11437, qwen untouched on 11434)
+
+Preset: one section, `[LiquidAI/LFM2.5-2.6B-GGUF:Q8_0]` carrying
+`alias = lfm25-26b-q8` (an entry id's exact shape). Observed:
+
+- `GET /models` lists the alias: `aliases: ['lfm25-26b-q8']` on the row.
+- A chat completion with `"model": "lfm25-26b-q8"` routed and answered
+  (the response's own `model` field reports the canonical id — clients that
+  echo it show the model reference, not the entry id; cosmetic, noted).
+- `GET /slots?model=lfm25-26b-q8` → 200 with slot data.
+- `GET /props?model=lfm25-26b-q8` → 200.
+
+**Ruling (settled 2026-08-31): router-included entries are addressed by
+entry id.** Each composed preset section carries `alias = <entry-id>`; the
+section name stays the model reference; clients (pi) send entry ids; cria's
+status and stats address children by the same ids. The quant-tag
+normalization wrinkle from the router probe is closed — normalization
+applies to section names, and the alias sidesteps it entirely. STEP-8
+encodes this; no fallback mapping is needed.
 
 ## Intent
 
