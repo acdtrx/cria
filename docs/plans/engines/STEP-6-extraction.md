@@ -1,6 +1,35 @@
 # STEP 6 — the extraction session; phase 2 closes
 
-Status: not started
+Status: done (2026-08-31) — extraction complete, composition-proven; live
+smokes deferred by user ruling (record below)
+
+## Session record (2026-08-31, user present and ruling)
+
+Rulings: `engines/llama.toml` extracts **`-ngl 99` only** — the true
+intersection, all 13 llama profiles; `-fa on` stays per-profile (12/13 set
+it; llama's default verified `auto` via `--help`, so pinning `on` remains
+meaningful, and the embedding profile setting neither must not inherit it —
+override cannot unset). `engines/mlx.toml` extracts
+**`--prompt-cache-size 10 --prompt-cache-bytes 8G` only** — host-RAM
+policy; `--max-tokens` ruled model-specific and stays per-profile.
+
+Method and proof:
+1. Pre-extraction capture: every entry's `Resolve`d args under config
+   defaults, via a temporary test in the worktree (deleted after).
+2. Engine files written; the extracted tokens removed from all 15 profiles
+   by surgical text edit, each file re-parsed and its args verified equal
+   to expected removal — comments and formatting untouched.
+3. Post-extraction capture, fresh (`-count=1` — the first comparison hit
+   go's test cache replaying pre-edit output; caught because "identical
+   order" was too good to be true, the merge puts engine args first).
+4. All 15 entries flag-group-equivalent, the only difference the expected
+   one: extracted flags lead the composed line. FAILURES: 0.
+
+Live smokes: **deferred by user ruling** — the serving qwen38-27 is not to
+be restarted, and both mlx profiles are too large to load beside it. The
+engine files' first live read happens on the next natural start; the
+composition-level proof above is the phase's verification. Suite green at
+phase end (code unchanged since 3b2d712; config package re-run fresh).
 
 ## Intent
 
