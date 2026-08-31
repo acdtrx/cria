@@ -15,6 +15,16 @@ keybinds get detailed as they are built.
   the colour each name is drawn in are the TUI's own, keyed by engine id — a
   backend with no colour of its own is drawn as plain text rather than borrowing
   another's.
+- **The toggle chooses what the screen is about, not which entries it filters**
+  (settled 2026-08-31, when the router became the third engine). Two of the three
+  positions are an entry list filtered by the backend those entries declare; the
+  router's is a list of the models it holds, because no entry declares the router
+  and what it serves is state of its own (`docs/specs/CONFIG.md`). The walk is
+  therefore over every engine cria has rather than over the backends an entry may
+  name, and a preferences file naming something cria does not serve is refused
+  against the same set. Rejected: a separate view with its own key — the router is
+  one of the ways this host serves models, and the key that asks "which way" is the
+  one that already exists.
 - **The entry list is the picker.** It shows the active backend's entries —
   picking an entry picks everything in one gesture: for a flat entry that is
   model, quant and params directly; for an entry with choices its current picks
@@ -167,6 +177,46 @@ keybinds get detailed as they are built.
     self-contained (`docs/specs/SERVE.md`). The status box names the running
     combination.
   - A flat entry offers no picker; the key does nothing there.
+- **The router's view** (settled 2026-08-31, `docs/specs/SERVE.md` owns what the
+  router is): the toggle's third position, laid out exactly as the entry view is —
+  a list, a detail pane beside it, the same cursor and the same picker floating
+  over the list — because it is the same gesture: stand on a thing and read what
+  serving it would come to. Contracts:
+  - **The rows are the store's, not the running router's.** They are the models
+    included in it, in id order, whether or not a router is running: the list
+    answers "what would the next start serve", and what is being served right now
+    is drawn onto it. A model included since the router started therefore reads as
+    *not served* — with the pane saying the preset is composed at every start —
+    rather than vanishing from a list the operator just wrote.
+  - **Each row carries the router's own word**, and cria's phase is only what
+    colours it. Three of the six states a router publishes have no phase in cria's
+    vocabulary, so a row with no colour is normal and never missing data. The
+    state column is a fixed width — a row that reflows as a model loads is a row
+    nobody can read.
+  - **A model the preset could not carry is a row, not a footnote**: it reads
+    `skipped`, and the pane carries the reason in the words whoever included it
+    has to act on. A dropped model hidden away is a client's 404 hours later.
+  - **The pane is the picking-and-seeing loop in the router's flavour**: the entry
+    through the picks the *router* holds it under, and the preset section a start
+    would write for it — where the entry view shows the composed command line. `p`
+    opens the same picker over the same axes and writes the router's own store, so
+    one entry carries two combinations and each is edited where it is used.
+  - **Include, exclude, load and unload are CLI verbs** (settled 2026-08-31, and
+    deliberately not gestures here). Inclusion is a decision about which entry, made
+    from outside this list; loading is a deliberate request about memory with a
+    busy gate whose refusal is a sentence to read (`docs/specs/CLI.md`). Both would
+    need a modal to be honest, and a modal is what the picker doctrine exists to
+    avoid. The empty list names `cria router include` rather than pretending to be
+    the place.
+- **The router is a server in the status box** (settled 2026-08-31): cria started
+  it, and the box shows what cria started — hiding it would make "what is running
+  here" a lie in the one view that answers it. Its row names the engine where an
+  entry's names the entry, and no model, because it serves none. The server keys
+  reach it as they reach any row: stop, kill, log and dismiss. Two do not —
+  **restart** replays the combination one record was composed with and the router
+  was composed from no entry, and **bench** measures one model's server where the
+  router fronts several — so the bar stops drawing `r` for a box holding only the
+  router, rather than offering a key that does nothing.
 - **Every text color clears WCAG AA (≥4.5:1) against a dark terminal ground,
   enforced by a palette test** (settled 2026-08-18, after first real use found
   the dim tones illegible): muted tones are muted by hue and saturation, never

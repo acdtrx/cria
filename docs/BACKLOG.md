@@ -38,6 +38,24 @@ Group entries under headings as themes emerge.
 
 ## Serve
 
+- **Router-aware `cria validate`.** `cria validate <id>` proves an entry serves
+  under the **llama** engine: it displaces whatever holds the entry's own port,
+  starts that one entry, asks it for a completion and puts the displaced server
+  back (`docs/specs/SERVE.md`, Validate). It knows nothing about the router, so
+  proving the combination the router holds an entry under means stopping the
+  router by hand, starting the entry as itself on some port, and undoing both.
+  What a router-aware validate would answer instead: does this entry, in the
+  combination `models.json` holds it under, actually load and answer *through the
+  running router* — which is a different protocol, since nothing needs displacing
+  (the router is already up), the load is `POST /models/load` rather than a spawn,
+  and the proof is a completion naming the model's alias. Deliberately out of
+  scope when the router landed (`docs/plans/engines/OVERVIEW.md`): the entry-level
+  validate had just been settled and user-designed, and a second protocol under
+  the same verb wanted its own design pass. Revisit trigger: wanting to validate
+  an entry's router combination without hand-stopping the router — most likely
+  the first time a profile that serves fine on its own is skipped or fails under
+  the router and the difference has to be found by hand.
+
 - **Keyed servers vs cria's own requests.** An entry carrying
   `--api-key-file` makes llama-server 401 everything but `/health`: phases
   and start/stop survive, but the mlx warm, validate's prove, `cria bench`
@@ -85,124 +103,6 @@ Group entries under headings as themes emerge.
   idea not fully framed by the user's own account.) Revisit trigger: a profile
   actually gets exchanged between people or machines and re-creating it via
   agent/docs feels like friction.
-
-## Engines
-
-- **Engine config + shared model profiles; router as a third engine.**
-  (direction settled in discussion 2026-08-27; supersedes the global-profile
-  and router-mode entries — git holds their history.) The cut: model profiles
-  keep only what is true of the model wherever it runs — repo, quant, name,
-  sampling, fit choices — shared verbatim by the llama and router engines;
-  per-engine config (`engines/llama.toml`, `engines/router.toml`,
-  `engines/mlx.toml`) owns how this machine runs that engine — `ngl`, `fa`,
-  ports, `models-max`, parallelism. The TUI's backend toggle becomes an
-  engine toggle. Rejected: separate router profiles — the model facts would
-  fork and drift; the "global profile" framing — those params were never
-  global, they were engine-scoped, which also settles that entry's
-  per-backend-scoping question.
-  **Args become ini-style keys** (`key = value`, upstream's own preset
-  spelling) — **reversed 2026-08-31 by the user; the tree's args stay
-  verbatim argv tokens** and the preset is derived by dash-stripping flag
-  groups at composition time (reasoning: `docs/plans/engines/OVERVIEW.md`
-  ruling 1, `docs/specs/CONFIG.md`). What was argued for it: key→argv is
-  mechanical without arity knowledge (`c = 65536` →
-  `-c 65536`, `jinja = true` → `--jinja`), composition is order-independent
-  with exact key collisions (retiring the token heuristics), override
-  precedence is upstream's documented model-section > engine `[*]` rather
-  than cria's invention, and the router's `--models-preset` ini composes
-  near-verbatim into the state dir — one section per included entry plus its
-  router-scoped picks; section names = entry ids = the `model` field clients
-  send. (Router half-fired 2026-08-23: pi-llama-cpp *requires* router mode —
-  it manages models via `GET /models` + load/unload, which single-model
-  servers lack.)
-  **Context semantics** (settled 2026-08-31, user, at plan review): `c` and
-  `parallel` stay passthrough keys carrying the literal values llama
-  receives — cria computes nothing, the human divides, layout comments
-  carry the note. Rejected: the engine-composed pool recommendation of
-  2026-08-27 (`-c = context × parallel`) — simplicity won and
-  flag-agnosticism stays total; `host`/`port` remain the only
-  schema-composed fields. Engine knowledge is elsewhere — not an exception
-  but the layer's job (ruled 2026-08-27, user): cria is a llama-and-mlx runner, not
-  a generic process manager. The *tree's* args stay flag-agnostic
-  passthrough; each **engine module knows its engine by design** — schema
-  fields, endpoint knowledge (`/health`, `/slots`, the completion shape —
-  all already engine knowledge living in serve), phase semantics, and stats
-  collection (the slots-visibility entry's collector is llama-engine
-  territory; mlx answers "nothing" honestly; router reuses the llama
-  family's with `?model=` addressing — confirm `/slots` takes it during the
-  live probe). Upstream drift (unified KV) is then contained in the engine
-  module that owns the semantics.
-  **Refactor discipline for the extraction** (ruled 2026-08-27, user-raised:
-  test-preservation must not become the target in place of the new
-  architecture — "behavior-preserving" and "test-preserving" are different
-  claims): step zero classifies every test as *contract* (what the outside
-  sees — CLI output and exit codes, TUI frames, files, HTTP requests made;
-  the refactor's definition of behavior) or *structure* (pins the current
-  shape — seams, fakes, signatures). Contract tests never go red at any
-  step; structure tests may go red mid-phase, each named with the step that
-  rewrites it against the Engine interface — CLAUDE.md's phase rule,
-  sharpened to say which tests it licenses. The interface is designed from
-  the seams inventory before the first edit; steps move seams behind it,
-  never shuffle-until-green. No shim survives a phase end (code whose only
-  caller is an old-shape test is a named red in disguise). Fakes are
-  regenerated against the interface — an awkward fake is interface feedback,
-  not a reason to adapt. Deleting a structure test of a removed shape is
-  legitimate only paired, in the step file, with its replacement asserting
-  the same concern against the new shape; contract tests keep the full
-  never-delete protection. If this discipline proves out here, it graduates
-  to CLAUDE.md as a template lesson.
-  Open rulings: repeatable flags are inexpressible as keys (upstream's
-  preset shares the limit) — entries needing them stay argv-only or the
-  limit is accepted; booleans mirror upstream exactly; router inclusion
-  stays router-scoped state per the 2026-08-23 ruling, pending one
-  confirmation now that engines exist; migration is a manual rewrite of
-  every profile's args block (feature-building mode, ~15 files).
-  **Shape of the build** (ruled 2026-08-27, user): an Engine interface with
-  one implementation per engine, extracted from the seams the code already
-  has — today the backend is a string enum dispatched at ~10 named
-  predicates/switches (command+tool composition, health endpoint,
-  LoadsLazily, publishesSlots, record validation, hub/cache presence
-  semantics, schema fields, TUI toggle, scaffold). Phase 1 of the plan is
-  that extraction, behavior-preserving, llama+mlx only — the suite validates
-  it — then router lands as the third implementation instead of an eleventh
-  if-site. The interface's altitude is the open design question the probe
-  informs: not "give me argv" but make-this-entry-serve / stop-serving /
-  what-is-its-state — process spawn/kill for llama and mlx, load/unload API
-  calls against one resident process for the router, preset-ini
-  materialization instead of argv composition.
-  **Live probe PASSED 2026-08-31** (build 10450, dev Mac, port 11437, qwen
-  stopped for headroom and restored after; probe.ini was hand-written, no
-  cria code). Findings, all load-bearing for the plan:
-  - Discovery lists the whole HF cache **per quant** (12 models here), each
-    row tagged `source: cache|preset` with status and the child's full argv.
-  - **The router is a supervisor**: each loaded model is a child
-    llama-server process (`--port 0`, proxied) — load/unload is supervised
-    spawn/kill behind one port. The Engine interface's lifecycle altitude is
-    therefore make-serve/stop-serve via the router's API; cria never touches
-    the children.
-  - Ini keys: short forms **canonicalize upstream** (`temp`→`--temperature`,
-    `c`→`--ctx-size`, `fa`→`--flash-attn`) and `GET /models` echoes the
-    canonical preset back — cria needs no key mapping at all. Spec keys
-    (`spec-type`, `spec-draft-n-max`) accepted. A bogus key **fails startup
-    loudly**, naming key and section.
-  - Autoload-on-request works; both models resident at `--models-max 2`;
-    unload is async (success, then a grace-period transition); at
-    `--models-max 1` requesting the other model auto-evicts the resident
-    one — client-driven stop-one-start-another, live.
-  - `GET /props?model=` and **`GET /slots?model=` both work** — the llama
-    engine's stats collector transfers to the router engine wholesale.
-  - Wrinkle, naming: section quant tags **normalize** (`UD-Q4_K_XL` section
-    → listed id `Q4_K_XL`), so section names are not verbatim client names;
-    each child gets `--alias <id>` — an `alias = <entry-id>` preset key is
-    the untested lever for making entry ids the `model` field. Verify early
-    in the plan.
-  - Wrinkle, context semantics: on the SAME build, qwen with explicit
-    `--parallel 2` divides its pool (131072/slot from `-c 262144`) while
-    the LFM child under auto-parallel got 4 slots each reporting the FULL
-    `n_ctx 8192` — auto-parallel appears to multiply up, exactly the
-    per-conversation semantics the context ruling leans toward. Verify
-    before settling `context × parallel` composition.
-  Gate passed — next step is `docs/plans/engines/`.
 
 ## Cache view
 
@@ -266,8 +166,26 @@ Group entries under headings as themes emerge.
   remembered as the idle slot's "last" rate. Rejected for now: `--metrics`
   (Prometheus) — lifetime averages, needs a flag in every profile (the
   running server answers 501), and poll deltas answer the actual question.
-  Home (ruled 2026-08-27): the collector is llama-engine territory — engine
-  modules know their engine by design (see Engines); the TUI asks the engine
-  what it reports rather than special-casing a backend. Build after the
+  Home (ruled 2026-08-27, and built into the boundary since): the collector is
+  llama-engine territory — engine modules know their engine by design
+  (`docs/ARCHITECTURE.md`); the TUI asks the engine what it reports rather than
+  special-casing a backend. Under the router the same collector transfers by
+  `?model=` addressing (probe-verified 2026-08-31, and already used by the
+  unload busy gate), so slots visibility would reach the router's models too. Build after the
   validate plan lands — wanted; the trigger (watching logs to see how the
   server is doing) is being felt.
+
+## Method
+
+- **The contract/structure test triage as a template lesson.** The engines
+  refactor ran under a discipline written before the first edit (ruled
+  2026-08-27, user-raised: "behavior-preserving" and "test-preserving" are
+  different claims): every test classified as *contract* — what the outside sees,
+  never red at any step — or *structure* — pins the current shape, may go red
+  mid-phase, each named with the step that rewrites it, and never deleted except
+  paired with its replacement. It held for nine steps across three phases
+  (`docs/plans/engines/TRIAGE.md` is the classification, and each step file
+  records its own rewrites and mutation checks). Open question: whether it
+  graduates into `CLAUDE.md` as standing methodology, which would bind every
+  future refactor. Revisit trigger: the next refactor of comparable size — either
+  it is reached for again unprompted, or its absence is felt.

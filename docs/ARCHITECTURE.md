@@ -18,11 +18,12 @@ the command line to `cli`, passing `tui.Run` as the program bare `cria` opens.
 | `internal/tools` | which managed programs the host has and what each one's state disables (`specs/TOOLS.md`) | `Check(settings)` | `config` |
 | `internal/engine` | what cria knows about each way of serving — llama, mlx and the router: the program, the model reference, the endpoints, the warm and slot rules, and the router's preset composition (`specs/SERVE.md`) | `For(backend)`, `All()`, `RouterPreset` | `config`, `tools` |
 | `internal/procs` | every `ps`/`lsof` exec and every signal cria sends (`specs/SERVE.md`) | `System{}` (a `Host`) | `engine`, `tools` |
+| `internal/picks` | what has been chosen: the option picked on each entry's axes, and which entries the router holds and under what (`specs/CONFIG.md`) | `Load`/`Save`, `LoadRouter`/`SaveRouter` | `config` |
 | `internal/hubcache` | the cache walk, true blob-deduped sizes, entry presence, and the delete plans (`specs/CACHE.md`) | `Read(root)`, `Plan*`/`Execute` | `config`, `engine` |
 | `internal/hubapi` | what a model comes to when complete, and the HF token | `New()`, `Token()` | `config`, `engine`, `hubcache` |
-| `internal/serve` | a managed server's life: compose, spawn detached, record, observe, stop (`specs/SERVE.md`) | `New(root, host)` | `config`, `tools`, `engine`, `procs`, `hubcache`, `hubapi` |
-| `internal/cli` | parsing, ordering and output for the subcommands (`specs/CLI.md`) | `Dispatch(args, version, tui)` | `config`, `tools`, `engine`, `procs`, `serve`, `format` |
-| `internal/tui` | the program frame and its screens (`specs/TUI.md`) | `Run()` | `config`, `tools`, `engine`, `procs`, `serve`, `hubcache`, `format` |
+| `internal/serve` | a managed server's life: compose, spawn detached, record, observe, stop (`specs/SERVE.md`) | `New(root, host)` | `config`, `tools`, `engine`, `procs`, `picks`, `hubcache`, `hubapi` |
+| `internal/cli` | parsing, ordering and output for the subcommands (`specs/CLI.md`) | `Dispatch(args, version, tui)` | `config`, `tools`, `engine`, `procs`, `picks`, `serve`, `format` |
+| `internal/tui` | the program frame and its screens (`specs/TUI.md`) | `Run()` | `config`, `tools`, `engine`, `procs`, `picks`, `serve`, `hubcache`, `format` |
 
 The graph is acyclic and layered — leaves that only read the world, then the
 lifecycle over them, then the two faces (CODING-RULES §7). Two rules hold it that
@@ -43,6 +44,21 @@ way:
   the same kind of question, so `hubcache` and `hubapi` ask it too (settled
   2026-08-31): a reference qualified by a quantization is one file set out of a
   repo, one that is not is the whole repo.
+- **An engine knows, it never acts** (settled 2026-08-31, the boundary as three
+  implementations left it). The interface is paths, predicates and composition —
+  id, program, tool, model args, quant rule, health path, lazy-load, slots path —
+  and every transport stays a `serve.Manager` field: spawn, probe, complete,
+  slots, bench, and the router's two (one listing read, one load/unload sender).
+  The router proved the boundary rather than bending it: it composes a preset file
+  where the others compose argv, and it names its own endpoints and states, but
+  the requests to them are `serve`'s like all the others. That is what keeps an
+  engine implementable by something that is not a process at all.
+- **Not every engine is a backend an entry may declare** (settled 2026-08-31).
+  `config.Engines()` is what the tree may configure — engine files, records,
+  display; `config.Backends()` is the narrower set an entry's `backend` key may
+  name. The router is in the first and not the second: it runs **one server for
+  the host**, serving models that are ordinary entries, so what makes an entry the
+  router's lives in state rather than in the tree.
 - **The per-backend schema metadata stays in `config`** (settled 2026-08-31).
   `engine` imports `config`, so the keys a backend takes and the example values
   it takes them at cannot be declared with the engines without a cycle; `config`
@@ -62,6 +78,7 @@ graph BT
     procs[procs]
     tools[tools]
     engine[engine]
+    picks[picks]
     hubcache[hubcache]
     hubapi[hubapi]
     serve[serve]
@@ -78,14 +95,17 @@ graph BT
     hubapi --> config
     hubapi --> engine
     hubapi --> hubcache
+    picks --> config
 
     serve --> config
     serve --> tools
     serve --> engine
     serve --> procs
+    serve --> picks
     serve --> hubcache
     serve --> hubapi
 
+    cli --> picks
     cli --> serve
     cli --> config
     cli --> tools
@@ -94,6 +114,7 @@ graph BT
     cli --> format
 
     tui --> serve
+    tui --> picks
     tui --> config
     tui --> tools
     tui --> engine
@@ -108,7 +129,7 @@ graph BT
 
 ## Data flow
 
-Four sources of truth feed everything cria shows, and cria owns none of them.
+Five sources of truth feed everything cria shows, and cria owns none of them.
 
 **The config tree → entries → a launch.** `~/.config/cria/` is written by people
 and coding agents; `config.Load` reads it into resolved entries (port and host
@@ -137,6 +158,17 @@ process table. It answers four questions: is this pid the process cria recorded
 server), what does it cost, which server processes exist — the foreign scan,
 looking for the programs the engines name — and who holds a port (the attributed
 refusal).
+
+**The router's own API → which models it holds.** A router is a supervisor of
+child servers behind one port, and its children are its own: cria never looks for
+them in the process table. It asks `GET /models`, which publishes one row per
+model with the router's own word for what that model is doing, and it addresses
+one child by naming it (`?model=`), which is how the llama engine's per-slot
+signal transfers under the router. What the router answers is display data like a
+health probe — a router still coming up has nothing to say yet, and that is
+reported rather than turned into an error. Which entries the router is *asked* to
+hold comes from the other direction entirely: cria's own store, composed against
+the config tree into the preset the router reads (`docs/specs/SERVE.md`).
 
 **Server logs flow one way: to the screen.** They are tailed raw and never parsed
 for data (`docs/cria.md`, principle 6).
@@ -180,8 +212,32 @@ cria writes to exactly two trees and reads a third it does not own:
 | tree | who writes it | what is in it |
 | --- | --- | --- |
 | `~/.config/cria/` | people and coding agents; cria creates the root, `models/` and `AGENTS.md` when missing | `config.toml`, one `models/<id>.toml` per launchable entry, one `engines/<engine>.toml` per engine |
-| `~/.local/state/cria/` | cria alone | `servers/<id>.json` state records, `logs/<id>-<stamp>.log` (newest three per entry), `engines/<engine>/` for state that belongs to an engine rather than an entry (the router's composed preset, its record and its logs), `ui.json` UI memory |
+| `~/.local/state/cria/` | cria alone | `servers/<id>.json` state records, `logs/<id>-<stamp>.log` (newest three per entry), `choices.json` picks, `engines/<engine>/` for state that belongs to an engine rather than an entry, `ui.json` UI memory |
 | `~/.cache/huggingface/hub/` | `hf` and the servers; cria only through a delete plan | every model byte on the host — the single source of truth |
+
+**State is per entry, except where it is per engine** (settled 2026-08-31). Most
+of what cria writes belongs to an entry — its record, its logs, the option picked
+on each of its axes. What belongs to an *engine* — a server the whole tree shares
+rather than one entry's — lives in a folder of its own, so nothing an entry is
+named can collide with it:
+
+```
+~/.local/state/cria/
+├── servers/<entry-id>.json          one record per entry's running server
+├── logs/<entry-id>-<stamp>.log      newest three per entry
+├── choices.json                     the option picked on each entry's axes
+├── ui.json                          the TUI's own memory
+└── engines/router/                  the one engine that has state of its own
+    ├── models.json                  which entries it holds, and under what
+    ├── preset.ini                   composed at every start, never edited
+    ├── server.json                  its record
+    └── logs/router-<stamp>.log      newest three
+```
+
+Entry records and logs stay where they are: an entry's server is still an
+entry's, and moving them under `engines/llama/` would be a rename with no
+question behind it. The router's logs sit under its own folder so an entry named
+`router` can neither prune them nor be pruned by them.
 
 The cache location is resolved the way `huggingface_hub` resolves it
 (`HF_HUB_CACHE`, then `HF_HOME`, then the XDG cache directory), so cria reads

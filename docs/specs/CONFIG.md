@@ -96,6 +96,18 @@ group with its dashes stripped, derived where the preset is composed.
 - Display follows the same rule: the TUI shows the files' own `args`, one flag
   group to a line, and the full composed command line verbatim — that *is* the
   entry's documentation.
+- **Context and parallelism are passthrough like everything else** (settled
+  2026-08-31, user, at plan review). `-c` and `--parallel` carry the literal
+  values the server receives; cria computes nothing, and the human divides when
+  reading — the layout comments in an entry file carry that note, beside the fit
+  measurements already there. Rejected: composing the pool from `context ×
+  parallel` — simplicity won, and it keeps cria's flag-agnosticism total;
+  `host` and `port` stay the only fields cria composes. This matters because the
+  semantics move upstream: on one build (10450, probed 2026-08-31) an explicit
+  `--parallel 2` divided a `-c 262144` pool into 131072 per slot, while a child
+  under auto-parallel reported the *full* `n_ctx` on each of four slots. That is a
+  fact for whoever writes the profile, and precisely the kind of fact cria must
+  not encode a formula against.
 
 ## Choices — variations inside one entry (settled 2026-08-22)
 
@@ -150,6 +162,14 @@ next to the options, where fit measurements already live.
   `cria start <id> choice=option` overrides for that one start and writes
   nothing — one-shot, so an agent's experiment never silently changes what a
   bare start launches next.
+- **One entry, one set of axes, a combination per engine** (settled 2026-08-31).
+  The axes are the entry's; which option is current is per engine, because the
+  combination that fits a model as one server per entry is not the combination
+  that fits it beside three others behind one router. `choices.json` holds the
+  entry's own; the router's store holds the router's
+  (`docs/specs/SERVE.md`). Both are written by the same gesture in their own
+  surface — the TUI picker in the engine's view, and `cria router include` on the
+  command line — and neither can see the other's.
 - An entry with no choices behaves exactly as today. A running server is never
   confused by choice edits: its record carries the picks it composed and the
   full command line (`docs/specs/SERVE.md`).
@@ -199,6 +219,26 @@ there rather than repeated in fifteen profiles.
 - Every flag in the router's `args` must be writable as one preset key: a flag
   written twice, a flag carrying more than one value, or tokens before any flag
   refuse the start by name (`docs/specs/SERVE.md`, The router).
+- **`router_args` is verbatim argv too** (settled 2026-08-31, extending the
+  verbatim-token ruling above): it is a command line — llama-server's own, for the
+  supervisor process — so the same rule applies token for token, and cria composes
+  `--models-preset`, `--host` and `--port` around it. It is the one arg list that
+  never becomes preset keys, because it is not about any model: `--models-max`,
+  `--models-autoload` and the sleep flags live here and reach the process
+  directly. cria therefore carries none of upstream's defaults for them.
+- **Which entries the router serves is not in the tree** (settled 2026-08-31).
+  There is no key for it in any file: inclusion is router-scoped state, edited by
+  `cria router include` / `exclude`, and the same entry can be held by the router
+  under a different combination than the one a bare `cria start` composes
+  (`docs/specs/SERVE.md`, The models under the router). An agent looking for a
+  config key here will not find one, and `~/.config/cria/AGENTS.md` says so.
+- **A router section carries the entry's args and the picked options', never the
+  engine's** (settled 2026-08-31). The three-level merge below is the entry's own
+  engine file, then the entry, then the picks; the router composes each model's
+  section from the entry level down and writes `engines/router.toml`'s `args`
+  once, as the preset's `[*]` block. Upstream applies that block under every
+  section by its own precedence — merging it into each section would be cria doing
+  that work twice, and would turn every pick change into a whole-file diff.
 - Human/agent-owned like the rest of the tree; cria reads it and never writes it.
 - A file named after something cria does not serve is not read at all — it is
   somebody's note, not a config cria silently obeys.

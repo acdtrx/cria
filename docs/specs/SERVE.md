@@ -175,6 +175,109 @@ children — which models it holds is asked through the router's documented API
 - **The tool check answers for router mode** (`docs/specs/TOOLS.md`): the same
   `llama-server`, asked whether this build takes `--models-preset`, so a build that
   predates router mode refuses up front instead of failing at the spawn.
+- **Where a record lives is a function of the record** (settled 2026-08-31): an
+  entry's server is recorded under its entry, an engine's own under its engine,
+  and the record already says which it is. So stop, kill and dismiss take a
+  record and need no second answer — the router is ended by the same escalation
+  at the same pid as any server, and the file the confirmed exit removes is
+  whichever of the two it lives in. Rejected: a stop of its own per engine — one
+  call per place a record can sit is a dispatcher the record makes unnecessary.
+
+### The models under the router (settled 2026-08-31)
+
+Which entries the router serves is **state, not config**: the tree declares
+entries, and a store of the router's own says which of them this host's router
+holds and under which combination (OVERVIEW ruling 2). The same entry can be a
+llama entry with its own picks and a router model with different ones — that is
+the point of holding them per engine, and it is why no entry key could express
+inclusion (`docs/specs/CONFIG.md`).
+
+- **The store is `~/.local/state/cria/engines/router/models.json`**, entry id →
+  the picks it is held under. **The key is the inclusion**: an entry held at its
+  config defaults is `{}` rather than absent, which is exactly where this store
+  parts from `choices.json` — there, an entry picking nothing and an absent entry
+  say the same thing.
+- **A store cria cannot read refuses; it does not degrade.** A stale *pick* has
+  the config default to fall back on, and nothing stands in for "which entries are
+  included" — an empty answer would start a router serving nothing and look like a
+  successful start. So a broken store refuses the start naming the path and the
+  one-line fix, while a missing file is simply a fresh router.
+- **Inclusion is never auto-pruned.** A pick naming an option the entry no longer
+  has falls back to the config default; an included id whose entry is gone stays
+  in the store and is reported against that id. A rename or a typo must not
+  silently empty the router, and `cria router exclude` — which never reads the
+  tree, for this reason — is the way out.
+- **The preset is one section per included entry**, carrying the entry's args
+  merged with the picked options' and **no engine level**. `engines/router.toml`'s
+  `args` are the `[*]` block, which upstream applies under every section by its
+  own documented precedence (command line > model section > `[*]`); merging them
+  into each section would be cria doing upstream's job twice and would make every
+  pick change a whole-file diff. Each section is named by the model reference and
+  carries `alias = <entry-id>` — upstream normalizes a section's quant tag but
+  passes an alias through as written, which is what makes the entry id the name
+  clients send.
+- **A model that cannot be carried is skipped, never fatal** (settled
+  2026-08-31). One entry whose args are not expressible as preset keys would
+  otherwise take every other model down with it. The verdict is per model and
+  **every surface prints it** — a silently dropped model is a client's 404 hours
+  later. Six things skip one model: its args are not writable as preset keys (the
+  three refusals above), its args set `alias` (cria writes that key itself, and
+  two would hand upstream two answers), two models resolve to the same
+  `repo:quant` (one section written twice — the later is skipped naming both
+  entries), the tree no longer declares the id, its file no longer loads, or an
+  entry served by another program is included (`mlx` entries are served by
+  `mlx_lm.server`; only llama entries can be in a llama-server router). The
+  engine file's own args remain the one thing that refuses the whole composition:
+  that is the router's configuration, not one of its models.
+- **The composition is pure**: it reads the store and the tree, writes nothing and
+  asks no server, so it answers the same whether or not a router is running —
+  what the *next* start would serve. A start returns it beside the record, so the
+  caller reports what was actually written rather than composing a second time.
+
+### What the router says its models are doing
+
+Child processes are the router's own. cria never looks for them in the process
+table: it asks the router, which publishes one row per model it holds
+(`GET /models` — id, aliases, status).
+
+- **Upstream's word is what is shown, and the phase map is deliberately
+  partial** (settled 2026-08-31). The states are `downloading`, `downloaded`,
+  `unloaded`, `loading`, `loaded`, `sleeping`. Three map onto cria's phases —
+  `downloading` → `downloading`, `loading` → `starting`, `loaded` → `running` —
+  and three have no true word in it: `downloaded`, `unloaded` and `sleeping` all
+  mean the router holds this model with nothing resident, which is not
+  `starting` (nothing is starting), not `exited` (nothing was launched) and not
+  `running`. Those get **no phase at all**, and every surface prints the router's
+  own word, which is what a reader wants anyway. Visible-and-absent beats
+  plausible-and-wrong, and a state upstream adds later lands in the same place
+  instead of being read as something cria knows. Rejected: widening `Phase` with
+  a "held" value — it would reach `cria status --json`, the TUI's tone table and
+  this document's phase contract for a state that is not a server's phase.
+- **A listing cria could not get is a display fact, not an error** — the same
+  shape a health probe has. A router still coming up has nothing to answer with
+  yet, and the surfaces say so rather than claiming it holds nothing.
+- **cria only ever addresses a model the router has just said it holds.** A name
+  matches on alias *or* reference, and that check is what makes `?model=`
+  addressing honest: `/slots` (and `/props`) transfer to one child by query
+  parameter, so the llama engine's per-slot signal works under the router
+  unchanged.
+- **Load and unload are deliberate verbs** (`POST /models/load|unload`, body
+  `{"model": "<name>"}`, under the same generous budget a warm gets). The router
+  loads a model on the first request that names it — that autoload is the feature
+  clients rely on — and these exist because a mechanism must be invocable on its
+  own: a model wanted resident before the first request is a thing to ask for,
+  not a thing to arrange by sending a fake completion.
+- **Unload refuses a model that is answering a request right now**, with
+  `--ignore-busy` as the override — the same gate, the same signal and the same
+  spelling validate puts in front of displacing a busy server (Validate, below).
+  That refusal is also what gives the per-model `/slots` addressing a real caller.
+- **Eviction is upstream's and client-driven** (probe-verified 2026-08-31): at
+  `--models-max N` the router keeps N models resident, and a request naming an
+  N+1th stops one and starts the other. cria neither triggers nor prevents that —
+  it is the swap the whole router mode exists for — and how many may be resident
+  is a `router_args` flag rather than anything cria carries a default for
+  (`docs/specs/CONFIG.md`). What cria shows is the result: the router's own word
+  per model, changing under the refresh.
 
 ## Foreign servers (settled 2026-08-18)
 
@@ -190,6 +293,15 @@ children — which models it holds is asked through the router's documented API
   server was composed from, when its entry declares choices. `--json` emits the
   same facts as one JSON document — the machine contract for agents. Exits zero
   when at least one server is live, non-zero when none is.
+- **The router is one of those servers** (settled 2026-08-31): cria started it and
+  holds its record, so a status that hid it would answer "what is running here"
+  wrongly, and a live router alone exits zero like any live server. It reads as a
+  block of its own rather than a row among the entries' — it serves a preset
+  instead of a model, and the models it holds are its own to list, each with the
+  router's own word for it. In `--json` it is the `router` key, **null** on a host
+  that has no router record: one router per host, so an empty list would deny the
+  shape and a zeroed object would read as a router with pid 0. An exited router is
+  a crash report and is not asked what it holds.
 
 ## Validate (settled 2026-08-23, user-designed)
 
