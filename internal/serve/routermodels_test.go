@@ -225,7 +225,7 @@ func TestAPickChangeRegeneratesTheSectionAtTheNextStart(t *testing.T) {
 
 	record, _ := startRouterFor(t, manager, host, tree, 4242)
 	before := readFile(t, manager.routerPresetPath())
-	if err := manager.StopRouter(record); err != nil {
+	if err := manager.Stop(record); err != nil {
 		t.Fatalf("stopping the router: %v", err)
 	}
 

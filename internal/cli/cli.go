@@ -110,10 +110,10 @@ type servers interface {
 
 	// The router's own lifecycle (router.go). It is one process per host rather
 	// than one per entry, and its record lives with its engine's state, so it is
-	// read, started, stopped and observed by its own calls.
+	// read, started and observed by its own calls — the stop is Stop, which takes
+	// a record and reads where that record lives off the record itself.
 	RouterServer() (serve.Server, bool, error)
 	StartRouter(tree *config.Tree, report tools.Report) (serve.Record, serve.RouterModels, error)
-	StopRouter(record serve.Record) error
 	RouterSnapshot(record serve.Record) (serve.Status, error)
 
 	// The models under the router (routermodels.go): what the store and the tree

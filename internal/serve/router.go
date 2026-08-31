@@ -156,15 +156,6 @@ func (m *Manager) StartRouter(tree *config.Tree, report tools.Report) (Record, R
 	return record, models, nil
 }
 
-// StopRouter ends the router the way every managed server is ended: SIGTERM, a
-// grace period, then SIGKILL, with the record removed once the process is
-// confirmed gone (docs/specs/SERVE.md). The composed preset is left where it is —
-// it is regenerated at the next start, and it is what the stopped router was
-// serving from.
-func (m *Manager) StopRouter(record Record) error {
-	return m.end(record, m.grace, m.routerRecordPath())
-}
-
 // RouterSnapshot observes the router: whether it is still the process cria
 // launched, and whether its port answers.
 //

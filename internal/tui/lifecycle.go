@@ -516,10 +516,12 @@ func orUnreadable(value string) string {
 // record behind it — the other half is the last-started entry, an id the
 // preferences carry across sessions (restartShownEntry, docs/specs/TUI.md).
 // A server cria can see is never answered for here: the keys that could mean any
-// of several ask which (pick.go).
+// of several ask which (pick.go). Neither is the router: a restart is one entry's
+// combination started again, and the router is composed from no entry at all
+// (pick.go, reaches).
 func (m model) exitedRecord() (serve.Record, bool) {
 	for _, status := range m.listing.Servers {
-		if status.Phase == serve.PhaseExited {
+		if status.Phase == serve.PhaseExited && status.Backend != config.BackendRouter {
 			return status.Record, true
 		}
 	}

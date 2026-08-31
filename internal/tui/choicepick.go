@@ -9,6 +9,7 @@ import (
 
 	"cria/internal/config"
 	"cria/internal/picks"
+	"cria/internal/serve"
 )
 
 // This file is the write side of an entry's choices: the picker a selection key
@@ -38,16 +39,23 @@ const picksTitle = "picks"
 // still be narrower — the pane's own width wins (pickerBox).
 const pickerFloor = 40
 
-// picker is one entry's axes being picked over: which entry, and which axis the
-// cursor stands on. There is nothing else to keep — by the time the next key
-// arrives, whatever the last one picked is already on disk.
+// picker is one entry's axes being picked over: which entry, which axis the
+// cursor stands on, and which store the picks belong to. There is nothing else
+// to keep — by the time the next key arrives, whatever the last one picked is
+// already on disk.
 //
 // The entry is held by id rather than by value: the tree is re-read every couple
 // of seconds under the open picker, and the axes drawn are the ones the file
 // declares now.
+//
+// router says the picks being edited are the ones the router holds this entry
+// under, not the ones a bare start composes with. One entry carries both, by
+// design (docs/plans/engines/OVERVIEW.md, ruling 2), so the same gesture over
+// the same axes writes whichever store the screen it was opened from is about.
 type picker struct {
 	entry  string
 	cursor int
+	router bool
 }
 
 // openPicker is p: the highlighted entry's axes, with the cursor on the first
@@ -58,11 +66,31 @@ type picker struct {
 // the picks and the bar names the keys; a line repeating any of that would be
 // one more thing to read that is already on screen (managegroups.go).
 func (m model) openPicker() model {
+	if m.onRouter() {
+		return m.openRouterPicker()
+	}
 	selected, ok := m.selectedRow()
 	if !ok || selected.broken != nil || len(selected.entry.Choices) == 0 {
 		return m
 	}
 	m.picker = &picker{entry: selected.entry.ID}
+	return m.syncEscScope()
+}
+
+// openRouterPicker is the same key in the router's view: the axes of the model
+// the cursor stands on, picked along for the combination the *router* holds it
+// under. The box, the rows and the keys are the entry view's — only the store
+// the pick lands in differs (routerview.go).
+func (m model) openRouterPicker() model {
+	row, ok := m.selectedRouterRow()
+	if !ok || row.skipped() {
+		return m
+	}
+	entry, found := m.entryNamed(row.id)
+	if !found || len(entry.Choices) == 0 {
+		return m
+	}
+	m.picker = &picker{entry: entry.ID, router: true}
 	return m.syncEscScope()
 }
 
@@ -123,7 +151,7 @@ func (m model) rollPick(entry config.Entry, by int) model {
 	// from, so the option that moves is the one the user is looking at. A
 	// selection naming nothing for this axis rolls from its first option, which
 	// is where an unmarked row reads as standing.
-	at, current := 0, m.picks(entry)[choice.Name]
+	at, current := 0, m.pickerSelection(entry)[choice.Name]
 	for i, option := range choice.Options {
 		if option.Name == current {
 			at = i
@@ -131,7 +159,78 @@ func (m model) rollPick(entry config.Entry, by int) model {
 		}
 	}
 	rolled := (at + by + len(choice.Options)) % len(choice.Options)
+	if m.picker.router {
+		return m.recordRouterPick(entry, choice.Name, choice.Options[rolled].Name)
+	}
 	return m.recordPick(entry.ID, choice.Name, choice.Options[rolled].Name)
+}
+
+// pickerSelection is the combination the open picker draws its marks from and
+// rolls along: the entry's own picks, or the router's picks for it. It is the
+// same reading the pane beside the box is composed from, so the mark and what it
+// composes can never disagree.
+func (m model) pickerSelection(entry config.Entry) config.Selection {
+	if m.picker != nil && m.picker.router {
+		return m.routerPicks(entry.ID)
+	}
+	return m.picks(entry)
+}
+
+// routerPicks is the combination the router holds one entry under, as the last
+// composition resolved it. A model the router does not hold has none — the
+// picker is not opened on one (openRouterPicker).
+func (m model) routerPicks(id string) config.Selection {
+	for _, model := range m.router.models.Served {
+		if model.ID == id {
+			return model.Selection
+		}
+	}
+	return nil
+}
+
+// recordRouterPick writes one pick into the store of models the router holds
+// (internal/picks, Router). It is the same write the entry picker makes, into
+// the store one level up: the key is the inclusion and the value is the
+// combination, so the entry stays included and only what it is held under moves.
+//
+// The store is read again here rather than carried on the frame. `cria router
+// include` writes it too — inclusion is a verb (docs/specs/CLI.md) — so the
+// frame is not its only writer, and a copy held since the last tick could
+// overwrite an inclusion made in another terminal a second ago.
+//
+// The router composes its preset at every start, so a pick changed under a
+// running router is what the *next* start serves. The pane says so; nothing here
+// touches the process.
+func (m model) recordRouterPick(entry config.Entry, choice, option string) model {
+	dir := serve.RouterStateDir(m.root)
+	held, err := picks.LoadRouter(dir)
+	if err != nil {
+		m.alert = alert{text: err.Error(), bad: true}
+		return m
+	}
+	if !held.Holds(entry.ID) {
+		// It was excluded while the picker stood on it. Saying so beats writing
+		// an inclusion the user did not ask this key for.
+		m.alert = alert{text: entry.ID + " is no longer one of the router's models", bad: true}
+		return m.leavePicker()
+	}
+
+	selection := held.Picks(entry.ID)
+	if selection == nil {
+		selection = config.Selection{}
+	}
+	selection[choice] = option
+	held.Include(entry.ID, selection)
+
+	m.alert = alert{}
+	if err := picks.SaveRouter(dir, held); err != nil {
+		m.alert = alert{text: err.Error(), bad: true}
+		return m
+	}
+	// The list and the pane are drawn from the composition the last tick made,
+	// so the pick shows on the next one — a beat away, like every other fact on
+	// this screen.
+	return m
 }
 
 // recordPick writes one pick and says nothing about it: the row it lands on
@@ -206,7 +305,25 @@ func (m model) pickedEntry() (config.Entry, bool) {
 	if !found || len(entry.Choices) == 0 {
 		return config.Entry{}, false
 	}
+	// A router picker also stands on an inclusion, and an inclusion can be
+	// dropped from another terminal while it is open (docs/specs/CLI.md,
+	// `cria router exclude`). There is nothing to pick for a model the router no
+	// longer holds.
+	if m.picker.router && m.routerPicks(entry.ID) == nil && !m.holdsRouterModel(entry.ID) {
+		return config.Entry{}, false
+	}
 	return entry, true
+}
+
+// holdsRouterModel reports whether the last composition put this entry among the
+// models the router serves.
+func (m model) holdsRouterModel(id string) bool {
+	for _, model := range m.router.models.Served {
+		if model.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // pickedChoice is the axis the cursor stands on right now.
@@ -234,8 +351,8 @@ func (m model) pickerBox(width, rows int) string {
 	}
 
 	// One reading of the picks draws every row, and it is the same reading the
-	// detail pane beside the box composes its command line from (m.picks).
-	selection := m.picks(entry)
+	// pane beside the box is composed from (pickerSelection).
+	selection := m.pickerSelection(entry)
 	cursor := clamped(m.picker.cursor, len(entry.Choices))
 	column := choiceColumn(entry.Choices)
 

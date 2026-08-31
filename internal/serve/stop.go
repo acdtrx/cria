@@ -12,14 +12,18 @@ import (
 //
 // Stopping a server that has already exited is not a failure: it removes the
 // record, which is the state the caller asked for.
+//
+// It ends the router as readily as an entry's server: the escalation is the
+// same signal at the same pid, and where the record to remove lives is the
+// record's own answer (recordPathOf).
 func (m *Manager) Stop(record Record) error {
-	return m.end(record, m.grace, m.recordPath(record.EntryID))
+	return m.end(record, m.grace)
 }
 
 // Kill is Stop without the grace: SIGKILL straight away, for a server that is
 // wedged or that the user does not want to wait for.
 func (m *Manager) Kill(record Record) error {
-	return m.end(record, 0, m.recordPath(record.EntryID))
+	return m.end(record, 0)
 }
 
 // Dismiss clears the record of a server that has exited — the crash report, once
@@ -34,14 +38,13 @@ func (m *Manager) Dismiss(record Record) error {
 	if live {
 		return fmt.Errorf("%s is running as pid %d; stop it rather than dismissing it", record.EntryID, record.PID)
 	}
-	return removeRecordAt(m.recordPath(record.EntryID))
+	return removeRecordAt(m.recordPathOf(record))
 }
 
 // end is the whole escalation. grace is how long SIGTERM is given before SIGKILL
-// follows; zero skips SIGTERM entirely. recordPath is the file this record lives
-// in — an entry's, or an engine's own (router.go) — since a confirmed exit is
-// what removes it.
-func (m *Manager) end(record Record, grace time.Duration, recordPath string) error {
+// follows; zero skips SIGTERM entirely. A confirmed exit is what removes the
+// record, wherever the record lives (recordPathOf).
+func (m *Manager) end(record Record, grace time.Duration) error {
 	live, err := m.Live(record)
 	if err != nil {
 		return err
@@ -73,7 +76,7 @@ func (m *Manager) end(record Record, grace time.Duration, recordPath string) err
 				record.EntryID, record.PID, m.confirm)
 		}
 	}
-	return removeRecordAt(recordPath)
+	return removeRecordAt(m.recordPathOf(record))
 }
 
 // waitGone watches one pid until it stops being the server the record names, or

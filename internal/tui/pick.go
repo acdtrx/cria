@@ -4,6 +4,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"cria/internal/config"
 	"cria/internal/serve"
 )
 
@@ -146,11 +147,26 @@ func (m model) leavePick() model {
 func (m model) pickable(action pickAction) []int {
 	var rows []int
 	for i, status := range m.listing.Servers {
-		if action.answers(status.Phase) {
+		if action.answers(status.Phase) && action.reaches(status.Backend) {
 			rows = append(rows, i)
 		}
 	}
 	return rows
+}
+
+// reaches reports whether an action means anything for a server of one engine.
+//
+// Two of them mean nothing for the router. A restart replays the combination one
+// record was composed with (lifecycle.go, replayOf), and the router was composed
+// from no entry and no picks; a bench measures one model's prefill and decode
+// (docs/specs/SERVE.md), and the router serves however many models are included
+// in it. The rest are about a process — stop it, kill it, read its log, clear its
+// crash report — and the router is a process like any other.
+func (a pickAction) reaches(backend config.Backend) bool {
+	if backend != config.BackendRouter {
+		return true
+	}
+	return a != pickRestart && a != pickBench
 }
 
 // answers reports whether a server in this phase is something the action can be

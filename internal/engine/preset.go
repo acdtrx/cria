@@ -59,9 +59,10 @@ type RouterModel struct {
 // down with it, and a router that serves the rest and says which one it dropped
 // is the answer the host can act on (docs/specs/SERVE.md).
 type Composition struct {
-	Preset  string   // the file's whole text
-	Served  []string // the ids that got a section, in the order they were written
-	Skipped []Skipped
+	Preset   string            // the file's whole text
+	Sections map[string]string // id → the section written for it, so a surface can show one model's own lines
+	Served   []string          // the ids that got a section, in the order they were written
+	Skipped  []Skipped
 }
 
 // Skipped is one model the preset could not carry, and why — phrased for
@@ -97,7 +98,7 @@ func RouterPreset(defaults []string, models []RouterModel) (Composition, error) 
 		preset.WriteString(key.line() + "\n")
 	}
 
-	composed := Composition{}
+	composed := Composition{Sections: map[string]string{}}
 	sections := map[string]string{} // section name → the id that wrote it
 	for _, model := range models {
 		section := hubReference(config.Launch{Repo: model.Repo, Quant: model.Quant})
@@ -120,11 +121,15 @@ func RouterPreset(defaults []string, models []RouterModel) (Composition, error) 
 		}
 
 		sections[section] = model.ID
-		preset.WriteString("\n[" + section + "]\n")
-		preset.WriteString(presetAlias + " = " + model.ID + "\n")
+
+		var written strings.Builder
+		written.WriteString("[" + section + "]\n")
+		written.WriteString(presetAlias + " = " + model.ID + "\n")
 		for _, key := range keys {
-			preset.WriteString(key.line() + "\n")
+			written.WriteString(key.line() + "\n")
 		}
+		preset.WriteString("\n" + written.String())
+		composed.Sections[model.ID] = written.String()
 		composed.Served = append(composed.Served, model.ID)
 	}
 

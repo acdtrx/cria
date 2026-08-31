@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 	"cria/internal/procs"
 	"cria/internal/serve"
 )
@@ -318,5 +319,150 @@ func TestStatusJSONIsAlwaysADocument(t *testing.T) {
 	}
 	if document.Servers == nil || document.Broken == nil {
 		t.Errorf("the document is %s, want both lists present and empty", out)
+	}
+}
+
+// The router this host runs is one of the servers `cria status` reports, in a
+// block of its own: it serves a preset rather than a model, and the models it
+// holds are its own to name (docs/specs/SERVE.md, The router).
+func TestStatusReportsTheRouterAndTheModelsItHolds(t *testing.T) {
+	fake := &fakeServers{
+		snapshots:    serve.StatusListing{Servers: []serve.Status{runningStatus()}},
+		routerFound:  true,
+		routerLive:   true,
+		routerRecord: routerRecord(),
+		health:       serve.Health{URL: "http://127.0.0.1:11434/health", Green: true, Status: 200, Detail: "200 OK"},
+		routerChildren: serve.RouterChildren{Children: []serve.RouterChild{
+			{Model: "unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL", Aliases: []string{"qwen"}, State: engine.RouterLoaded, Phase: serve.PhaseRunning},
+			{Model: "ggml-org/gemma-3-4b-it-GGUF:Q8_0", Aliases: []string{"gemma"}, State: engine.RouterUnloaded},
+		}},
+	}
+	app, out, errOut := newTestApp(testTree(), fake)
+
+	if code := app.status(nil); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	for _, want := range []string{
+		"qwen  running  llama",    // the entry's server is still reported
+		"router  running  router", // and the router beside it
+		"preset /home/u/.local/state/cria/engines/router/preset.ini", // what a router serves instead of a model
+		"health http://127.0.0.1:11434/health: 200 OK",
+		"qwen   loaded    unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL", // the router's own word per model
+		"gemma  unloaded  ggml-org/gemma-3-4b-it-GGUF:Q8_0",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("cria printed\n%s\nwant it to contain %q", out, want)
+		}
+	}
+}
+
+// A live router is a live server: it answers the question the exit code asks,
+// with no entry's server running at all.
+func TestStatusExitsZeroForALiveRouterAlone(t *testing.T) {
+	fake := &fakeServers{routerFound: true, routerLive: true, routerRecord: routerRecord()}
+	app, out, errOut := newTestApp(testTree(), fake)
+
+	if code := app.status(nil); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+	if strings.Contains(out.String(), "no servers") {
+		t.Errorf("cria printed %q while a router was running", out)
+	}
+}
+
+// An exited router is a crash report like any other record: it is reported, it is
+// not asked what it holds, and it makes nothing live.
+func TestStatusReportsAnExitedRouterWithoutAskingItAnything(t *testing.T) {
+	fake := &fakeServers{
+		routerFound:    true,
+		routerRecord:   routerRecord(),
+		routerPhase:    serve.PhaseExited,
+		routerChildren: serve.RouterChildren{Children: []serve.RouterChild{{Model: "qwen", State: engine.RouterLoaded}}},
+	}
+	app, out, errOut := newTestApp(testTree(), fake)
+
+	if code := app.status(nil); code != exitFailure {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitFailure, errOut)
+	}
+	if !strings.Contains(out.String(), "router  exited") || !strings.Contains(out.String(), "is gone; launched") {
+		t.Errorf("cria printed %q, want the router's crash report", out)
+	}
+	if strings.Contains(out.String(), "\n  models\n") {
+		t.Errorf("cria printed %q, want no model listing from a router that is gone", out)
+	}
+}
+
+// The router reaches the machine contract too, under a key that is always there:
+// null on a host with no router, an object with the models it holds on one with.
+func TestStatusJSONCarriesTheRouter(t *testing.T) {
+	fake := &fakeServers{
+		routerFound:  true,
+		routerLive:   true,
+		routerRecord: routerRecord(),
+		health:       serve.Health{URL: "http://127.0.0.1:11434/health", Green: true, Status: 200, Detail: "200 OK"},
+		routerChildren: serve.RouterChildren{Children: []serve.RouterChild{
+			{Model: "unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL", Aliases: []string{"qwen"}, State: engine.RouterLoaded, Phase: serve.PhaseRunning},
+			{Model: "ggml-org/gemma-3-4b-it-GGUF:Q8_0", Aliases: []string{"gemma"}, State: engine.RouterSleeping},
+		}},
+	}
+	app, out, errOut := newTestApp(testTree(), fake)
+
+	if code := app.status([]string{"--json"}); code != exitOK {
+		t.Fatalf("exit code %d, want %d (stderr: %s)", code, exitOK, errOut)
+	}
+
+	var document map[string]any
+	if err := json.Unmarshal(out.Bytes(), &document); err != nil {
+		t.Fatalf("the document does not parse: %v\n%s", err, out)
+	}
+	router, ok := document["router"].(map[string]any)
+	if !ok {
+		t.Fatalf("router is %#v, want the object the running router fills", document["router"])
+	}
+	for field, want := range map[string]any{
+		"entry":   "router",
+		"backend": "router",
+		"preset":  "/home/u/.local/state/cria/engines/router/preset.ini",
+		"port":    float64(11434),
+		"pid":     float64(4242),
+		"phase":   "running",
+	} {
+		if got := router[field]; got != want {
+			t.Errorf("router.%s is %#v, want %#v", field, got, want)
+		}
+	}
+
+	models, ok := router["models"].([]any)
+	if !ok || len(models) != 2 {
+		t.Fatalf("router.models is %#v, want the two models the router holds", router["models"])
+	}
+	// A state cria's phases cannot say is published as the router wrote it, with
+	// an empty phase beside it — visibly absent rather than plausibly wrong.
+	sleeping, ok := models[1].(map[string]any)
+	if !ok {
+		t.Fatalf("the model is %#v, want an object", models[1])
+	}
+	if sleeping["state"] != "sleeping" || sleeping["phase"] != "" {
+		t.Errorf("the sleeping model reads %#v, want the router's own word and no phase of cria's", sleeping)
+	}
+}
+
+// A host with no router says so with null, which is the one absence in the
+// document: a router is one per host, so an empty list would deny its shape.
+func TestStatusJSONHasNoRouterWithoutOne(t *testing.T) {
+	app, out, _ := newTestApp(testTree(), &fakeServers{})
+
+	if code := app.status([]string{"--json"}); code != exitFailure {
+		t.Fatalf("exit code %d, want %d", code, exitFailure)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(out.Bytes(), &document); err != nil {
+		t.Fatalf("the document does not parse: %v\n%s", err, out)
+	}
+	if _, present := document["router"]; !present {
+		t.Errorf("the document is %s, want the router key present", out)
+	}
+	if document["router"] != nil {
+		t.Errorf("router is %#v, want null on a host that has none", document["router"])
 	}
 }

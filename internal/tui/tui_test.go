@@ -56,7 +56,49 @@ type fakeServers struct {
 	specs     []serve.BenchSpec
 	holders   []int
 	asked     []int // the ports a start asked about, in the order it asked
+
+	// The router this host runs, as the frame reads it: whether cria holds a
+	// record of one, whether its process is still there, the phase an
+	// observation reports, what the store and the tree compose it to serve, and
+	// what the running one says it holds (routerview.go).
+	routerRecord   serve.Record
+	routerFound    bool
+	routerPhase    serve.Phase
+	routerModels   serve.RouterModels
+	routerChildren serve.RouterChildren
+	routerErr      error
+	routerModelErr error
 }
+
+// The router's half of the seam. A fixture that says nothing about a router is a
+// host that has never started one, which is what most of this package's tests
+// are about.
+func (f *fakeServers) RouterServer() (serve.Server, bool, error) {
+	if f.routerErr != nil {
+		return serve.Server{}, false, f.routerErr
+	}
+	if !f.routerFound {
+		return serve.Server{}, false, nil
+	}
+	return serve.Server{Record: f.routerRecord, Live: f.routerPhase != serve.PhaseExited}, true, nil
+}
+
+func (f *fakeServers) RouterSnapshot(record serve.Record) (serve.Status, error) {
+	phase := f.routerPhase
+	if phase == "" {
+		phase = serve.PhaseRunning
+	}
+	return serve.Status{Record: record, Phase: phase, Uptime: time.Minute}, nil
+}
+
+func (f *fakeServers) RouterModels(*config.Tree) (serve.RouterModels, error) {
+	if f.routerModelErr != nil {
+		return serve.RouterModels{}, f.routerModelErr
+	}
+	return f.routerModels, nil
+}
+
+func (f *fakeServers) RouterChildren(serve.Record) serve.RouterChildren { return f.routerChildren }
 
 func (f *fakeServers) Snapshots() (serve.StatusListing, error) {
 	if f.err != nil {
@@ -428,6 +470,10 @@ func TestBackendToggleIsWrittenDown(t *testing.T) {
 		t.Errorf("the next launch would open on %q, want %q", saved.Backend, config.BackendMLX)
 	}
 
+	frame, _ = press(t, frame, tea.KeyPressMsg{Code: tea.KeyTab})
+	if frame.prefs.Backend != config.BackendRouter {
+		t.Errorf("the toggle left the backend at %q, want %q", frame.prefs.Backend, config.BackendRouter)
+	}
 	frame, _ = press(t, frame, tea.KeyPressMsg{Code: tea.KeyTab})
 	if frame.prefs.Backend != config.BackendLlama {
 		t.Errorf("the toggle left the backend at %q, want it back on %q", frame.prefs.Backend, config.BackendLlama)

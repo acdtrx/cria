@@ -111,7 +111,7 @@ func TestTheRouterPresetIsWrittenAtEveryStart(t *testing.T) {
 	}
 
 	// The engine file changes, and the next start serves what it says now.
-	if err := manager.StopRouter(record); err != nil {
+	if err := manager.Stop(record); err != nil {
 		t.Fatalf("stopping the router: %v", err)
 	}
 	router.Args = []string{"-ngl", "50"}
@@ -269,7 +269,7 @@ func TestStoppingTheRouterRemovesItsRecord(t *testing.T) {
 	manager := newManager(t, host)
 	record, _ := startRouter(t, manager, host, routerConfig(), 4242)
 
-	if err := manager.StopRouter(record); err != nil {
+	if err := manager.Stop(record); err != nil {
 		t.Fatalf("stopping the router: %v", err)
 	}
 	if want := []string{"TERM 4242"}; strings.Join(host.sent, ",") != strings.Join(want, ",") {

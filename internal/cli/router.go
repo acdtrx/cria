@@ -179,7 +179,7 @@ func (a *app) routerStop() int {
 	if !found {
 		return a.fail("router stop: cria has no record of a router on this host; nothing to stop")
 	}
-	if err := manager.StopRouter(server.Record); err != nil {
+	if err := manager.Stop(server.Record); err != nil {
 		return a.fail("router stop: %v", err)
 	}
 

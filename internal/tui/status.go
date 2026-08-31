@@ -304,14 +304,24 @@ type boxTarget struct {
 	live   bool // at least one server cria can still see: stop, kill and log have something to act on
 	exited bool // at least one crash report is on screen: there is something to dismiss
 	shown  bool // the box names an entry at all, live, exited or merely last-started
+
+	// At least one row a restart can be aimed at, or a last-started entry to
+	// start again. The router is not one: a restart replays the combination one
+	// record was composed with, and the router was composed from no entry
+	// (pick.go, reaches). A box holding nothing but the router therefore draws no
+	// r — a key on the bar is a key that does something.
+	replayable bool
 }
 
 // targetOf reads the box's target off the same two things the box is drawn
 // from.
 func targetOf(listing serve.StatusListing, saved prefs) boxTarget {
-	target := boxTarget{shown: saved.LastStarted != ""}
+	target := boxTarget{shown: saved.LastStarted != "", replayable: saved.LastStarted != ""}
 	for _, status := range listing.Servers {
 		target.shown = true
+		if pickRestart.reaches(status.Backend) {
+			target.replayable = true
+		}
 		if status.Phase == serve.PhaseExited {
 			target.exited = true
 			continue

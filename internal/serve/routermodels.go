@@ -53,12 +53,18 @@ type RouterModels struct {
 
 // ServedModel is one entry the router serves: the id clients address it by — the
 // alias its section carries — the model reference that section is named after,
-// and the combination it is held under.
+// the combination it is held under, and the section the preset carries for it.
+//
+// The section travels with the model rather than being cut back out of the
+// preset: it is what a start writes for this one entry, and a surface showing it
+// beside the entry's own facts is showing the composition rather than re-deriving
+// it (docs/specs/TUI.md).
 type ServedModel struct {
 	ID        string           `json:"id"`
 	Repo      string           `json:"repo"`
 	Quant     string           `json:"quant,omitempty"`
 	Selection config.Selection `json:"selection,omitempty"`
+	Section   string           `json:"section,omitempty"`
 }
 
 // RouterModels reads the store of models the router holds and composes what it
@@ -129,7 +135,9 @@ func (m *Manager) RouterModels(tree *config.Tree) (RouterModels, error) {
 			serving.Skipped = append(serving.Skipped, engine.Skipped{ID: id, Reason: reason})
 			continue
 		}
-		serving.Served = append(serving.Served, resolved[id])
+		model := resolved[id]
+		model.Section = composed.Sections[id]
+		serving.Served = append(serving.Served, model)
 	}
 	return serving, nil
 }

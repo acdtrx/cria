@@ -16,6 +16,12 @@ import (
 
 // liveStatus is a server as one observation reports it, in the phase the test
 // is about (docs/specs/SERVE.md).
+// routerStatus is this host's router as an observation sees it: a server whose
+// record names a preset rather than a model (docs/specs/SERVE.md).
+func routerStatus(phase serve.Phase) serve.Status {
+	return serve.Status{Record: routerRecord(), Phase: phase, Uptime: time.Minute}
+}
+
 func liveStatus(phase serve.Phase) serve.Status {
 	return serve.Status{
 		Record: serve.Record{
@@ -428,25 +434,34 @@ func TestBoxTarget(t *testing.T) {
 		{
 			name:  "a stopped box still names the last-started entry",
 			saved: prefs{Backend: config.BackendLlama, LastStarted: "qwen"},
-			want:  boxTarget{shown: true},
+			want:  boxTarget{shown: true, replayable: true},
 		},
 		{
 			name:    "a running server is live",
 			listing: serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning)}},
 			saved:   defaultPrefs(),
-			want:    boxTarget{live: true, shown: true},
+			want:    boxTarget{live: true, shown: true, replayable: true},
 		},
 		{
 			name:    "an exited record is a crash report to dismiss",
 			listing: serve.StatusListing{Servers: []serve.Status{exited}},
 			saved:   defaultPrefs(),
-			want:    boxTarget{exited: true, shown: true},
+			want:    boxTarget{exited: true, shown: true, replayable: true},
 		},
 		{
 			name:    "one of each is both",
 			listing: serve.StatusListing{Servers: []serve.Status{liveStatus(serve.PhaseRunning), exited}},
 			saved:   defaultPrefs(),
-			want:    boxTarget{live: true, exited: true, shown: true},
+			want:    boxTarget{live: true, exited: true, shown: true, replayable: true},
+		},
+		{
+			// The router is a server the box shows and the stop keys act on, and
+			// it is nothing a restart can replay: it was composed from no entry
+			// and no picks (pick.go, reaches).
+			name:    "a router alone is live but not replayable",
+			listing: serve.StatusListing{Servers: []serve.Status{routerStatus(serve.PhaseRunning)}},
+			saved:   defaultPrefs(),
+			want:    boxTarget{live: true, shown: true},
 		},
 	}
 

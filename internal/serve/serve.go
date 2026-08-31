@@ -32,6 +32,7 @@ import (
 	"sync"
 	"time"
 
+	"cria/internal/config"
 	"cria/internal/hubapi"
 	"cria/internal/procs"
 )
@@ -206,4 +207,15 @@ func (m *Manager) logsRoot() string { return filepath.Join(m.root, logsDir) }
 // filesystem rather than a rule cria has to remember (docs/specs/SERVE.md).
 func (m *Manager) recordPath(entryID string) string {
 	return filepath.Join(m.recordsRoot(), entryID+recordExt)
+}
+
+// recordPathOf is where one record lives, whichever of the two kinds it is: an
+// entry's server is recorded under the entry, and an engine's own server —
+// today the router — under its engine (router.go). A record already says which
+// it is, so nothing that ends or clears one needs to be told a second time.
+func (m *Manager) recordPathOf(record Record) string {
+	if record.Backend == config.BackendRouter {
+		return m.routerRecordPath()
+	}
+	return m.recordPath(record.EntryID)
 }

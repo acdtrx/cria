@@ -304,11 +304,6 @@ func (f *fakeServers) RouterUnload(_ serve.Record, id string) error {
 	return f.unloadErr
 }
 
-func (f *fakeServers) StopRouter(record serve.Record) error {
-	f.stopped = append(f.stopped, record.EntryID)
-	return f.stopErr
-}
-
 func (f *fakeServers) RouterSnapshot(record serve.Record) (serve.Status, error) {
 	if f.snapshotErr != nil {
 		return serve.Status{}, f.snapshotErr

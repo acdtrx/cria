@@ -149,31 +149,31 @@ func TestBrokenPrefsResetLoudly(t *testing.T) {
 	}
 }
 
-// The toggle is a cycle: pressing it reaches every backend an entry may declare
-// and comes back to where it started, so no backend is a dead end and none is
-// unreachable.
+// The toggle is a cycle: pressing it reaches every engine cria has and comes
+// back to where it started, so no engine is a dead end and none is unreachable.
 //
-// It walks the backends rather than the engines cria has: the key changes which
-// entries the lists show, and the router declares none of its own — the engine
-// toggle that reaches it comes with the view it would show (docs/specs/TUI.md).
-func TestTheBackendToggleWalksEveryBackend(t *testing.T) {
-	backends := config.Backends()
+// It walks the engines rather than the backends an entry may declare
+// (docs/specs/TUI.md): the key chooses what the screen is about, and the router
+// is one of the answers — it declares no entries, and its position shows the
+// models it holds instead of a filtered entry list (routerview.go).
+func TestTheEngineToggleWalksEveryEngine(t *testing.T) {
+	engines := config.Engines()
 	saved := defaultPrefs()
 	visited := map[config.Backend]bool{saved.Backend: true}
 
-	for press := 1; press < len(backends); press++ {
+	for press := 1; press < len(engines); press++ {
 		saved.Backend = saved.next()
 		if visited[saved.Backend] {
-			t.Fatalf("press %d came back to %q before every backend had been shown", press, saved.Backend)
+			t.Fatalf("press %d came back to %q before every engine had been shown", press, saved.Backend)
 		}
 		visited[saved.Backend] = true
 	}
-	for _, backend := range backends {
-		if !visited[backend] {
-			t.Errorf("the toggle never reaches %q", backend)
+	for _, engine := range engines {
+		if !visited[engine] {
+			t.Errorf("the toggle never reaches %q", engine)
 		}
 	}
 	if back := saved.next(); back != defaultPrefs().Backend {
-		t.Errorf("the press after the last backend left the toggle on %q, want it back on %q", back, defaultPrefs().Backend)
+		t.Errorf("the press after the last engine left the toggle on %q, want it back on %q", back, defaultPrefs().Backend)
 	}
 }

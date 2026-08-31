@@ -57,6 +57,16 @@ type servers interface {
 	Bench(record serve.Record, spec serve.BenchSpec, report func(serve.BenchStep)) serve.BenchResult
 	PortUse(port int) (serve.PortUse, error)
 	KillHolder(holder serve.Holder) error
+
+	// The router, which the frame only reads: its record and one observation of
+	// it, what the store and the tree compose it to serve, and what the running
+	// one says it holds (routerview.go). Its life is `cria router start|stop`
+	// (docs/specs/CLI.md) — what is on the seam here is stop, which every server
+	// shares, and the three questions the view is drawn from.
+	RouterServer() (serve.Server, bool, error)
+	RouterSnapshot(record serve.Record) (serve.Status, error)
+	RouterModels(tree *config.Tree) (serve.RouterModels, error)
+	RouterChildren(record serve.Record) serve.RouterChildren
 }
 
 // host is everything the frame reads this machine through: the lifecycle, the
@@ -113,6 +123,7 @@ type (
 	tickMsg     time.Time
 	snapshotMsg struct {
 		listing serve.StatusListing
+		router  routerState
 		err     error
 	}
 	// entriesMsg is one read of the config tree and — when a list that draws it
@@ -148,6 +159,13 @@ type model struct {
 	failure error // the last refresh that failed, held until one succeeds
 	alert   alert
 
+	// This host's router as the last observation saw it: its own status, the
+	// models the store and the tree compose it to serve, and what the running
+	// one says it holds (routerview.go). Its status is also appended to the
+	// listing above, because the box shows every server cria started and the
+	// router is one of them.
+	router routerState
+
 	// What cria is doing to an entry between the keypress and the answer, drawn
 	// in the box where a server's state is read (lifecycle.go).
 	pending pendingActions
@@ -162,10 +180,12 @@ type model struct {
 	cache    *hubcache.Cache
 	cacheErr error
 
-	// Each list keeps its own cursor: the entry list and the cache list hold
-	// different things, and coming back to a view lands where it was left.
-	selected      int
-	cacheSelected int
+	// Each list keeps its own cursor: the entry list, the cache list and the
+	// router's model list hold different things, and coming back to one lands
+	// where it was left.
+	selected       int
+	cacheSelected  int
+	routerSelected int
 
 	modal     *modal    // the refusal a start came back with; nil when there is none
 	confirm   *deletion // the delete waiting for its answer; nil when none is
@@ -356,8 +376,16 @@ func (m model) observed(msg snapshotMsg) model {
 		return m
 	}
 	m.listing, m.failure = msg.listing, nil
+	m.router = msg.router
+	// The router is a server cria started, so the box shows it: last, after the
+	// entries', because it is the one row that serves no single model. The keys
+	// that act on the box act on it too — a stop is a stop — with the two that
+	// mean something only for an entry's server skipping it (pick.go).
+	if m.router.found {
+		m.listing.Servers = append(m.listing.Servers, m.router.status)
+	}
 	m.keys.retarget(targetOf(m.listing, m.prefs))
-	return m
+	return m.reselect(m.cursor())
 }
 
 // loaded takes one read of the config tree, and the cache walk when the read
@@ -495,9 +523,11 @@ func (m model) switchBackend() model {
 	if err := savePrefs(m.root, m.prefs); err != nil {
 		m.alert = alert{text: err.Error(), bad: true}
 	}
-	// The entry list is another backend's now, so its cursor starts at the top.
-	// The cache list holds the same models either way and keeps its place.
-	m.selected = 0
+	// The list is another engine's now, so its cursor starts at the top — both
+	// lists the toggle walks between, since the router's is not the entry list
+	// filtered. The cache list holds the same models either way and keeps its
+	// place.
+	m.selected, m.routerSelected = 0, 0
 	return m.reselect(m.cursor())
 }
 
@@ -517,9 +547,12 @@ func (m model) show(showing view) model {
 // switch, a view switch — goes through here, so a cursor never points past the
 // end of its list and the bar never offers an action there is no row for.
 func (m model) reselect(to int) model {
-	if m.view == viewCache {
+	switch {
+	case m.view == viewCache:
 		m.cacheSelected = clamped(to, len(m.cacheRows()))
-	} else {
+	case m.onRouter():
+		m.routerSelected = clamped(to, len(m.routerRows()))
+	default:
 		m.selected = clamped(to, len(m.rows()))
 	}
 	return m.rebindContext()
@@ -538,8 +571,11 @@ func clamped(to, rows int) int {
 
 // cursor is where the visible list's cursor sits.
 func (m model) cursor() int {
-	if m.view == viewCache {
+	switch {
+	case m.view == viewCache:
 		return m.cacheSelected
+	case m.onRouter():
+		return m.routerSelected
 	}
 	return m.selected
 }
@@ -553,16 +589,23 @@ func (m model) cursor() int {
 func (m model) rebindContext() model {
 	entry, hasEntry := m.selectedRow()
 	_, hasCached := m.selectedCacheRow()
-	onEntryList := m.view == viewServe && hasEntry
+	model, hasModel := m.selectedRouterRow()
+	onEntryList := m.view == viewServe && !m.onRouter() && hasEntry
 	onCacheList := m.view == viewCache && hasCached
+	// The router's list is walked and picked over like the entry list, and
+	// nothing else: which entries it holds is settled by a verb rather than in
+	// this list, and loading one of them is a deliberate request with a busy gate
+	// in front of it (docs/specs/CLI.md, routerview.go).
+	onRouterList := m.onRouter() && hasModel
+	pickableModel := onRouterList && !model.skipped() && m.entryHasChoices(model.id)
 
-	m.keys.up.SetEnabled(onEntryList || onCacheList)
-	m.keys.down.SetEnabled(onEntryList || onCacheList)
+	m.keys.up.SetEnabled(onEntryList || onCacheList || onRouterList)
+	m.keys.down.SetEnabled(onEntryList || onCacheList || onRouterList)
 	m.keys.start.SetEnabled(onEntryList && entry.broken == nil)
 	// The picker needs axes to pick between: a flat entry offers none, so the
 	// key is not on the bar and does nothing when pressed (docs/specs/TUI.md,
 	// choicepick.go). A refused file has no choices cria could read either.
-	m.keys.pickChoices.SetEnabled(onEntryList && entry.broken == nil && len(entry.entry.Choices) > 0)
+	m.keys.pickChoices.SetEnabled(pickableModel || (onEntryList && entry.broken == nil && len(entry.entry.Choices) > 0))
 	// Filing an entry file cria refused is impossible for the same reason
 	// starting one is: the key that would sort it under a group is exactly the
 	// key that could not be read (groups.go).
@@ -580,6 +623,13 @@ func (m model) rebindContext() model {
 	// then the way back (syncEscScope).
 	m.keys.cache.SetEnabled(m.view == viewServe)
 	return m.syncEscScope()
+}
+
+// entryHasChoices reports whether the tree declares axes for one id — what the
+// picker needs before it is worth opening on a row (choicepick.go).
+func (m model) entryHasChoices(id string) bool {
+	entry, found := m.entryNamed(id)
+	return found && len(entry.Choices) > 0
 }
 
 // syncEscScope points esc at what it answers right now, in its settled order: a
@@ -603,9 +653,55 @@ func (m model) syncEscScope() model {
 
 // refresh is one observation, taken as a command so the probes and the `ps`
 // calls it costs run off the UI thread.
+//
+// The router is observed beside the entries' servers rather than among them: its
+// record lives with its engine and its phase is derived without the cache, since
+// it holds no model of its own (docs/specs/SERVE.md). What it comes back with
+// joins the listing all the same — the box shows what cria started, and the
+// router is one of the things cria started.
 func (m model) refresh() tea.Msg {
 	listing, err := m.host.servers.Snapshots()
-	return snapshotMsg{listing: listing, err: err}
+	if err != nil {
+		return snapshotMsg{err: err}
+	}
+	return snapshotMsg{listing: listing, router: m.observeRouter()}
+}
+
+// observeRouter is the router's whole reading: the record, one look at the
+// process and its port, the composition the store and the tree come to, and —
+// from a router that is actually there — the models it says it holds.
+//
+// Nothing here fails the refresh. A router is optional on a host, its store is
+// read at every tick because a `cria router include` while the TUI is open is
+// the expected way one changes (docs/cria.md, principle 5), and a store that
+// cannot be read costs the view its list and nothing else.
+func (m model) observeRouter() routerState {
+	var held routerState
+	if m.tree != nil {
+		// The tree has not been read on the very first refresh, and there is
+		// nothing to compose a model list against until it has.
+		held.models, held.failure = m.host.servers.RouterModels(m.tree)
+	}
+
+	server, found, err := m.host.servers.RouterServer()
+	if err != nil {
+		held.failure = err
+		return held
+	}
+	if !found {
+		return held
+	}
+
+	status, err := m.host.servers.RouterSnapshot(server.Record)
+	if err != nil {
+		held.failure = err
+		return held
+	}
+	held.found, held.status = true, status
+	if status.Phase != serve.PhaseExited {
+		held.children = m.host.servers.RouterChildren(status.Record)
+	}
+	return held
 }
 
 // readEntries re-reads what the config tree declares — an agent writing an entry
@@ -718,6 +814,7 @@ func (m model) notes(width int) []string {
 		{"cannot read the servers: ", m.failure},
 		{"cannot read the config tree: ", m.treeErr},
 		{"cannot read the model cache: ", m.cacheErr},
+		{"cannot read the router: ", m.router.failure},
 	} {
 		if failed.err != nil {
 			notes = append(notes, fit(alarmStyle.Render(failed.what+failed.err.Error()), width))
@@ -763,6 +860,11 @@ func (m model) screen(width, rows int) string {
 		return m.confirmPanel(width, rows)
 	case m.view == viewCache:
 		return m.cacheScreen(width, rows)
+	case m.onRouter():
+		// The toggle's third position is not a filtered entry list: the router
+		// declares no entries, and what it serves is state of its own
+		// (routerview.go).
+		return m.routerScreen(width, rows)
 	}
 	return m.serveScreen(width, rows)
 }
@@ -986,6 +1088,6 @@ func (k *keymap) retarget(target boxTarget) {
 	k.stop.SetEnabled(target.live)
 	k.forceKill.SetEnabled(target.live)
 	k.log.SetEnabled(target.live || target.exited)
-	k.restart.SetEnabled(target.shown)
+	k.restart.SetEnabled(target.replayable)
 	k.dismiss.SetEnabled(target.exited)
 }
