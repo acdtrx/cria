@@ -123,6 +123,7 @@ func TestAgentsPagePointsAtTheBinary(t *testing.T) {
 		"cria status --json",
 		"cria stop <id>",
 		entriesDir + "/<id>.toml",
+		enginesDir + "/<backend>.toml",
 		settingsFile,
 	} {
 		if !strings.Contains(page, want) {

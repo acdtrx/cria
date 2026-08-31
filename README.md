@@ -50,7 +50,7 @@ backend = "llama"
 repo = "unsloth/Qwen3-30B-A3B-GGUF"
 quant = "UD-Q4_K_XL"       # spelled exactly as the repo names it
 port = 8080
-args = ["--ctx-size", "16384", "--jinja"]
+args = ["ctx-size = 16384", "jinja = true"]   # flags as keys, without their dashes
 ```
 
 ```sh

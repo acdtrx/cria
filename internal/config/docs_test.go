@@ -28,9 +28,9 @@ func TestDocsExamplesShowEveryKeyOfTheirBackend(t *testing.T) {
 	var walk func(t *testing.T, s schema, prefix, example string, backend Backend)
 	walk = func(t *testing.T, s schema, prefix, example string, backend Backend) {
 		for _, k := range s {
-			if k.onlyBackend != "" && k.onlyBackend != backend {
+			if !k.takenBy(backend) {
 				if strings.Contains(example, k.name+" =") {
-					t.Errorf("the %q example sets %q, a key only the %q backend takes", backend, k.name, k.onlyBackend)
+					t.Errorf("the %q example sets %q, a key %s", backend, k.name, k.takenByNamed())
 				}
 				continue
 			}
@@ -53,6 +53,12 @@ func TestDocsExamplesShowEveryKeyOfTheirBackend(t *testing.T) {
 			walk(t, entrySchema, "", example, backend)
 			if !strings.Contains(Docs(), example) {
 				t.Errorf("the %q example is not part of the `cria docs` page", backend)
+			}
+
+			engine := exampleEngine(backend)
+			walk(t, engineSchema, "", engine, backend)
+			if !strings.Contains(Docs(), engine) {
+				t.Errorf("the %q engine example is not part of the `cria docs` page", backend)
 			}
 		})
 	}
@@ -86,6 +92,7 @@ func TestEveryKeyExamplesEveryBackend(t *testing.T) {
 		}
 	}
 	walk(entrySchema, "")
+	walk(engineSchema, "")
 	walk(treeSchema, "")
 }
 
@@ -201,11 +208,15 @@ func TestDocsFollowsTheDefinitions(t *testing.T) {
 // The examples are copied into real trees, so they must load as real trees: what
 // the page prints is written to a config tree and read back through the loader.
 func TestDocsExamplesLoadAsAConfigTree(t *testing.T) {
-	root := writeTree(t, map[string]string{
+	files := map[string]string{
 		settingsFile: exampleSettings(),
 		path.Join(entriesDir, "llama-example.toml"): ExampleEntry(BackendLlama),
 		path.Join(entriesDir, "mlx-example.toml"):   ExampleEntry(BackendMLX),
-	})
+	}
+	for _, backend := range Backends() {
+		files[path.Join(enginesDir, string(backend)+tomlExt)] = exampleEngine(backend)
+	}
+	root := writeTree(t, files)
 
 	tree, err := Load(root)
 	if err != nil {
@@ -234,6 +245,11 @@ func TestDocsExamplesLoadAsAConfigTree(t *testing.T) {
 	for _, entry := range tree.Entries {
 		if entry.Repo == "" || entry.Port == 0 || entry.Host == "" || entry.Name == "" || len(entry.Args) == 0 {
 			t.Errorf("the %s example resolved incompletely: %+v", entry.ID, entry)
+		}
+		// The engine example is a file of the same tree, so it reaches the
+		// entries that backend serves — the level the page says they start from.
+		if len(entry.EngineArgs) == 0 {
+			t.Errorf("the %s example resolved without the %q engine example's args", entry.ID, entry.Backend)
 		}
 	}
 }
@@ -305,6 +321,7 @@ func definedKeyNames() []string {
 		}
 	}
 	walk(entrySchema, "")
+	walk(engineSchema, "")
 	walk(treeSchema, "")
 	return names
 }

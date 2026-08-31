@@ -3,6 +3,7 @@ package serve
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -52,7 +53,7 @@ func TestComposedCommand(t *testing.T) {
 			entry: config.Entry{
 				ID: "qwen-mlx", Backend: config.BackendMLX,
 				Repo: "mlx-community/Qwen3-30B-A3B-4bit", Host: "0.0.0.0", Port: 8080,
-				Args: []string{"--max-tokens", "4096"},
+				Args: []config.Arg{{Key: "max-tokens", Value: "4096"}},
 			},
 			want: []string{
 				"/opt/homebrew/bin/mlx_lm.server",
@@ -106,6 +107,131 @@ func TestComposedCommand(t *testing.T) {
 			}
 			if !slices.Equal(got, test.want) {
 				t.Errorf("composed\n  %v\nwant\n  %v", got, test.want)
+			}
+		})
+	}
+}
+
+// A profile written as keys serves the model it served as a list of flags. The
+// argv below is the one the same profile composed when its args were the flags
+// themselves — every token in the order it stood — and a tree written the way
+// the schema takes it now has to reach exactly that command line, or a migrated
+// profile is a differently-served model wearing its name (docs/plans/engines).
+//
+// A key spells one flag, so a line is migrated to the key of the flag it
+// carried: "-c 262144" becomes "c = 262144" and "--gpu-layers 99" becomes
+// "gpu-layers = 99". A short alias of more than one letter has no key of its
+// own, and migrating it to the long option is the one place a token on the line
+// legitimately changes (internal/engine, Flags).
+//
+// It goes through the real loader rather than a built entry: the file, the
+// merge and the flag spelling are all part of what has to still add up.
+func TestAProfileWrittenAsKeysComposesTheArgvItComposedAsFlags(t *testing.T) {
+	// llama-server -hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL --host 0.0.0.0
+	//   --port 8080 --gpu-layers 99 --flash-attn on -c 262144 --parallel 1
+	//   --jinja --n-cpu-moe 24
+	composedBefore := []string{
+		"/opt/homebrew/bin/llama-server",
+		"-hf", "unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL",
+		"--host", "0.0.0.0",
+		"--port", "8080",
+		"--gpu-layers", "99",
+		"--flash-attn", "on",
+		"-c", "262144",
+		"--parallel", "1",
+		"--jinja",
+		"--n-cpu-moe", "24",
+	}
+
+	tests := []struct {
+		name  string
+		files map[string]string
+	}{
+		{
+			// The profile migrated key for key: every flag it carried is a line of
+			// its own args, in the order it stood on the command line.
+			name: "a profile that kept all its keys",
+			files: map[string]string{
+				"models/qwen.toml": `backend = "llama"
+repo = "unsloth/Qwen3-30B-A3B-GGUF"
+quant = "UD-Q4_K_XL"
+port = 8080
+args = [
+  "gpu-layers = 99",
+  "flash-attn = on",
+  # 262144 tokens, the whole window for a single slot
+  "c = 262144",
+  "parallel = 1",
+  "jinja = true",
+]
+
+[[choice]]
+name = "offload"
+  [[choice.option]]
+  name = "cpu"
+  args = ["n-cpu-moe = 24"]
+`,
+			},
+		},
+		{
+			// The same profile with the machine's own keys lifted into the engine
+			// file. They compose first, which is where they already stood here —
+			// an extraction that moves a key past another changes the order of the
+			// two and nothing else, since no key is passed twice.
+			name: "a profile whose machine-wide keys moved to the engine file",
+			files: map[string]string{
+				"engines/llama.toml": "args = [\"gpu-layers = 99\", \"flash-attn = on\"]\n",
+				"models/qwen.toml": `backend = "llama"
+repo = "unsloth/Qwen3-30B-A3B-GGUF"
+quant = "UD-Q4_K_XL"
+port = 8080
+args = ["c = 262144", "parallel = 1", "jinja = true"]
+
+[[choice]]
+name = "offload"
+  [[choice.option]]
+  name = "cpu"
+  args = ["n-cpu-moe = 24"]
+`,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			for name, body := range test.files {
+				path := filepath.Join(root, filepath.FromSlash(name))
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatalf("cannot create %s: %v", filepath.Dir(path), err)
+				}
+				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+					t.Fatalf("cannot write %s: %v", path, err)
+				}
+			}
+
+			tree, err := config.Load(root)
+			if err != nil {
+				t.Fatalf("loading the migrated tree: %v", err)
+			}
+			if len(tree.Broken) != 0 {
+				t.Fatalf("the migrated profile was refused: %v", tree.Broken[0].Err)
+			}
+			entry, found := tree.Entry("qwen")
+			if !found {
+				t.Fatalf("the migrated tree holds %+v, want the qwen entry", tree.Entries)
+			}
+
+			launch, err := config.Resolve(entry, config.DefaultSelection(entry))
+			if err != nil {
+				t.Fatalf("resolving: %v", err)
+			}
+			got, err := ComposedCommand(entry, launch, usableReport())
+			if err != nil {
+				t.Fatalf("composing: %v", err)
+			}
+			if !slices.Equal(got, composedBefore) {
+				t.Errorf("the migrated profile composes\n  %v\nwant the line it composed before\n  %v", got, composedBefore)
 			}
 		})
 	}

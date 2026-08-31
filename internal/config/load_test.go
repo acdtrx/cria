@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -98,10 +99,11 @@ func TestLoadIsolatesABrokenChoice(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		settingsFile:      "default_port = 8080\n",
 		"models/aaa.toml": "backend = \"llama\"\nrepo = \"org/aaa\"\n",
-		"models/broken.toml": "backend = \"llama\"\nrepo = \"org/broken\"\nargs = [\"--ctx-size\", \"16384\"]\n" +
-			"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n",
+		"models/broken.toml": "backend = \"llama\"\nrepo = \"org/broken\"\n" +
+			"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"ctx-size = 65536\"]\n" +
+			"[[choice]]\nname = \"offload\"\n  [[choice.option]]\n  name = \"cpu\"\n  args = [\"ctx-size = 8192\"]\n",
 		"models/zzz.toml": "backend = \"llama\"\nrepo = \"org/zzz\"\n" +
-			"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"--ctx-size\", \"65536\"]\n",
+			"[[choice]]\nname = \"ctx\"\n  [[choice.option]]\n  name = \"long\"\n  args = [\"ctx-size = 65536\"]\n",
 	})
 
 	tree, err := Load(root)
@@ -125,6 +127,135 @@ func TestLoadIsolatesABrokenChoice(t *testing.T) {
 	}
 	if keyErr.Key != "choice.option.args" {
 		t.Errorf("broken entry names key %q, want %q", keyErr.Key, "choice.option.args")
+	}
+}
+
+// engines/<engine>.toml reaches the entries of its own backend and no others.
+// It is what this machine serves them with, so it is read once and carried by
+// every entry that will be launched under it (docs/specs/CONFIG.md).
+func TestEngineArgsReachTheEntriesOfTheirOwnBackend(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		settingsFile:         "default_port = 8080\n",
+		"engines/llama.toml": "args = [\"gpu-layers = 99\", \"flash-attn = on\"]\n",
+		"models/one.toml":    "backend = \"llama\"\nrepo = \"org/one\"\n",
+		"models/two.toml":    "backend = \"mlx\"\nrepo = \"org/two\"\n",
+	})
+
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(tree.Entries) != 2 {
+		t.Fatalf("entries are %+v, want two", tree.Entries)
+	}
+
+	llama, mlx := tree.Entries[0], tree.Entries[1]
+	if want := args("gpu-layers = 99", "flash-attn = on"); !reflect.DeepEqual(llama.EngineArgs, want) {
+		t.Errorf("the llama entry carries engine args %v, want %v", llama.EngineArgs, want)
+	}
+	if len(mlx.EngineArgs) != 0 {
+		t.Errorf("the mlx entry carries engine args %v, and no engines/mlx.toml exists", mlx.EngineArgs)
+	}
+	if len(llama.Args) != 0 {
+		t.Errorf("the engine's args landed in the entry's own args as %v; they are a level of their own", llama.Args)
+	}
+}
+
+// A tree with no engines/ directory is the common one: an engine with no file
+// serves entries with what they declare themselves, and nothing is missing.
+func TestATreeWithoutEngineFilesLoads(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		settingsFile:      "default_port = 8080\n",
+		"models/one.toml": "backend = \"llama\"\nrepo = \"org/one\"\nargs = [\"ctx-size = 16384\"]\n",
+	})
+
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(tree.Entries) != 1 {
+		t.Fatalf("entries are %+v, want one", tree.Entries)
+	}
+	if entry := tree.Entries[0]; len(entry.EngineArgs) != 0 {
+		t.Errorf("the entry carries engine args %v, and the tree has no engines/ at all", entry.EngineArgs)
+	}
+}
+
+// An engine file every entry of a backend resolves against is tree-wide
+// configuration, like config.toml: a broken one is reported once, naming the
+// file and the key, rather than disabling entries whose own files are fine.
+func TestABrokenEngineFileFailsTheLoad(t *testing.T) {
+	tests := []struct {
+		name    string
+		file    string
+		wantKey string
+	}{
+		{
+			name:    "an unknown key is a typo",
+			file:    "arg = [\"gpu-layers = 99\"]\n",
+			wantKey: "arg",
+		},
+		{
+			name:    "args is held to the same shape as an entry's",
+			file:    "args = [\"--gpu-layers\", \"99\"]\n",
+			wantKey: "args",
+		},
+		{
+			name:    "an engine may not compose what cria composes",
+			file:    "args = [\"port = 9090\"]\n",
+			wantKey: "args",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeTree(t, map[string]string{
+				settingsFile:         "default_port = 8080\n",
+				"engines/llama.toml": test.file,
+				"models/one.toml":    "backend = \"llama\"\nrepo = \"org/one\"\n",
+			})
+
+			tree, err := Load(root)
+			if err == nil {
+				t.Fatalf("tree loaded as %+v, want the broken engine file to fail the load", tree)
+			}
+			if tree != nil {
+				t.Errorf("Load returned a tree alongside its error; a tree-level failure yields none")
+			}
+			var keyErr *KeyError
+			if !errors.As(err, &keyErr) {
+				t.Fatalf("error is %T (%v), want a *KeyError naming %q", err, err, test.wantKey)
+			}
+			if keyErr.Key != test.wantKey {
+				t.Errorf("error names key %q, want %q (%v)", keyErr.Key, test.wantKey, err)
+			}
+			if !strings.Contains(err.Error(), filepath.Join("engines", "llama.toml")) {
+				t.Errorf("error is %q, want it to name the file it came from", err)
+			}
+		})
+	}
+}
+
+// engines/ holds one file per backend and cria reads no others: a file named
+// after nothing cria serves is somebody's note, not a config it silently obeys.
+func TestOnlyTheEnginesOwnFilesAreRead(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		settingsFile:         "default_port = 8080\n",
+		"engines/vllm.toml":  "nonsense = true\n",
+		"engines/README.md":  "# what this machine serves each engine with\n",
+		"engines/llama.toml": "args = [\"gpu-layers = 99\"]\n",
+		"models/one.toml":    "backend = \"llama\"\nrepo = \"org/one\"\n",
+	})
+
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(tree.Entries) != 1 {
+		t.Fatalf("entries are %+v, want one", tree.Entries)
+	}
+	if want := args("gpu-layers = 99"); !reflect.DeepEqual(tree.Entries[0].EngineArgs, want) {
+		t.Errorf("the entry carries engine args %v, want %v", tree.Entries[0].EngineArgs, want)
 	}
 }
 

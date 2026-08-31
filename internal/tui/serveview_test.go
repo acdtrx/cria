@@ -457,7 +457,8 @@ func TestDetailPaneCarriesTheWholeEntry(t *testing.T) {
 		"UD-Q4_K_XL",
 		"8080",
 		"0.0.0.0",
-		"--ctx-size 16384 --jinja",
+		"ctx-size = 16384",
+		"jinja = true",
 		"yes — starting it serves what is on disk",
 		"/opt/homebrew/bin/llama-server -hf unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL --host 0.0.0.0 --port 8080 --ctx-size 16384 --jinja",
 	} {
@@ -586,16 +587,16 @@ func TestDetailPaneCarriesThePickedArgs(t *testing.T) {
 	frame, _ := choicesFrame(t, &fakeServers{})
 
 	drawn := strings.Join(frame.detailLines(200, 30), "\n")
-	if !strings.Contains(drawn, pickedFactStyle.Render("--parallel 2")) {
+	if !strings.Contains(drawn, pickedFactStyle.Render("parallel = 2")) {
 		t.Errorf("the pane does not carry the picked option's args on the pick's ink:\n%s", drawn)
 	}
-	if !strings.Contains(drawn, factStyle.Render("--jinja")) {
+	if !strings.Contains(drawn, factStyle.Render("jinja = true")) {
 		t.Errorf("the pane does not keep the file's own args as body text:\n%s", drawn)
 	}
 	// The picked lines continue the args block rather than opening one of their
 	// own: one label, the picks' contribution indented under the file's lines.
 	if plain := plain(drawn); strings.Count(plain, "args") != 1 ||
-		!strings.Contains(plain, "args     --ctx-size 16384\n         --jinja\n         --parallel 2") {
+		!strings.Contains(plain, "args     ctx-size = 16384\n         jinja = true\n         parallel = 2") {
 		t.Errorf("the picked args do not continue the args block:\n%s", plain)
 	}
 
@@ -603,7 +604,7 @@ func TestDetailPaneCarriesThePickedArgs(t *testing.T) {
 	// stay one launch.
 	frame.stored = picks.Picks{"qwen": {"layout": "chat"}}
 	moved := strings.Join(frame.detailLines(200, 30), "\n")
-	if !strings.Contains(moved, pickedFactStyle.Render("--parallel 1")) {
+	if !strings.Contains(moved, pickedFactStyle.Render("parallel = 1")) {
 		t.Errorf("the args block does not follow the pick:\n%s", moved)
 	}
 }

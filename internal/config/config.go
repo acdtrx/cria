@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 )
 
 // Backend names the server program an entry runs. The values below are the whole
@@ -25,6 +24,14 @@ const (
 	BackendMLX   Backend = "mlx"
 )
 
+// backendFacts is one backend as the config tree knows it: the value a file's
+// backend key may carry, and the args key cria composes that backend's model
+// reference with.
+type backendFacts struct {
+	id       Backend
+	modelKey string
+}
+
 // backends is every backend an entry may declare, in the order `cria docs`
 // presents them. It is the set the parser accepts, the set the examples are
 // rendered for, and the set the per-backend schema metadata is read against — so
@@ -33,30 +40,69 @@ const (
 // The engines that implement these backends live in internal/engine, and that
 // package imports this one: the set cannot be read from there without a cycle,
 // which is why it is declared here rather than derived. internal/engine holds
-// the test that checks the two against each other, so a backend that exists on
-// one side only is a red suite rather than a schema that documents a backend
-// nothing serves.
-var backends = []Backend{BackendLlama, BackendMLX}
+// the tests that check the two against each other, so a backend that exists on
+// one side only — or a model key that is not the flag its engine composes — is
+// a red suite rather than a schema that documents something nothing serves.
+var backends = []backendFacts{
+	{id: BackendLlama, modelKey: "hf"},
+	{id: BackendMLX, modelKey: "model"},
+}
 
 // Backends lists them for the callers that render or enumerate the set: the
 // examples `cria docs` prints, and the refusal a file naming something else
 // gets.
-func Backends() []Backend { return slices.Clone(backends) }
+func Backends() []Backend {
+	ids := make([]Backend, 0, len(backends))
+	for _, backend := range backends {
+		ids = append(ids, backend.id)
+	}
+	return ids
+}
+
+// ModelKey is the args key cria composes this backend's model reference with —
+// the key an args list may therefore not restate, since restating it would fight
+// the composed command line rather than change it (docs/specs/CONFIG.md).
+//
+// It is the flag without its dashes: the engine spells the flag itself
+// (internal/engine), which is the one thing this package cannot read from there.
+// A backend the tree does not declare has no key.
+func ModelKey(backend Backend) string {
+	for _, declared := range backends {
+		if declared.id == backend {
+			return declared.modelKey
+		}
+	}
+	return ""
+}
+
+// Arg is one args key and the value it carries: a flag written without its
+// dashes, and whatever the server should receive after it. cria never reads what
+// a key means — it spells the key as a flag and passes the value through exactly
+// as written (docs/specs/CONFIG.md).
+type Arg struct {
+	Key   string
+	Value string
+}
+
+// String spells an arg the way the file writes it, one key to a line — which is
+// also the way the servers' own config format spells it.
+func (a Arg) String() string { return a.Key + " = " + a.Value }
 
 // Entry is one launchable thing: a models/<id>.toml file whose keys have been
 // validated and whose port and host are already resolved against the tree
 // settings. Everything the lifecycle needs to compose a command line is here.
 type Entry struct {
-	ID      string   // the filename minus .toml; the id in the TUI and on the CLI
-	Path    string   // the file this entry was read from
-	Backend Backend  // which server program serves it
-	Repo    string   // Hugging Face repo id, org/name
-	Quant   string   // llama only; empty means the server picks the repo's default
-	Port    int      // resolved: the entry's own port, else default_port
-	Host    string   // resolved: the entry's own host, else default_host, else 0.0.0.0
-	Name    string   // display name; the id when the file sets none
-	Args    []string // extra flags handed to the server verbatim
-	Choices []Choice // the axes this entry varies on, in file order; none for a flat entry
+	ID         string   // the filename minus .toml; the id in the TUI and on the CLI
+	Path       string   // the file this entry was read from
+	Backend    Backend  // which server program serves it
+	Repo       string   // Hugging Face repo id, org/name
+	Quant      string   // llama only; empty means the server picks the repo's default
+	Port       int      // resolved: the entry's own port, else default_port
+	Host       string   // resolved: the entry's own host, else default_host, else 0.0.0.0
+	Name       string   // display name; the id when the file sets none
+	Args       []Arg    // the entry's own args keys, in file order
+	EngineArgs []Arg    // resolved: engines/<backend>.toml's args, the level this entry's own args override
+	Choices    []Choice // the axes this entry varies on, in file order; none for a flat entry
 }
 
 // Choice is one axis an entry varies on: a named set of options, exactly one of
@@ -72,9 +118,9 @@ type Choice struct {
 // knowledge, not cria's — flags that must vary together live in one choice.
 type ChoiceOption struct {
 	Name  string
-	Quant string   // llama only; replaces the entry's quant when set
-	Repo  string   // replaces the entry's repo when set
-	Args  []string // appended to the entry's args
+	Quant string // llama only; replaces the entry's quant when set
+	Repo  string // replaces the entry's repo when set
+	Args  []Arg  // merged over the entry's args when this option is picked
 }
 
 // Settings is config.toml: the defaults entries fall back to and the tool paths

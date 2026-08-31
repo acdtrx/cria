@@ -290,7 +290,7 @@ func testTree() *config.Tree {
 			Host:    "0.0.0.0",
 			Port:    8080,
 			Name:    "Qwen3 30B",
-			Args:    []string{"--ctx-size", "16384"},
+			Args:    []config.Arg{{Key: "ctx-size", Value: "16384"}},
 		}},
 	}
 }
@@ -318,8 +318,8 @@ func choicesEntry() config.Entry {
 func pickyEntry() config.Entry {
 	entry := choicesEntry()
 	entry.Choices = append(entry.Choices, config.Choice{Name: "layout", Options: []config.ChoiceOption{
-		{Name: "chat", Args: []string{"--parallel", "1"}},
-		{Name: "coding", Args: []string{"--parallel", "4"}},
+		{Name: "chat", Args: []config.Arg{{Key: "parallel", Value: "1"}}},
+		{Name: "coding", Args: []config.Arg{{Key: "parallel", Value: "4"}}},
 	}})
 	return entry
 }

@@ -16,7 +16,7 @@ the command line to `cli`, passing `tui.Run` as the program bare `cria` opens.
 | `internal/config` | the config tree, its schema, and the schema's own documentation (`specs/CONFIG.md`) | `Load(root)` | — |
 | `internal/format` | how a size, a duration and a Hub reference are spelled | `Bytes`, `HubReference`, … | — |
 | `internal/tools` | which managed programs the host has and what each one's state disables (`specs/TOOLS.md`) | `Check(settings)` | `config` |
-| `internal/engine` | what cria knows about each way of serving: the program, the model reference, the endpoints, the warm and slot rules (`specs/SERVE.md`) | `For(backend)`, `All()` | `config`, `tools` |
+| `internal/engine` | what cria knows about each way of serving: the program, the model reference, the endpoints, the warm and slot rules, and how a launch's args keys are spelled as flags (`specs/SERVE.md`, `specs/CONFIG.md`) | `For(backend)`, `All()`, `Flags(args)` | `config`, `tools` |
 | `internal/procs` | every `ps`/`lsof` exec and every signal cria sends (`specs/SERVE.md`) | `System{}` (a `Host`) | `engine`, `tools` |
 | `internal/hubcache` | the cache walk, true blob-deduped sizes, entry presence, and the delete plans (`specs/CACHE.md`) | `Read(root)`, `Plan*`/`Execute` | `config`, `engine` |
 | `internal/hubapi` | what a model comes to when complete, and the HF token | `New()`, `Token()` | `config`, `engine`, `hubcache` |

@@ -16,7 +16,7 @@ type kind int
 const (
 	kindString kind = iota
 	kindInteger
-	kindStringList
+	kindArgs
 	kindTable
 	kindTableArray
 )
@@ -28,7 +28,7 @@ func (k kind) String() string {
 		return "string"
 	case kindInteger:
 		return "integer"
-	case kindStringList:
+	case kindArgs:
 		return "string[]"
 	case kindTable:
 		return "table"
@@ -51,20 +51,54 @@ func (k kind) holdsKeys() bool {
 // declared — decoding, validation and `cria docs` all read them, so a schema
 // change updates the documentation by construction (docs/specs/CONFIG.md).
 //
-// Which backend takes a key, and what value it takes there, are declared here
+// Which backends take a key, and what value it takes there, are declared here
 // too: internal/engine imports this package, so the per-backend metadata cannot
 // live with the engines without a cycle. It is written to be total over
 // Backends() rather than to have a default — see exampleFor.
 type key struct {
-	name        string             // the TOML key
-	kind        kind               // the type the file must use
-	required    bool               // absent is an error on its own
-	onlyBackend Backend            // the one backend that takes this key; empty means every backend
-	rules       string             // the docs line: what the key means and what constrains it
-	example     string             // a valid value in TOML syntax, the same one under every backend
-	examples    map[Backend]string // a value per backend, where the backends genuinely differ
-	keys        schema             // kindTable only: the sub-table's own keys
-	check       func(v any) error  // the value rules this key can judge on its own
+	name         string             // the TOML key
+	kind         kind               // the type the file must use
+	required     bool               // absent is an error on its own
+	onlyBackends []Backend          // the backends that take this key; empty means every backend
+	rules        string             // the docs line: what the key means and what constrains it
+	example      string             // a valid value in TOML syntax, the same one under every backend
+	examples     map[Backend]string // a value per backend, where the backends genuinely differ
+	keys         schema             // kindTable only: the sub-table's own keys
+	check        func(v any) error  // the value rules this key can judge on its own
+}
+
+// takenBy reports whether an entry on this backend may set this key. A key that
+// names no backends is taken by all of them; one that names some is refused for
+// every backend outside the list, so a key applicable to two of three backends
+// needs no third state.
+func (k key) takenBy(backend Backend) bool {
+	return len(k.onlyBackends) == 0 || slices.Contains(k.onlyBackends, backend)
+}
+
+// takenByNamed is the clause a refusal opens with: which backends this key
+// belongs to, in the file's own vocabulary.
+func (k key) takenByNamed() string {
+	named := make([]string, 0, len(k.onlyBackends))
+	for _, backend := range k.onlyBackends {
+		named = append(named, fmt.Sprintf("%q", backend))
+	}
+	if len(named) == 1 {
+		return "only the " + named[0] + " backend takes it"
+	}
+	return "only the " + strings.Join(named[:len(named)-1], ", ") + " and " + named[len(named)-1] + " backends take it"
+}
+
+// backendNote is how the docs table flags a key not every backend takes; a key
+// they all take carries no note at all.
+func (k key) backendNote() string {
+	if len(k.onlyBackends) == 0 {
+		return ""
+	}
+	named := make([]string, 0, len(k.onlyBackends))
+	for _, backend := range k.onlyBackends {
+		named = append(named, string(backend))
+	}
+	return strings.Join(named, ", ") + " only — "
 }
 
 // exampleFor is the value this key takes in one backend's example.
@@ -120,12 +154,12 @@ var entrySchema = schema{
 		check: checkRepo,
 	},
 	{
-		name:        "quant",
-		kind:        kindString,
-		onlyBackend: BackendLlama,
-		rules:       "the quantization to serve, spelled exactly as the repo's files name it, UD- prefix and all; omit it and the server picks the repo's default (an mlx quantization is its own repo)",
-		example:     `"UD-Q4_K_XL"`,
-		check:       checkNonEmpty,
+		name:         "quant",
+		kind:         kindString,
+		onlyBackends: []Backend{BackendLlama},
+		rules:        "the quantization to serve, spelled exactly as the repo's files name it, UD- prefix and all; omit it and the server picks the repo's default (an mlx quantization is its own repo)",
+		example:      `"UD-Q4_K_XL"`,
+		check:        checkNonEmpty,
 	},
 	{
 		name:    "port",
@@ -153,18 +187,18 @@ var entrySchema = schema{
 	},
 	{
 		name:  "args",
-		kind:  kindStringList,
-		rules: "extra flags passed to the server verbatim; cria composes the model, port and host flags itself",
+		kind:  kindArgs,
+		rules: `what this model is served with, one "key = value" line per flag: the server's own long option written without its dashes, and the value it takes. They override the keys engines/<backend>.toml sets for every entry`,
 		examples: map[Backend]string{
-			BackendLlama: `["--ctx-size", "16384", "--jinja"]`,
-			BackendMLX:   `["--max-tokens", "32768"]`,
+			BackendLlama: `["ctx-size = 16384", "jinja = true"]`,
+			BackendMLX:   `["max-tokens = 32768"]`,
 		},
 		check: checkArgs,
 	},
 	{
 		name:  "choice",
 		kind:  kindTableArray,
-		rules: "a pick-one axis this entry varies on: the [[choice.option]] tables under it are the picks, and cria folds the picked one into the launch without reading its flags — so flags that must vary together belong in the same option",
+		rules: "a pick-one axis this entry varies on: the [[choice.option]] tables under it are the picks, and cria folds the picked one into the launch without reading what its keys mean — so keys that must vary together belong in the same option",
 		keys:  choiceSchema,
 	},
 }
@@ -206,12 +240,12 @@ var choiceOptionSchema = schema{
 		check:    checkName,
 	},
 	{
-		name:        "quant",
-		kind:        kindString,
-		onlyBackend: BackendLlama,
-		rules:       "replaces the entry's quant when this option is picked; only one choice's options may set it",
-		example:     `"UD-Q4_K_XL"`,
-		check:       checkNonEmpty,
+		name:         "quant",
+		kind:         kindString,
+		onlyBackends: []Backend{BackendLlama},
+		rules:        "replaces the entry's quant when this option is picked; only one choice's options may set it",
+		example:      `"UD-Q4_K_XL"`,
+		check:        checkNonEmpty,
 	},
 	{
 		name:  "repo",
@@ -225,11 +259,27 @@ var choiceOptionSchema = schema{
 	},
 	{
 		name:  "args",
-		kind:  kindStringList,
-		rules: "appended to the entry's args when this option is picked; a flag set here may not also be set by the entry's args or by another choice's options, since those compose into one launch",
+		kind:  kindArgs,
+		rules: "merged over the entry's args when this option is picked, so a key set here is what that pick changes; another choice's options may not set the same key, since those two compose into one launch",
 		examples: map[Backend]string{
-			BackendLlama: `["--n-cpu-moe", "24"]`,
-			BackendMLX:   `["--temp", "0.7"]`,
+			BackendLlama: `["n-cpu-moe = 24"]`,
+			BackendMLX:   `["temp = 0.7"]`,
+		},
+		check: checkArgs,
+	},
+}
+
+// engineSchema is engines/<engine>.toml: what this machine serves every entry of
+// one backend with. It is the level entries override, and it is optional — an
+// engine with no file has no defaults of its own (docs/specs/CONFIG.md).
+var engineSchema = schema{
+	{
+		name:  "args",
+		kind:  kindArgs,
+		rules: `what every entry this engine serves starts from, one "key = value" line per flag — the machine's own defaults, not the model's; an entry that sets the same key overrides it`,
+		examples: map[Backend]string{
+			BackendLlama: `["gpu-layers = 99", "flash-attn = on"]`,
+			BackendMLX:   `["log-level = INFO"]`,
 		},
 		check: checkArgs,
 	},
@@ -282,11 +332,19 @@ var treeSchema = schema{
 	},
 }
 
-// composedFlags are the flags cria builds itself out of an entry's own keys
-// (docs/specs/CONFIG.md). An entry restating one in args would fight the composed
-// command line, so args naming any of them is refused instead of silently
-// overriding.
-var composedFlags = []string{"-hf", "--model", "--port", "--host"}
+// composedKeys are the args keys cria builds itself out of an entry's own keys
+// (docs/specs/CONFIG.md): the bind address, the port, and the key each backend's
+// model reference is spelled with. An args list restating one of them would
+// fight the composed command line, so it is refused instead of silently
+// overriding — and every backend's model key is refused under every backend,
+// since a key one server does not take is a mistake either way.
+func composedKeys() []string {
+	keys := make([]string, 0, len(backends)+2)
+	for _, backend := range backends {
+		keys = append(keys, backend.modelKey)
+	}
+	return append(keys, "host", "port")
+}
 
 // check validates a parsed TOML table against the schema. An unknown key, a wrong
 // type, a missing required key or a value its own rule rejects is an error naming
@@ -380,7 +438,7 @@ func (k kind) match(value any) error {
 		if _, ok := value.(int64); !ok {
 			return typeMismatch(k, value)
 		}
-	case kindStringList:
+	case kindArgs:
 		list, ok := value.([]any)
 		if !ok {
 			return typeMismatch(k, value)
@@ -440,11 +498,11 @@ func tomlType(value any) string {
 // the set the examples are rendered for cannot come apart.
 func checkBackend(value any) error {
 	declared := Backend(value.(string))
-	if slices.Contains(backends, declared) {
+	if slices.Contains(Backends(), declared) {
 		return nil
 	}
 	named := make([]string, 0, len(backends))
-	for _, backend := range backends {
+	for _, backend := range Backends() {
 		named = append(named, fmt.Sprintf("%q", backend))
 	}
 	return fmt.Errorf("want one of %s, got %q", strings.Join(named, ", "), declared)
@@ -510,52 +568,64 @@ func checkAbsPath(value any) error {
 	return nil
 }
 
-// checkArgs refuses args that restate a flag cria composes itself, in both the
-// separate-value and --flag=value spellings.
+// argsShapeFix is the one edit that turns a refused args list into a valid one.
+// It rides every refusal parseArg makes, because each of them is a line written
+// in some other shape than the one this schema takes.
+const argsShapeFix = `write args as "key = value" lines — the server's own long option without its dashes, then the value it takes (see cria docs)`
+
+// checkArgs holds the args contract: every element is one key and the value it
+// carries, no key twice, and none of the keys cria composes itself. The rules
+// that need more than one args list in view — a key an option and a choice both
+// set, a key an entry overrides — live in load.go and resolve.go.
 func checkArgs(value any) error {
+	composed := composedKeys()
+	seen := map[string]bool{}
 	for i, element := range value.([]any) {
-		flag, ok := flagToken(element.(string))
-		if !ok {
-			continue
+		arg, err := parseArg(element.(string))
+		if err != nil {
+			return fmt.Errorf("element %d: %w", i, err)
 		}
-		for _, composed := range composedFlags {
-			if flag == composed {
-				return fmt.Errorf("element %d: cria composes %s itself from this entry's keys; remove it from args", i, composed)
-			}
+		if seen[arg.Key] {
+			return fmt.Errorf("element %d: this list sets %q twice, and one key carries one value; a key is overridden from another level, never from the same one", i, arg.Key)
+		}
+		seen[arg.Key] = true
+		if slices.Contains(composed, arg.Key) {
+			return fmt.Errorf("element %d: cria composes %s itself from this entry's keys; remove it from args", i, arg.Key)
 		}
 	}
 	return nil
 }
 
-// flagToken reads an args element as a flag: the flag it names, without any
-// --flag=value payload, and whether it names one at all. A leading '-' followed
-// by a letter is a flag; "-1" and "-0.5" are values a flag takes, and two parts
-// of one launch may pass the same number without fighting over anything.
-func flagToken(arg string) (string, bool) {
-	name, _, _ := strings.Cut(arg, "=")
-	rest := strings.TrimLeft(name, "-")
-	if rest == name || rest == "" {
-		return "", false
+// parseArg reads one args element: the key before the first '=' and the value
+// after it, each trimmed of the spaces around it. The value is otherwise left
+// exactly as written — a value holding an '=' of its own keeps it, and nothing
+// about it is interpreted here (docs/specs/CONFIG.md).
+func parseArg(element string) (Arg, error) {
+	name, value, split := strings.Cut(element, "=")
+	if !split {
+		return Arg{}, fmt.Errorf("%q carries no '=', so it names no key; %s", element, argsShapeFix)
 	}
-	switch first := rest[0]; {
-	case first >= 'a' && first <= 'z', first >= 'A' && first <= 'Z':
-		return name, true
-	default:
-		return "", false
+	arg := Arg{Key: strings.TrimSpace(name), Value: strings.TrimSpace(value)}
+	if strings.HasPrefix(arg.Key, "-") {
+		return Arg{}, fmt.Errorf("%q is a flag, not a key; %s", arg.Key, argsShapeFix)
 	}
+	if !isName(arg.Key) {
+		return Arg{}, fmt.Errorf("%q is not a key: a key holds letters, digits, '-', '_' and '.'; %s", arg.Key, argsShapeFix)
+	}
+	if arg.Value == "" {
+		return Arg{}, fmt.Errorf("key %q carries no value; a flag that takes none is written %q", arg.Key, arg.Key+" = true")
+	}
+	return arg, nil
 }
 
-// flagTokens lists the flags an args list sets. Values are left out, so two parts
-// of a launch setting the same flag collide whatever they set it to
+// argKeys lists the keys an args list sets, for the rules that compare two lists
 // (docs/specs/CONFIG.md).
-func flagTokens(args []string) []string {
-	var tokens []string
+func argKeys(args []Arg) []string {
+	keys := make([]string, 0, len(args))
 	for _, arg := range args {
-		if token, ok := flagToken(arg); ok {
-			tokens = append(tokens, token)
-		}
+		keys = append(keys, arg.Key)
 	}
-	return tokens
+	return keys
 }
 
 // isName reports whether s is spelled with the characters cria allows in an entry

@@ -22,14 +22,17 @@ const (
 )
 
 // Docs renders the config reference: the tree layout, one table per schema, a
-// complete example for each backend and for config.toml, and the one command
-// that proves a freshly written entry actually serves. Plain text — it reads in
-// a terminal and pastes into a coding agent's context.
+// complete example for each backend, for each engine and for config.toml, and
+// the one command that proves a freshly written entry actually serves. Plain
+// text — it reads in a terminal and pastes into a coding agent's context.
 func Docs() string {
 	return fmt.Sprintf(docsPage,
 		keyTable(entrySchema),
+		keyTable(engineSchema),
 		keyTable(treeSchema),
+		composedKeysNote(),
 		entryExamples(),
+		engineExamples(),
 		exampleSettings(),
 	)
 }
@@ -45,8 +48,32 @@ func entryExamples() string {
 	return sections.String()
 }
 
-// exampleEntrySection is one such heading and the file under it.
-const exampleEntrySection = "EXAMPLE — models/<id>.toml, backend %q\n\n%s\n"
+// engineExamples is one complete engine file per backend, walked from the same
+// registry.
+func engineExamples() string {
+	var sections strings.Builder
+	for _, backend := range Backends() {
+		sections.WriteString(fmt.Sprintf(exampleEngineSection, backend, exampleEngine(backend)))
+	}
+	return sections.String()
+}
+
+// The headings each example file sits under.
+const (
+	exampleEntrySection  = "EXAMPLE — models/<id>.toml, backend %q\n\n%s\n"
+	exampleEngineSection = "EXAMPLE — engines/%s.toml\n\n%s\n"
+)
+
+// composedKeysNote lists the args keys cria composes itself, each with the
+// backend it belongs to. It reads the same registry the parser refuses them
+// from, so the page cannot name a different set than the one a file is held to.
+func composedKeysNote() string {
+	named := make([]string, 0, len(backends)+2)
+	for _, backend := range backends {
+		named = append(named, fmt.Sprintf("%s (%s)", backend.modelKey, backend.id))
+	}
+	return strings.Join(append(named, "host", "port"), ", ")
+}
 
 const docsPage = `cria config — the tree at ~/.config/cria
 
@@ -57,10 +84,13 @@ are missing.
 LAYOUT
 
   ~/.config/cria/
-  ├── AGENTS.md      created on first run when missing
-  ├── config.toml    tree-wide settings; the file itself is optional
+  ├── AGENTS.md            created on first run when missing
+  ├── config.toml          tree-wide settings; the file itself is optional
+  ├── engines/
+  │   └── <engine>.toml    what this machine serves every entry of one backend
+  │                        with; optional, one file per backend
   └── models/
-      └── <id>.toml  one launchable entry per file
+      └── <id>.toml        one launchable entry per file
 
   An entry's id is its filename minus .toml — the name "cria start <id>" takes. An
   id holds letters, digits, '-', '_' and '.'; anything else is refused. One file is
@@ -70,22 +100,50 @@ LAYOUT
 ENTRY KEYS — models/<id>.toml
 
 %s
+ENGINE KEYS — engines/<engine>.toml
+
+%s
 TREE KEYS — config.toml
 
 %s
+ARGS ARE KEYS
+
+  - One element of an args list is one flag: "key = value", where the key is the
+    server's own long option written without its dashes. cria splits on the first
+    '=' and passes both halves on untouched.
+  - A one-letter key is spelled with one dash and anything longer with two, so
+    write the long option: "gpu-layers = 99" rather than the "-ngl" alias, which
+    would reach the server as "--ngl" and be refused by name at startup.
+  - "key = true" is a flag that takes no value. Every other value is passed
+    exactly as written, so a flag with an off switch takes the word the server
+    itself takes for it: "flash-attn = off".
+  - Write the list one line to a key when a value deserves a comment:
+
+      args = [
+        # 262144 tokens, the whole window for a single slot
+        "c = 262144",
+        "parallel = 1",
+      ]
+
+  - One list may not set a key twice. Across levels the same key is an override
+    and the more specific level wins: engines/<engine>.toml first, then the
+    entry, then the options its picks land on. Two options of different choices
+    may not set one key — both are picked at once, so there is no winner.
+  - cria composes the model reference, the host and the port itself from the keys
+    above, so args may not set them: %s.
+
 HOW THE TREE IS READ
 
   - Unknown keys and wrong types are errors, never silent defaults: a typo fails
     loudly instead of behaving like something you did not write.
-  - A file cria refuses disables only itself; the report names the file and the
-    offending key.
-  - cria composes the model, port and host flags itself: "-hf repo:quant" for
-    llama, "--model repo" for mlx, plus "--port" and "--host". An args list
-    restating one of them is refused, never a silent override.
-  - Everything else belongs in args, passed to the server verbatim. cria types no
-    server flags of its own, so read the server's own --help for what goes there.
+  - An entry file cria refuses disables only itself; the report names the file and
+    the offending key. config.toml and the engine files are read by every entry
+    they govern, so a broken one is reported and nothing loads until it is fixed.
+  - Everything a server takes beyond the composed keys belongs in args. cria types
+    no server flags of its own, so read the server's own --help for what goes
+    there.
 
-%sEXAMPLE — config.toml
+%s%sEXAMPLE — config.toml
 
 %s
 VALIDATE WHAT YOU WROTE
@@ -162,10 +220,7 @@ func schemaRows(s schema, prefix string) []docsRow {
 		if k.required {
 			required = "yes"
 		}
-		rules := k.rules
-		if k.onlyBackend != "" {
-			rules = string(k.onlyBackend) + " only — " + rules
-		}
+		rules := k.backendNote() + k.rules
 		rows = append(rows, docsRow{name: prefix + k.name, kind: k.kind.String(), required: required, rules: rules})
 		if k.kind.holdsKeys() {
 			rows = append(rows, schemaRows(k.keys, prefix+k.name+".")...)
@@ -187,7 +242,7 @@ func ExampleEntry(backend Backend) string {
 	var file strings.Builder
 	writeComment(&file, fmt.Sprintf(exampleEntryPreamble, backend, entrySchema.requiredNames()))
 	for _, k := range entrySchema {
-		if k.kind.holdsKeys() || (k.onlyBackend != "" && k.onlyBackend != backend) {
+		if k.kind.holdsKeys() || !k.takenBy(backend) {
 			continue
 		}
 		writeExampleKey(&file, k, backend)
@@ -231,7 +286,7 @@ const exampleAxisNote = "Uncomment the block below to declare one, and repeat it
 func exampleBlockLines(k key, prefix, indent string, backend Backend) []string {
 	lines := []string{indent + k.header(prefix)}
 	for _, sub := range k.keys {
-		if sub.kind.holdsKeys() || (sub.onlyBackend != "" && sub.onlyBackend != backend) {
+		if sub.kind.holdsKeys() || !sub.takenBy(backend) {
 			continue
 		}
 		lines = append(lines, indent+sub.name+" = "+sub.exampleFor(backend))
@@ -245,6 +300,21 @@ func exampleBlockLines(k key, prefix, indent string, backend Backend) []string {
 	}
 	return lines
 }
+
+// exampleEngine renders a complete engines/<engine>.toml for one backend: what
+// this machine would serve every entry of that backend with. Built from the same
+// definitions the parser checks the file against, like every other example here.
+func exampleEngine(backend Backend) string {
+	var file strings.Builder
+	writeComment(&file, fmt.Sprintf(exampleEnginePreamble, backend, backend))
+	for _, k := range engineSchema {
+		writeExampleKey(&file, k, backend)
+	}
+	return file.String()
+}
+
+const exampleEnginePreamble = "A complete engines/%s.toml: what this machine serves every %q entry with. " +
+	"The file is optional and so is every key in it — without one, entries carry their own args alone."
 
 // exampleSettings renders a complete config.toml. Scalar keys come before any
 // table because TOML gives every key after a [table] header to that table; the

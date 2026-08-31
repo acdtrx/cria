@@ -402,12 +402,13 @@ func (m model) entryDetail(entry config.Entry, inner int) (facts, command []stri
 	}
 	add("port", strconv.Itoa(entry.Port), factStyle)
 	add("host", entry.Host, factStyle)
-	// Args go one flag to a line, verbatim: a file's args list is read to check
-	// what this entry sets, and a single wrapped string hides where one flag
-	// ends and the next begins. The args the current picks contribute follow in
-	// the same block, in the order composition appends them, on the pick's own
-	// ink — the block reads as the launch's effective args, each line's origin
-	// told by hue.
+	// Args go one key to a line, spelled as the file spells them: the block is
+	// read to check what this entry sets, and a single wrapped string hides
+	// where one key ends and the next begins. The keys the current picks
+	// contribute follow in the same block, on the pick's own ink — the block
+	// reads as what the entry's own files say, each line's origin told by hue.
+	// What the engine serves everything with, and how the keys become flags,
+	// are read off the command line below.
 	argLines := 0
 	argRow := func(row string, style lipgloss.Style) {
 		label := ""
@@ -417,11 +418,11 @@ func (m model) entryDetail(entry config.Entry, inner int) (facts, command []stri
 		argLines++
 		add(label, row, style)
 	}
-	for _, row := range argRows(entry.Args) {
-		argRow(row, factStyle)
+	for _, arg := range entry.Args {
+		argRow(arg.String(), factStyle)
 	}
-	for _, row := range argRows(pickedArgs(entry, selection)) {
-		argRow(row, pickedFactStyle)
+	for _, arg := range pickedArgs(entry, selection) {
+		argRow(arg.String(), pickedFactStyle)
 	}
 	add("cached", m.cachedWord(entry, selection), factStyle)
 	lines = append(lines, choiceRows(entry, selection, inner)...)
@@ -554,8 +555,8 @@ func (m model) composedCommand(entry config.Entry, selection config.Selection) (
 // Resolve composes them — each choice's picked option, choices in file order
 // (config/resolve.go). An axis the selection leaves unpicked adds nothing here;
 // the command line is where that refusal is spelled out (choiceRows).
-func pickedArgs(entry config.Entry, selection config.Selection) []string {
-	var args []string
+func pickedArgs(entry config.Entry, selection config.Selection) []config.Arg {
+	var args []config.Arg
 	for _, choice := range entry.Choices {
 		for _, option := range choice.Options {
 			if option.Name == selection[choice.Name] {
@@ -564,21 +565,6 @@ func pickedArgs(entry config.Entry, selection config.Selection) []string {
 		}
 	}
 	return args
-}
-
-// argRows groups an args list the way it was written: each flag with the values
-// that follow it, so `--ctx-size 16384` is one line and `--jinja` is another.
-// Nothing is reformatted — the tokens are the file's own, in the file's order.
-func argRows(args []string) []string {
-	var rows []string
-	for _, arg := range args {
-		if len(rows) == 0 || strings.HasPrefix(arg, "-") {
-			rows = append(rows, arg)
-			continue
-		}
-		rows[len(rows)-1] += " " + arg
-	}
-	return rows
 }
 
 // brokenDetail is an entry file cria refused: which file, which key, and the one

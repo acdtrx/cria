@@ -25,7 +25,7 @@ func quantAxis() config.Choice {
 func slotsAxis() config.Choice {
 	return config.Choice{Name: "slots", Options: []config.ChoiceOption{
 		{Name: "one"},
-		{Name: "four", Args: []string{"--parallel", "4"}},
+		{Name: "four", Args: []config.Arg{{Key: "parallel", Value: "4"}}},
 	}}
 }
 
