@@ -78,3 +78,41 @@ func TestTheRouterRunsLlamaServerInAnotherMode(t *testing.T) {
 		t.Errorf("the router publishes slots at %q (%v), want the endpoint its children answer", path, published)
 	}
 }
+
+// The router serves llama entries and only llama entries: it is llama-server in
+// router mode, so what it can hold is what that program serves. The refusal
+// names both programs, which is the fact behind the rule.
+func TestOnlyTheEntriesTheRoutersProgramServesCanBeIncluded(t *testing.T) {
+	if err := RouterServes(config.BackendLlama); err != nil {
+		t.Errorf("a llama entry cannot be included in the router: %v", err)
+	}
+
+	err := RouterServes(config.BackendMLX)
+	if err == nil {
+		t.Fatal("an mlx entry was accepted into the router, which runs llama-server")
+	}
+	for _, want := range []string{string(tools.MLXLMServer), string(tools.LlamaServer), string(config.BackendLlama)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal reads %v, want it to name %q", err, want)
+		}
+	}
+
+	// The router itself is not a model to include: no entry declares it.
+	if err := RouterServes(config.BackendRouter); err == nil {
+		t.Error("the router was accepted as one of its own models")
+	}
+	if err := RouterServes("vllm"); err == nil {
+		t.Error("a backend cria has no engine for was accepted into the router")
+	}
+}
+
+// One of the router's models is addressed by the alias its section carries — the
+// entry id — on the endpoints a child answers for.
+func TestARoutersModelIsAddressedByItsAlias(t *testing.T) {
+	if got, want := RouterModelQuery("/slots", "qwen-q6"), "/slots?model=qwen-q6"; got != want {
+		t.Errorf("cria addresses a child at %q, want %q", got, want)
+	}
+	if got, want := RouterModelQuery("/props", "lfm 2.5"), "/props?model=lfm+2.5"; got != want {
+		t.Errorf("a name with a space is addressed as %q, want it escaped: %q", got, want)
+	}
+}

@@ -111,6 +111,12 @@ type Manager struct {
 	// before it stops one (validate.go).
 	slots slotsReader
 
+	// What the router says about the models it holds, and the request that loads
+	// or unloads one of them (routermodels.go). A router's children are its own
+	// processes, so both of these ask the router rather than the host.
+	children      routerChildren
+	commandRouter routerCommander
+
 	// What a Manager remembers between observations. Both are display state,
 	// live only as long as this cria invocation, and are never persisted: which
 	// pid of an entry has answered green — the line between "not answering yet"
@@ -153,6 +159,10 @@ func New(root string, host procs.Host) *Manager {
 		complete: newHTTPCompletion(),
 		bench:    newHTTPBench(),
 		slots:    newHTTPSlots(),
+
+		children:      newHTTPRouterChildren(),
+		commandRouter: newHTTPRouterCommand(),
+
 		greenPID: map[string]int{},
 		totals:   map[string]hubapi.Total{},
 		grace:    stopGrace,

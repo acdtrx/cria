@@ -23,36 +23,127 @@ import (
 const (
 	// presetDefaults is the section every model the router serves starts from.
 	// The model sections a launch composes override it, which is the same
-	// precedence the engine file and an entry already have.
+	// precedence the engine file and an entry already have — upstream's own
+	// precedence rule, so cria merges nothing into a section that the router
+	// would merge again.
 	presetDefaults = "*"
 
 	// presetTrue is what a flag with no value becomes. A command line says a
 	// switch by naming it; an ini file has to give it a value.
 	presetTrue = "true"
+
+	// presetAlias is the key that gives one section the name its clients address
+	// it by. cria writes it itself, from the entry id (STEP-4's ruling): section
+	// names are model references and upstream normalizes their quant tags, while
+	// an alias is passed through as written.
+	presetAlias = "alias"
 )
 
+// RouterModel is one entry as the router is asked to serve it: the id clients
+// address it by, the model reference its section is named after, and the args
+// that section carries — the entry's own, merged with the picked options', with
+// no engine level in them (config.ResolveUnder).
+type RouterModel struct {
+	ID    string
+	Repo  string
+	Quant string
+	Args  []string
+}
+
+// Composition is a composed preset and what became of every model it was asked
+// to carry: the ids that got a section, and the ids that got none with the
+// reason each was refused.
+//
+// A model that cannot be written is skipped rather than fatal. One entry whose
+// args are not expressible as preset keys would otherwise take the whole router
+// down with it, and a router that serves the rest and says which one it dropped
+// is the answer the host can act on (docs/specs/SERVE.md).
+type Composition struct {
+	Preset  string   // the file's whole text
+	Served  []string // the ids that got a section, in the order they were written
+	Skipped []Skipped
+}
+
+// Skipped is one model the preset could not carry, and why — phrased for
+// whoever included it, since the fix is always in that entry's file or in the
+// inclusion itself.
+type Skipped struct {
+	ID     string
+	Reason string
+}
+
 // RouterPreset composes the preset one router process serves from: the defaults
-// section, from what engines/router.toml says every model it serves starts from.
+// section, from what engines/router.toml says every model it serves starts from,
+// and one section per model included in the router.
 //
 // The file is regenerated at every start and never edited (docs/specs/SERVE.md),
 // and it carries no comments of its own: it is upstream's format, read by
 // upstream's parser, and a line cria added for a reader is a line that parser
 // has to accept.
-func RouterPreset(defaults []string) (string, error) {
-	lines, err := presetSection(defaults)
+//
+// The error is the defaults' alone. What the engine file says is the router's
+// own configuration — a router started with less than it asked for is not the
+// router that was configured — while a model that cannot be written is one
+// model, answered per model.
+func RouterPreset(defaults []string, models []RouterModel) (Composition, error) {
+	keys, err := presetSection(defaults)
 	if err != nil {
-		return "", fmt.Errorf("engines/%s.toml args: %w", config.BackendRouter, err)
+		return Composition{}, fmt.Errorf("engines/%s.toml args: %w", config.BackendRouter, err)
 	}
 
 	var preset strings.Builder
 	preset.WriteString("[" + presetDefaults + "]\n")
-	for _, line := range lines {
-		preset.WriteString(line + "\n")
+	for _, key := range keys {
+		preset.WriteString(key.line() + "\n")
 	}
-	return preset.String(), nil
+
+	composed := Composition{}
+	sections := map[string]string{} // section name → the id that wrote it
+	for _, model := range models {
+		section := hubReference(config.Launch{Repo: model.Repo, Quant: model.Quant})
+
+		if held, taken := sections[section]; taken {
+			composed.Skipped = append(composed.Skipped, Skipped{ID: model.ID, Reason: fmt.Sprintf(
+				"it serves %s, which %s is already the router's section for; one section per model reference, so include one of the two or point them at different quantizations",
+				section, held)})
+			continue
+		}
+		keys, err := presetSection(model.Args)
+		if err != nil {
+			composed.Skipped = append(composed.Skipped, Skipped{ID: model.ID, Reason: err.Error()})
+			continue
+		}
+		if named := namesAlias(keys); named != "" {
+			composed.Skipped = append(composed.Skipped, Skipped{ID: model.ID, Reason: fmt.Sprintf(
+				"its args set %s, and the router's section for it is named by its entry id; drop that flag from the entry's args", named)})
+			continue
+		}
+
+		sections[section] = model.ID
+		preset.WriteString("\n[" + section + "]\n")
+		preset.WriteString(presetAlias + " = " + model.ID + "\n")
+		for _, key := range keys {
+			preset.WriteString(key.line() + "\n")
+		}
+		composed.Served = append(composed.Served, model.ID)
+	}
+
+	composed.Preset = preset.String()
+	return composed, nil
 }
 
-// presetSection turns one args list into the lines of one preset section: each
+// presetKey is one line of a preset section: the key upstream canonicalizes and
+// the value written after it. It stays a pair rather than a formatted line so
+// composition can see what a section sets before it writes it.
+type presetKey struct {
+	Key   string
+	Flag  string // the flag the key was written as, for a refusal to name
+	Value string
+}
+
+func (k presetKey) line() string { return k.Key + " = " + k.Value }
+
+// presetSection turns one args list into the keys of one preset section: each
 // flag group as the key upstream canonicalizes, with the value written after it.
 //
 // Three lists cannot be written as keys, and each is refused by name rather than
@@ -63,10 +154,10 @@ func RouterPreset(defaults []string) (string, error) {
 //   - a flag carrying more than one value, for the same reason;
 //   - tokens written before any flag, which have no key to belong to.
 //
-// This is the derivation every section is composed with: the defaults here, and
-// each included model's own args where those land (STEP-8).
-func presetSection(args []string) ([]string, error) {
-	lines := make([]string, 0, len(args))
+// This is the derivation every section is composed with: the defaults, and each
+// included model's own args.
+func presetSection(args []string) ([]presetKey, error) {
+	keys := make([]presetKey, 0, len(args))
 	written := make(map[string]bool, len(args))
 
 	for _, group := range config.FlagGroups(args) {
@@ -84,9 +175,25 @@ func presetSection(args []string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		lines = append(lines, key+" = "+value)
+		keys = append(keys, presetKey{Key: key, Flag: group.Flag, Value: value})
 	}
-	return lines, nil
+	return keys, nil
+}
+
+// namesAlias reports the flag a section's own args set the alias with, or the
+// empty string when none does.
+//
+// cria writes that key itself, from the entry id, so a section carrying a second
+// one would hand upstream two answers to the same question. Only the key cria
+// writes is refused: cria owns no table of upstream's short spellings, so a
+// list writing `-a` is upstream's to canonicalize and refuse.
+func namesAlias(keys []presetKey) string {
+	for _, key := range keys {
+		if key.Key == presetAlias {
+			return key.Flag
+		}
+	}
+	return ""
 }
 
 // presetValue is what one flag group says on the right of the '='. The value is

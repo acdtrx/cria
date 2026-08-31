@@ -22,7 +22,8 @@ SUBCOMMANDS
   start <id> [picks] [--wait]  start the entry <id>; --wait blocks until it serves or fails
   stop [<id>]                  stop a running server; the id is required when several run
   status [--json]              what every server cria started is doing right now
-  router [start|stop|status]   the one router process this host runs; bare prints its status
+  router [verb] [<id>]         the one router process this host runs and the models under it:
+                               status (bare), start, stop, models, include, exclude, load, unload
   validate <id> [picks]        prove the entry serves: swap it in, ask it for a completion, swap back
   bench [<id>] [flags]         measure a running server: prefill and decode tokens/second
   list [--paths]               the entries the config tree declares
@@ -36,7 +37,7 @@ SUBCOMMANDS
 FLAGS
   --wait         start: block until the server answers its health endpoint, or fails
   --json         status, bench: emit the same facts as one JSON document
-  --ignore-busy  validate: displace the port's holder even while it answers a request
+  --ignore-busy  validate, router unload: act even while the server answers a request
   --sizes        bench: prompt sizes in tokens, comma-separated (default 16,4096,16384)
   --runs         bench: measured runs per size (default 3)
   --gen          bench: tokens each run asks the server to generate (default 256)
@@ -51,6 +52,8 @@ PICKS
   along them: cria start <id> [choice=option ...] [--wait], as in cria start qwen quant=q6.
   A pick there is one-shot: it composes that launch and leaves the stored picks alone.
   cria validate takes the same picks — the combination it proves.
+  cria router include takes them too, and there they are stored: the combination the
+  router holds that entry under, which may differ from the one a bare cria start uses.
   cria list prints each entry's choices with its current pick marked.
 
 EXIT CODES

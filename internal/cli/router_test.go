@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/engine"
+	"cria/internal/picks"
 	"cria/internal/procs"
 	"cria/internal/serve"
 	"cria/internal/tools"
@@ -277,5 +280,352 @@ func TestRouterRefusesAVerbItDoesNotHave(t *testing.T) {
 		if len(fake.routerStarts) != 0 {
 			t.Errorf("cria started the router from %v", args)
 		}
+	}
+}
+
+// routerApp is an app over a router store held in memory: what the verbs read,
+// and what they wrote. The store is the one piece of cria's state the CLI edits,
+// so a test reads the file that would have been written off this.
+func routerApp(tree *config.Tree, fake *fakeServers, held picks.Router) (*app, *bytes.Buffer, *bytes.Buffer, *picks.Router) {
+	app, out, errOut := newTestApp(tree, fake)
+	stored := &held
+	app.routerModels = func() (picks.Router, error) { return *stored, nil }
+	app.saveRouterModels = func(written picks.Router) error { *stored = written; return nil }
+	return app, out, errOut, stored
+}
+
+// `cria router include <id> [choice=option ...]` holds one of the tree's entries
+// under the router, in the combination it names — the same `choice=option`
+// vocabulary a start takes, stored here because under the router the combination
+// is the state.
+func TestRouterIncludeHoldsAnEntryUnderThePicksItNames(t *testing.T) {
+	tree := routerTree()
+	tree.Entries = append(tree.Entries, choicesEntry())
+	app, out, _, stored := routerApp(tree, &fakeServers{}, picks.Router{})
+
+	if code := app.run([]string{"router", "include", "qwen-choices", "quant=q6"}, "test"); code != exitOK {
+		t.Fatalf("`cria router include` exited %d, want %d", code, exitOK)
+	}
+	if !stored.Holds("qwen-choices") {
+		t.Fatalf("the router holds %v, want the entry that was included", stored.IDs())
+	}
+	if picked := stored.Picks("qwen-choices"); picked["quant"] != "q6" {
+		t.Errorf("qwen-choices is held under %v, want the combination the command named", picked)
+	}
+	for _, want := range []string{"included qwen-choices in the router", "quant=q6", `address it as "qwen-choices"`, "restart"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the include printed\n%s\nwant it to say %q", out, want)
+		}
+	}
+
+	// Running it again is how the combination is changed: one verb settles which
+	// models the router holds and what each is held as.
+	if code := app.run([]string{"router", "include", "qwen-choices", "quant=q4"}, "test"); code != exitOK {
+		t.Fatalf("re-including exited %d, want %d", code, exitOK)
+	}
+	if picked := stored.Picks("qwen-choices"); picked["quant"] != "q4" {
+		t.Errorf("qwen-choices is held under %v, want the combination named second", picked)
+	}
+	if !strings.Contains(out.String(), "qwen-choices was already in the router") {
+		t.Errorf("re-including printed\n%s\nwant it to say the entry was already held", out)
+	}
+}
+
+// Only the entries the router's own program serves can be included, and the
+// refusal names why rather than saying "no".
+func TestRouterIncludeRefusesAnEntryTheRouterCannotServe(t *testing.T) {
+	tree := routerTree()
+	mlx := choicesEntry()
+	mlx.ID, mlx.Backend, mlx.Choices = "qwen-mlx", config.BackendMLX, nil
+	mlx.Repo = "mlx-community/Qwen3-30B-A3B-4bit"
+	tree.Entries = append(tree.Entries, mlx)
+	app, _, errOut, stored := routerApp(tree, &fakeServers{}, picks.Router{})
+
+	if code := app.run([]string{"router", "include", "qwen-mlx"}, "test"); code != exitFailure {
+		t.Fatalf("including an mlx entry exited %d, want %d", code, exitFailure)
+	}
+	for _, want := range []string{"mlx_lm.server", "llama-server", "llama"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("the refusal reads\n%s\nwant it to name %q", errOut, want)
+		}
+	}
+	if len(stored.IDs()) != 0 {
+		t.Errorf("the router holds %v after a refused include", stored.IDs())
+	}
+}
+
+// An id that names no entry is refused with the ids that do exist — the same
+// answer a start gives, since the question is the same one.
+func TestRouterIncludeRefusesAnUnknownEntry(t *testing.T) {
+	app, _, errOut, stored := routerApp(routerTree(), &fakeServers{}, picks.Router{})
+
+	if code := app.run([]string{"router", "include", "nope"}, "test"); code != exitFailure {
+		t.Fatalf("including an unknown entry exited %d, want %d", code, exitFailure)
+	}
+	if !strings.Contains(errOut.String(), "no entry named \"nope\"") || !strings.Contains(errOut.String(), "qwen") {
+		t.Errorf("the refusal reads\n%s\nwant it to name the entries that do exist", errOut)
+	}
+	if len(stored.IDs()) != 0 {
+		t.Errorf("the router holds %v after a refused include", stored.IDs())
+	}
+}
+
+// `cria router exclude <id>` drops one model, and it never reads the tree: an
+// entry whose file was renamed away is exactly the one that has to be droppable.
+func TestRouterExcludeDropsWhatTheRouterHolds(t *testing.T) {
+	held := picks.Router{}
+	held.Include("qwen", nil)
+	held.Include("renamed-away", nil)
+	app, out, errOut, stored := routerApp(routerTree(), &fakeServers{}, held)
+
+	if code := app.run([]string{"router", "exclude", "renamed-away"}, "test"); code != exitOK {
+		t.Fatalf("`cria router exclude` exited %d, want %d", code, exitOK)
+	}
+	if stored.Holds("renamed-away") || !stored.Holds("qwen") {
+		t.Errorf("the router holds %v, want only the entry that was not excluded", stored.IDs())
+	}
+	if !strings.Contains(out.String(), "excluded renamed-away from the router") {
+		t.Errorf("the exclude printed\n%s\nwant it to name what it dropped", out)
+	}
+
+	// Excluding what the router does not hold is an answer, not a silent success.
+	if code := app.run([]string{"router", "exclude", "renamed-away"}, "test"); code != exitFailure {
+		t.Fatalf("excluding an entry the router does not hold exited %d, want %d", code, exitFailure)
+	}
+	if !strings.Contains(errOut.String(), "does not hold") {
+		t.Errorf("the refusal reads\n%s\nwant it to say the router does not hold it", errOut)
+	}
+}
+
+// `cria router models` is what the next start would serve, composed from the
+// store and the tree: it needs no running router, and a model that could not be
+// composed is listed with its reason rather than costing the listing its code.
+func TestRouterModelsListsWhatTheRouterWouldServe(t *testing.T) {
+	fake := &fakeServers{routerModels: serve.RouterModels{
+		Served: []serve.ServedModel{
+			{ID: "qwen", Repo: "unsloth/Qwen3-30B-A3B-GGUF", Quant: "UD-Q4_K_XL"},
+			{ID: "qwen-choices", Repo: "unsloth/Qwen3-30B-A3B-GGUF", Quant: "UD-Q6_K_XL", Selection: config.Selection{"quant": "q6"}},
+		},
+		Skipped: []engine.Skipped{{ID: "qwen-mlx", Reason: "mlx entries are served by mlx_lm.server"}},
+	}}
+	app, out, _, _ := routerApp(routerTree(), fake, picks.Router{})
+
+	if code := app.run([]string{"router", "models"}, "test"); code != exitOK {
+		t.Fatalf("`cria router models` exited %d, want %d", code, exitOK)
+	}
+	for _, want := range []string{
+		"qwen          unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL",
+		"qwen-choices  unsloth/Qwen3-30B-A3B-GGUF:UD-Q6_K_XL  quant=q6",
+		"qwen-mlx  skipped: mlx entries are served by mlx_lm.server",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the listing printed\n%s\nwant the line %q", out, want)
+		}
+	}
+}
+
+// A router holding nothing says so, and points at the verb that changes it.
+func TestRouterModelsSaysWhenTheRouterHoldsNothing(t *testing.T) {
+	app, out, _, _ := routerApp(routerTree(), &fakeServers{}, picks.Router{})
+
+	if code := app.run([]string{"router", "models"}, "test"); code != exitOK {
+		t.Fatalf("`cria router models` exited %d, want %d", code, exitOK)
+	}
+	if !strings.Contains(out.String(), "holds no models") || !strings.Contains(out.String(), "cria router include") {
+		t.Errorf("the listing printed\n%s\nwant it to say the router holds nothing and how to change that", out)
+	}
+}
+
+// `cria router status` reports the supervisor and then each model it holds: the
+// name a client sends, the router's own word for what that model is doing, and
+// the reference it lists.
+func TestRouterStatusShowsWhatEachModelIsDoing(t *testing.T) {
+	fake := &fakeServers{
+		routerRecord: routerRecord(), routerFound: true, routerLive: true,
+		health: serve.Health{URL: "http://127.0.0.1:11434/health", Green: true, Status: 200, Detail: "200 OK"},
+		routerChildren: serve.RouterChildren{Children: []serve.RouterChild{
+			{Model: "unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL", Aliases: []string{"qwen"}, State: "loaded", Phase: serve.PhaseRunning},
+			{Model: "LiquidAI/LFM2.5-2.6B-GGUF:Q8_0", Aliases: []string{"lfm"}, State: "unloaded"},
+		}},
+	}
+	app, out, _, _ := routerApp(routerTree(), fake, picks.Router{})
+
+	if code := app.run([]string{"router", "status"}, "test"); code != exitOK {
+		t.Fatalf("`cria router status` exited %d, want %d", code, exitOK)
+	}
+	for _, want := range []string{
+		"router  running  router",
+		"qwen  loaded    unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL",
+		"lfm   unloaded  LiquidAI/LFM2.5-2.6B-GGUF:Q8_0",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the status printed\n%s\nwant the line %q", out, want)
+		}
+	}
+}
+
+// A router that cannot be asked what it holds says why, and the status still
+// reports the supervisor it could observe.
+func TestRouterStatusSaysWhyItCouldNotListTheModels(t *testing.T) {
+	fake := &fakeServers{
+		routerRecord: routerRecord(), routerFound: true, routerLive: true,
+		routerChildren: serve.RouterChildren{Detail: "http://127.0.0.1:11434/models: connection refused"},
+	}
+	app, out, _, _ := routerApp(routerTree(), fake, picks.Router{})
+
+	if code := app.run([]string{"router", "status"}, "test"); code != exitOK {
+		t.Fatalf("`cria router status` exited %d, want %d", code, exitOK)
+	}
+	if !strings.Contains(out.String(), "connection refused") {
+		t.Errorf("the status printed\n%s\nwant it to say why the models could not be listed", out)
+	}
+}
+
+// `cria router load <id>` and `cria router unload <id>` act on one of the models
+// the router says it holds, addressed by the name it answers to.
+func TestRouterLoadAndUnloadActOnOneModel(t *testing.T) {
+	fake := &fakeServers{
+		routerRecord: routerRecord(), routerFound: true, routerLive: true,
+		routerChildren: serve.RouterChildren{Children: []serve.RouterChild{
+			{Model: "unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL", Aliases: []string{"qwen"}, State: "unloaded"},
+		}},
+	}
+	app, out, _, _ := routerApp(routerTree(), fake, picks.Router{})
+
+	if code := app.run([]string{"router", "load", "qwen"}, "test"); code != exitOK {
+		t.Fatalf("`cria router load` exited %d, want %d", code, exitOK)
+	}
+	if code := app.run([]string{"router", "unload", "qwen"}, "test"); code != exitOK {
+		t.Fatalf("`cria router unload` exited %d, want %d", code, exitOK)
+	}
+	if strings.Join(fake.loaded, ",") != "qwen" || strings.Join(fake.unloaded, ",") != "qwen" {
+		t.Errorf("cria loaded %v and unloaded %v, want the model the command named", fake.loaded, fake.unloaded)
+	}
+	if !strings.Contains(out.String(), "loaded qwen") || !strings.Contains(out.String(), "unloaded qwen") {
+		t.Errorf("the verbs printed\n%s\nwant each to say what it did", out)
+	}
+}
+
+// A name the router does not hold is refused before anything is sent, naming
+// what it does hold: the difference between "include it and restart" and a bare
+// 404 from somebody else's endpoint.
+func TestRouterLoadRefusesAModelTheRouterDoesNotHold(t *testing.T) {
+	fake := &fakeServers{
+		routerRecord: routerRecord(), routerFound: true, routerLive: true,
+		routerChildren: serve.RouterChildren{Children: []serve.RouterChild{
+			{Model: "unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL", Aliases: []string{"qwen"}, State: "loaded"},
+		}},
+	}
+	app, _, errOut, _ := routerApp(routerTree(), fake, picks.Router{})
+
+	if code := app.run([]string{"router", "load", "lfm"}, "test"); code != exitFailure {
+		t.Fatalf("loading a model the router does not hold exited %d, want %d", code, exitFailure)
+	}
+	if !strings.Contains(errOut.String(), "does not hold \"lfm\"") || !strings.Contains(errOut.String(), "it holds qwen") {
+		t.Errorf("the refusal reads\n%s\nwant it to name what the router holds instead", errOut)
+	}
+	if len(fake.loaded) != 0 {
+		t.Errorf("cria sent %v after refusing the load", fake.loaded)
+	}
+}
+
+// With no router running there is nothing to load into, and the refusal names
+// the verb that changes that.
+func TestRouterLoadRefusesWithNoRouterRunning(t *testing.T) {
+	app, _, errOut, _ := routerApp(routerTree(), &fakeServers{}, picks.Router{})
+
+	if code := app.run([]string{"router", "unload", "qwen"}, "test"); code != exitFailure {
+		t.Fatalf("unloading with no router exited %d, want %d", code, exitFailure)
+	}
+	if !strings.Contains(errOut.String(), "no router is running") || !strings.Contains(errOut.String(), "cria router start") {
+		t.Errorf("the refusal reads\n%s\nwant it to say there is no router and how to start one", errOut)
+	}
+}
+
+// Unloading a model that is answering somebody would cut that answer off, so it
+// is refused — the gate a validation puts in front of displacing a busy server,
+// with the same override.
+func TestRouterUnloadRefusesAModelThatIsAnswering(t *testing.T) {
+	fake := &fakeServers{
+		routerRecord: routerRecord(), routerFound: true, routerLive: true,
+		routerChildren: serve.RouterChildren{Children: []serve.RouterChild{
+			{Model: "unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL", Aliases: []string{"qwen"}, State: "loaded"},
+		}},
+		routerGeneration: serve.Generation{Busy: serve.BusyGenerating},
+	}
+	app, _, errOut, _ := routerApp(routerTree(), fake, picks.Router{})
+
+	if code := app.run([]string{"router", "unload", "qwen"}, "test"); code != exitFailure {
+		t.Fatalf("unloading a busy model exited %d, want %d", code, exitFailure)
+	}
+	if len(fake.unloaded) != 0 {
+		t.Errorf("cria unloaded %v while it was answering a request", fake.unloaded)
+	}
+	if !strings.Contains(errOut.String(), "answering a request right now") {
+		t.Errorf("the refusal reads\n%s\nwant it to say the model is mid-answer", errOut)
+	}
+
+	// The operator answering for it is what lets the unload through, and cria says
+	// what it is doing over the top of.
+	if code := app.run([]string{"router", "unload", "qwen", ignoreBusyFlag}, "test"); code != exitOK {
+		t.Fatalf("unloading with %s exited %d, want %d", ignoreBusyFlag, code, exitOK)
+	}
+	if strings.Join(fake.unloaded, ",") != "qwen" {
+		t.Errorf("cria unloaded %v, want the model the override named", fake.unloaded)
+	}
+	if !strings.Contains(errOut.String(), "mid-answer") {
+		t.Errorf("the override printed\n%s\nwant a note saying what it cut off", errOut)
+	}
+}
+
+// A signal cria cannot read is neither busy nor idle: the unload goes ahead with
+// the risk named, the way a validation proceeds over an unverifiable holder.
+func TestRouterUnloadProceedsWhenItCannotTell(t *testing.T) {
+	fake := &fakeServers{
+		routerRecord: routerRecord(), routerFound: true, routerLive: true,
+		routerChildren: serve.RouterChildren{Children: []serve.RouterChild{
+			{Model: "unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL", Aliases: []string{"qwen"}, State: "loaded"},
+		}},
+		routerGeneration: serve.Generation{Busy: serve.BusyUnverifiable, Detail: "the endpoint is not enabled"},
+	}
+	app, _, errOut, _ := routerApp(routerTree(), fake, picks.Router{})
+
+	if code := app.run([]string{"router", "unload", "qwen"}, "test"); code != exitOK {
+		t.Fatalf("unloading a model cria cannot judge exited %d, want %d", code, exitOK)
+	}
+	if strings.Join(fake.unloaded, ",") != "qwen" {
+		t.Errorf("cria unloaded %v, want the model that was named", fake.unloaded)
+	}
+	if !strings.Contains(errOut.String(), "cannot tell whether qwen is generating") {
+		t.Errorf("the unload printed\n%s\nwant the risk named", errOut)
+	}
+}
+
+// The verbs that take a model take exactly one, and a verb the subcommand does
+// not have is a command line cria cannot route.
+func TestRouterVerbsRefuseWhatTheyCannotRoute(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "a verb that does not exist", args: []string{"router", "reload"}, want: "no such verb"},
+		{name: "an argument to a verb that takes none", args: []string{"router", "status", "qwen"}, want: "takes no arguments"},
+		{name: "two entries to include", args: []string{"router", "include", "qwen", "gemma"}, want: "one entry at a time"},
+		{name: "nothing to include", args: []string{"router", "include"}, want: "one entry at a time"},
+		{name: "two models to load", args: []string{"router", "load", "qwen", "lfm"}, want: "one model at a time"},
+		{name: "a flag the subcommand does not have", args: []string{"router", "unload", "qwen", "--force"}, want: "unknown flag"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app, _, errOut, _ := routerApp(routerTree(), &fakeServers{}, picks.Router{})
+			if code := app.run(test.args, "test"); code != exitUsage {
+				t.Fatalf("`cria %s` exited %d, want %d", strings.Join(test.args, " "), code, exitUsage)
+			}
+			if !strings.Contains(errOut.String(), test.want) {
+				t.Errorf("the refusal reads\n%s\nwant it to say %q", errOut, test.want)
+			}
+		})
 	}
 }

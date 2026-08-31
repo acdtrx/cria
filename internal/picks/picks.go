@@ -1,8 +1,10 @@
-// Package picks is cria's memory of which option is picked on each of an entry's
-// choices: ~/.local/state/cria/choices.json, one pick per entry per choice
-// (docs/specs/CONFIG.md, Choices). Picks are state, not config — the config tree
-// is human-owned and cria never writes into it — so they live next to the state
-// records, in a file cria writes without being asked.
+// Package picks is cria's memory of what has been chosen: which option is picked
+// on each of an entry's choices — ~/.local/state/cria/choices.json, one pick per
+// entry per choice (docs/specs/CONFIG.md, Choices) — and which entries the
+// router holds, with the combination each is held under (router.go). Both are
+// state, not config — the config tree is human-owned and cria never writes into
+// it — so they live next to the state records, in files cria writes without
+// being asked.
 //
 // The store is its own package because both frontends need it and neither owns
 // it: the TUI picker is the only writer, while the CLI reads picks and records

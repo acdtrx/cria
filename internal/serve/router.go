@@ -83,41 +83,45 @@ func (m *Manager) RouterServer() (Server, bool, error) {
 // (docs/specs/SERVE.md).
 //
 // The preset is composed first, because it is the one part of the launch the
-// config tree can make impossible: a flag that cannot be written as a preset key
-// refuses here, before anything on the host has changed (internal/engine).
-func (m *Manager) StartRouter(router config.RouterConfig, report tools.Report) (Record, error) {
+// config tree can make impossible: an engine file whose args cannot be written
+// as preset keys refuses here, before anything on the host has changed
+// (internal/engine). The models it composed come back alongside the record —
+// including the ones it could not carry, which the caller reports rather than
+// discovering from a router that serves fewer models than the store lists.
+func (m *Manager) StartRouter(tree *config.Tree, report tools.Report) (Record, RouterModels, error) {
+	router := tree.Router
 	port, err := RouterPort(router)
 	if err != nil {
-		return Record{}, err
+		return Record{}, RouterModels{}, err
 	}
-	preset, err := engine.RouterPreset(router.Args)
+	models, err := m.RouterModels(tree)
 	if err != nil {
-		return Record{}, fmt.Errorf("cannot start the router: %w", err)
+		return Record{}, RouterModels{}, fmt.Errorf("cannot start the router: %w", err)
 	}
 	command, err := m.routerCommand(router, port, report)
 	if err != nil {
-		return Record{}, fmt.Errorf("cannot start the router: %w", err)
+		return Record{}, RouterModels{}, fmt.Errorf("cannot start the router: %w", err)
 	}
 	if err := m.refuseIfRouterRunning(); err != nil {
-		return Record{}, err
+		return Record{}, RouterModels{}, err
 	}
 
 	// Pruning first, to one short of the retention, leaves room for the log this
 	// launch is about to create — the same order an entry's start takes.
 	if err := pruneLogsIn(m.routerLogsRoot(), string(config.BackendRouter), logsKept-1); err != nil {
-		return Record{}, err
+		return Record{}, RouterModels{}, err
 	}
 
 	launchedAt := time.Now()
 	logPath := launchLogPath(m.routerLogsRoot(), string(config.BackendRouter), launchedAt)
 	log, err := m.createLog(logPath)
 	if err != nil {
-		return Record{}, err
+		return Record{}, RouterModels{}, err
 	}
 	defer log.Close()
 
-	if err := m.writeRouterPreset(preset); err != nil {
-		return Record{}, err
+	if err := m.writeRouterPreset(models.Preset); err != nil {
+		return Record{}, RouterModels{}, err
 	}
 
 	pid, err := m.spawn(launch{Command: command, Env: launchEnv(os.Environ(), hubapi.Token()), Log: log})
@@ -125,7 +129,7 @@ func (m *Manager) StartRouter(router config.RouterConfig, report tools.Report) (
 		// Nothing ran, so this launch's log is evidence of nothing, and leaving it
 		// would push a real crash log out of the three kept.
 		_ = os.Remove(logPath)
-		return Record{}, fmt.Errorf("cannot start the router: %w", err)
+		return Record{}, RouterModels{}, fmt.Errorf("cannot start the router: %w", err)
 	}
 
 	identity, captureErr := m.captureIdentity(pid, command[0])
@@ -142,14 +146,14 @@ func (m *Manager) StartRouter(router config.RouterConfig, report tools.Report) (
 		LaunchedAt: launchedAt,
 	}
 	if err := writeRecordAt(m.routerRecordPath(), record); err != nil {
-		return record, fmt.Errorf("the router was started as pid %d (log: %s), but cria could not record it: %w",
+		return record, models, fmt.Errorf("the router was started as pid %d (log: %s), but cria could not record it: %w",
 			pid, logPath, err)
 	}
 	if captureErr != nil {
-		return record, fmt.Errorf("the router was started as pid %d (log: %s), but cria could not read the process table to identify it: %w",
+		return record, models, fmt.Errorf("the router was started as pid %d (log: %s), but cria could not read the process table to identify it: %w",
 			pid, logPath, captureErr)
 	}
-	return record, nil
+	return record, models, nil
 }
 
 // StopRouter ends the router the way every managed server is ended: SIGTERM, a
@@ -255,8 +259,21 @@ func (m *Manager) writeRouterPreset(preset string) error {
 // engineRoot is where one engine's own state lives: everything that belongs to
 // the engine rather than to an entry it serves.
 func (m *Manager) engineRoot(id config.Backend) string {
-	return filepath.Join(m.root, engineStateDir, string(id))
+	return engineStateRoot(m.root, id)
 }
+
+func engineStateRoot(root string, id config.Backend) string {
+	return filepath.Join(root, engineStateDir, string(id))
+}
+
+// RouterStateDir is the router's own folder under one state root: its composed
+// preset, its record, its logs, and the store of which models it holds
+// (internal/picks). Callers outside this package resolve it through here rather
+// than spelling the layout a second time.
+func RouterStateDir(root string) string { return engineStateRoot(root, config.BackendRouter) }
+
+// routerStateRoot is that folder under this manager's own root.
+func (m *Manager) routerStateRoot() string { return m.engineRoot(config.BackendRouter) }
 
 // routerPresetPath is the preset the router serves from, routerRecordPath the
 // record of the process serving it, and routerLogsRoot the directory its launch

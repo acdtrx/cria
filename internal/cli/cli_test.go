@@ -77,6 +77,18 @@ type fakeServers struct {
 	routerStartErr error
 	routerErr      error
 
+	// The models under the router: what a composition says the preset carries,
+	// what a running one answers that it holds, and whether one of them is
+	// answering somebody. loaded and unloaded record the two verbs, in order.
+	routerModels     serve.RouterModels
+	routerModelsErr  error
+	routerChildren   serve.RouterChildren
+	routerGeneration serve.Generation
+	loaded           []string
+	unloaded         []string
+	loadErr          error
+	unloadErr        error
+
 	startErr     error
 	stopErr      error
 	listErr      error
@@ -261,12 +273,35 @@ func (f *fakeServers) RouterServer() (serve.Server, bool, error) {
 	return serve.Server{Record: f.routerRecord, Live: f.routerLive}, true, nil
 }
 
-func (f *fakeServers) StartRouter(router config.RouterConfig, _ tools.Report) (serve.Record, error) {
-	f.routerStarts = append(f.routerStarts, router)
+func (f *fakeServers) StartRouter(tree *config.Tree, _ tools.Report) (serve.Record, serve.RouterModels, error) {
+	f.routerStarts = append(f.routerStarts, tree.Router)
 	if f.routerStartErr != nil {
-		return serve.Record{}, f.routerStartErr
+		return serve.Record{}, serve.RouterModels{}, f.routerStartErr
 	}
-	return f.routerRecord, nil
+	return f.routerRecord, f.routerModels, nil
+}
+
+func (f *fakeServers) RouterModels(*config.Tree) (serve.RouterModels, error) {
+	if f.routerModelsErr != nil {
+		return serve.RouterModels{}, f.routerModelsErr
+	}
+	return f.routerModels, nil
+}
+
+func (f *fakeServers) RouterChildren(serve.Record) serve.RouterChildren { return f.routerChildren }
+
+func (f *fakeServers) RouterGenerating(_ serve.Record, _ string) serve.Generation {
+	return f.routerGeneration
+}
+
+func (f *fakeServers) RouterLoad(_ serve.Record, id string) error {
+	f.loaded = append(f.loaded, id)
+	return f.loadErr
+}
+
+func (f *fakeServers) RouterUnload(_ serve.Record, id string) error {
+	f.unloaded = append(f.unloaded, id)
+	return f.unloadErr
 }
 
 func (f *fakeServers) StopRouter(record serve.Record) error {
@@ -299,19 +334,21 @@ func (f *fakeServers) PortUse(port int) (serve.PortUse, error) {
 func newTestApp(tree *config.Tree, fake *fakeServers) (*app, *bytes.Buffer, *bytes.Buffer) {
 	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
 	return &app{
-		out:            out,
-		err:            errOut,
-		tree:           func() (*config.Tree, error) { return tree, nil },
-		tools:          func(config.Settings) tools.Report { return usableReport() },
-		servers:        func() (servers, error) { return fake, nil },
-		picksStore:     func() (picks.Picks, error) { return picks.Picks{}, nil }, // nothing picked yet
-		memoryMB:       func() (int, error) { return 16384, nil },                 // a 16 GiB machine
-		tui:            func() error { return nil },
-		interrupts:     func() (func() bool, func()) { return uninterrupted, func() {} }, // nobody hits Ctrl-C in a test unless it says so
-		poll:           time.Millisecond,
-		startWindow:    200 * time.Millisecond,
-		downloadWindow: 400 * time.Millisecond,
-		progressEvery:  time.Millisecond,
+		out:              out,
+		err:              errOut,
+		tree:             func() (*config.Tree, error) { return tree, nil },
+		tools:            func(config.Settings) tools.Report { return usableReport() },
+		servers:          func() (servers, error) { return fake, nil },
+		picksStore:       func() (picks.Picks, error) { return picks.Picks{}, nil },   // nothing picked yet
+		routerModels:     func() (picks.Router, error) { return picks.Router{}, nil }, // an empty router store
+		saveRouterModels: func(picks.Router) error { return nil },
+		memoryMB:         func() (int, error) { return 16384, nil }, // a 16 GiB machine
+		tui:              func() error { return nil },
+		interrupts:       func() (func() bool, func()) { return uninterrupted, func() {} }, // nobody hits Ctrl-C in a test unless it says so
+		poll:             time.Millisecond,
+		startWindow:      200 * time.Millisecond,
+		downloadWindow:   400 * time.Millisecond,
+		progressEvery:    time.Millisecond,
 	}, out, errOut
 }
 

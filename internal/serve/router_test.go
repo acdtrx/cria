@@ -35,6 +35,14 @@ func routerReport() tools.Report {
 	return report
 }
 
+// routerTree is a loaded tree whose engine file is this router config and whose
+// entries are the ones a test declares. The router is started from the tree
+// because what it serves is the tree's entries, held by its own store
+// (routermodels.go).
+func routerTree(router config.RouterConfig, entries ...config.Entry) *config.Tree {
+	return &config.Tree{Root: "/home/u/.config/cria", Router: router, Entries: entries}
+}
+
 // startRouter starts the router through a fake spawner and leaves the process
 // table holding the pid it reports.
 func startRouter(t *testing.T, manager *Manager, host *fakeHost, router config.RouterConfig, pid int) (Record, *fakeSpawner) {
@@ -47,7 +55,7 @@ func startRouter(t *testing.T, manager *Manager, host *fakeHost, router config.R
 	host.alive[pid] = identityOf("/opt/homebrew/bin/llama-server --models-preset " +
 		filepath.Join(manager.engineRoot(config.BackendRouter), presetFile))
 
-	record, err := manager.StartRouter(router, routerReport())
+	record, _, err := manager.StartRouter(routerTree(router), routerReport())
 	if err != nil {
 		t.Fatalf("starting the router: %v", err)
 	}
@@ -167,7 +175,7 @@ func TestASecondRouterIsRefused(t *testing.T) {
 	manager := newManager(t, host)
 	startRouter(t, manager, host, routerConfig(), 4242)
 
-	_, err := manager.StartRouter(routerConfig(), routerReport())
+	_, _, err := manager.StartRouter(routerTree(routerConfig()), routerReport())
 	if err == nil {
 		t.Fatal("a second router was started while the first was running")
 	}
@@ -187,7 +195,7 @@ func TestARouterlessLlamaServerRefusesTheStart(t *testing.T) {
 	spawner := &fakeSpawner{pid: 4242}
 	manager.spawn = spawner.launch
 
-	_, err := manager.StartRouter(routerConfig(), usableReport())
+	_, _, err := manager.StartRouter(routerTree(routerConfig()), usableReport())
 	if err == nil {
 		t.Fatal("the router started on a build that takes no router flags")
 	}
@@ -212,7 +220,7 @@ func TestARouterWithNoPortRefusesTheStart(t *testing.T) {
 	router := routerConfig()
 	router.Port = 0
 
-	_, err := manager.StartRouter(router, routerReport())
+	_, _, err := manager.StartRouter(routerTree(router), routerReport())
 	if err == nil {
 		t.Fatal("the router started without a port")
 	}
@@ -238,7 +246,7 @@ func TestArgsThatCannotBecomeAPresetRefuseTheStart(t *testing.T) {
 	router := routerConfig()
 	router.Args = []string{"--override-kv", "a=int:1", "--override-kv", "b=int:2"}
 
-	_, err := manager.StartRouter(router, routerReport())
+	_, _, err := manager.StartRouter(routerTree(router), routerReport())
 	if err == nil {
 		t.Fatal("the router started from args that cannot be written as preset keys")
 	}

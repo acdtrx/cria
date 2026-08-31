@@ -44,12 +44,12 @@ func TestThePresetIsTheEngineFilesArgsWithTheirDashesStripped(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			preset, err := RouterPreset(test.defaults)
+			composed, err := RouterPreset(test.defaults, nil)
 			if err != nil {
 				t.Fatalf("composing %v: %v", test.defaults, err)
 			}
-			if preset != test.want {
-				t.Errorf("the preset is\n%q\nwant\n%q", preset, test.want)
+			if composed.Preset != test.want {
+				t.Errorf("the preset is\n%q\nwant\n%q", composed.Preset, test.want)
 			}
 		})
 	}
@@ -93,9 +93,9 @@ func TestThePresetRefusesWhatItCannotWrite(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			preset, err := RouterPreset(test.defaults)
+			composed, err := RouterPreset(test.defaults, nil)
 			if err == nil {
-				t.Fatalf("%v composed as\n%s", test.defaults, preset)
+				t.Fatalf("%v composed as\n%s", test.defaults, composed.Preset)
 			}
 			for _, want := range append(test.want, "router.toml") {
 				if !strings.Contains(err.Error(), want) {
@@ -103,5 +103,119 @@ func TestThePresetRefusesWhatItCannotWrite(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The models included in the router become sections of the same file: one per
+// entry, named by the model reference it resolves to, carrying the entry id as
+// the alias clients address it by (STEP-4's ruling) and the args that entry
+// contributes over the defaults.
+func TestThePresetCarriesOneSectionPerIncludedModel(t *testing.T) {
+	composed, err := RouterPreset([]string{"-ngl", "99", "-fa", "on"}, []RouterModel{
+		{ID: "qwen", Repo: "unsloth/Qwen3-30B-A3B-GGUF", Quant: "UD-Q4_K_XL", Args: []string{"-c", "262144", "--jinja"}},
+		{ID: "lfm", Repo: "LiquidAI/LFM2.5-2.6B-GGUF", Quant: "Q8_0"},
+		{ID: "plain", Repo: "ggml-org/gemma-3-4b-it-GGUF"},
+	})
+	if err != nil {
+		t.Fatalf("composing the preset: %v", err)
+	}
+
+	want := "[*]\nngl = 99\nfa = on\n" +
+		"\n[unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL]\nalias = qwen\nc = 262144\njinja = true\n" +
+		"\n[LiquidAI/LFM2.5-2.6B-GGUF:Q8_0]\nalias = lfm\n" +
+		"\n[ggml-org/gemma-3-4b-it-GGUF]\nalias = plain\n"
+	if composed.Preset != want {
+		t.Errorf("the preset is\n%q\nwant\n%q", composed.Preset, want)
+	}
+	if got := strings.Join(composed.Served, ", "); got != "qwen, lfm, plain" {
+		t.Errorf("the composition served %q, want every model in the order it was given", got)
+	}
+	if len(composed.Skipped) != 0 {
+		t.Errorf("the composition skipped %+v, want nothing", composed.Skipped)
+	}
+}
+
+// One section per model reference. Two entries resolving to the same repo and
+// quantization would be one section written twice, so the second is refused —
+// naming both entries, because either of them is the one to change.
+func TestTwoModelsCannotShareOneSection(t *testing.T) {
+	composed, err := RouterPreset(nil, []RouterModel{
+		{ID: "qwen-q4", Repo: "unsloth/Qwen3-30B-A3B-GGUF", Quant: "UD-Q4_K_XL"},
+		{ID: "qwen-again", Repo: "unsloth/Qwen3-30B-A3B-GGUF", Quant: "UD-Q4_K_XL"},
+		{ID: "qwen-q6", Repo: "unsloth/Qwen3-30B-A3B-GGUF", Quant: "UD-Q6_K_XL"},
+	})
+	if err != nil {
+		t.Fatalf("composing the preset: %v", err)
+	}
+
+	if got := strings.Join(composed.Served, ", "); got != "qwen-q4, qwen-q6" {
+		t.Errorf("the composition served %q, want the first of the two and the one on another quantization", got)
+	}
+	if len(composed.Skipped) != 1 || composed.Skipped[0].ID != "qwen-again" {
+		t.Fatalf("the composition skipped %+v, want the second entry on the taken reference", composed.Skipped)
+	}
+	for _, want := range []string{"qwen-q4", "unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL"} {
+		if !strings.Contains(composed.Skipped[0].Reason, want) {
+			t.Errorf("the reason reads %q, want it to name %q", composed.Skipped[0].Reason, want)
+		}
+	}
+	if strings.Count(composed.Preset, "[unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL]") != 1 {
+		t.Errorf("the preset is\n%s\nwant the shared section written once", composed.Preset)
+	}
+}
+
+// An entry whose args cannot be written as preset keys costs that entry its
+// section and nothing else: the router still serves every other model included
+// in it, and the reason travels with the id (docs/specs/SERVE.md).
+func TestAModelThatCannotBeWrittenIsSkippedRatherThanFatal(t *testing.T) {
+	composed, err := RouterPreset([]string{"-ngl", "99"}, []RouterModel{
+		{ID: "twice", Repo: "org/twice", Quant: "Q4", Args: []string{"--override-kv", "a=int:1", "--override-kv", "b=int:2"}},
+		{ID: "named", Repo: "org/named", Quant: "Q4", Args: []string{"--alias", "something-else"}},
+		{ID: "loose", Repo: "org/loose", Quant: "Q4", Args: []string{"99", "-fa", "on"}},
+		{ID: "fine", Repo: "org/fine", Quant: "Q4", Args: []string{"-c", "8192"}},
+	})
+	if err != nil {
+		t.Fatalf("composing the preset: %v", err)
+	}
+
+	if got := strings.Join(composed.Served, ", "); got != "fine" {
+		t.Errorf("the composition served %q, want the one model it could write", got)
+	}
+	reasons := map[string]string{}
+	for _, skipped := range composed.Skipped {
+		reasons[skipped.ID] = skipped.Reason
+	}
+	for id, want := range map[string]string{
+		"twice": "more than once",
+		"named": "entry id",
+		"loose": "no preset key",
+	} {
+		if !strings.Contains(reasons[id], want) {
+			t.Errorf("%s was skipped with %q, want a reason naming %q", id, reasons[id], want)
+		}
+	}
+	if strings.Contains(composed.Preset, "org/twice") || strings.Contains(composed.Preset, "org/named") {
+		t.Errorf("the preset is\n%s\nwant no section for a model that was refused", composed.Preset)
+	}
+	if !strings.Contains(composed.Preset, "[*]\nngl = 99\n") {
+		t.Errorf("the preset is\n%s\nwant the engine file's defaults intact", composed.Preset)
+	}
+}
+
+// The engine file's own args are the router's configuration rather than one of
+// its models: args that cannot be written there refuse the whole composition,
+// and no model's section is written from a defaults section cria could not
+// honour.
+func TestTheDefaultsRefuseTheWholeComposition(t *testing.T) {
+	_, err := RouterPreset([]string{"-c", "8192", "-c", "16384"}, []RouterModel{
+		{ID: "fine", Repo: "org/fine", Quant: "Q4"},
+	})
+	if err == nil {
+		t.Fatal("a preset composed from defaults that cannot be written as keys")
+	}
+	for _, want := range []string{"router.toml", "-c", "more than once"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal reads %v, want it to name %q", err, want)
+		}
 	}
 }

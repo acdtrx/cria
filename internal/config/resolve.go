@@ -47,6 +47,20 @@ func DefaultSelection(entry Entry) Selection {
 // Every refusal names what is valid, because it is printed to whoever typed the
 // pick — on the command line or in the picker.
 func Resolve(entry Entry, selection Selection) (Launch, error) {
+	return ResolveUnder(entry, selection, entry.EngineArgs)
+}
+
+// ResolveUnder is Resolve with the engine level named by the caller: the args
+// every model that engine serves starts from, which the entry's own args
+// override.
+//
+// An entry is resolved under its own engine's file everywhere a server is
+// launched for it, and that is what Resolve does. The one caller that names
+// another level is the router, whose engine level is the preset's `[*]` section
+// rather than a merged prefix: it composes each included entry with no engine
+// args at all, and lets upstream apply the defaults it wrote once
+// (docs/specs/CONFIG.md, internal/engine).
+func ResolveUnder(entry Entry, selection Selection, engineArgs []string) (Launch, error) {
 	if err := refuseUnknownPicks(entry, selection); err != nil {
 		return Launch{}, err
 	}
@@ -71,7 +85,7 @@ func Resolve(entry Entry, selection Selection) (Launch, error) {
 		}
 		picked = append(picked, option.Args...)
 	}
-	launch.Args = mergeArgs(entry.EngineArgs, entry.Args, picked)
+	launch.Args = mergeArgs(engineArgs, entry.Args, picked)
 	return launch, nil
 }
 

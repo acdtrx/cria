@@ -32,6 +32,12 @@ learn the schema from this page.
   entry declares the router, it serves ordinary entries, and its file carries a
   port of its own besides the `args` every model it serves starts from.
   `cria router start|stop|status` is its lifecycle.
+- **Which entries the router serves is not in the tree.** It is cria's own state,
+  set with `cria router include <id> [choice=option ...]` and dropped with
+  `cria router exclude <id>`; `cria router models` lists what it holds. An
+  included entry keeps its own file unchanged, is served under the combination
+  the include named — which may differ from the one a bare `cria start` uses —
+  and clients address it by its entry id.
 - Take parameters from the model provider's own recommendation and note the source
   in a comment.
 - Tree-wide settings live in `config.toml`: `default_port`, `default_host`, and

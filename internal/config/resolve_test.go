@@ -463,3 +463,43 @@ func TestAnOverriddenFlagIsPassedOnce(t *testing.T) {
 		t.Errorf("the engine's own args became %v, want %v", entry.EngineArgs, want)
 	}
 }
+
+// An entry is resolved under an engine level the caller names. Every launch of a
+// server for one entry names that entry's own engine file, which is what Resolve
+// does; the router names none, because the args every model it serves starts
+// from are written once as its preset's defaults section rather than merged into
+// every model's own (internal/engine).
+func TestResolveUnderTakesTheEngineLevelFromTheCaller(t *testing.T) {
+	entry := entryVaryingOn([]string{"--ctx-size", "16384"}, quantAxis())
+	entry.EngineArgs = []string{"-ngl", "99", "--ctx-size", "4096"}
+	selection := Selection{"quant": "q8"}
+
+	own, err := Resolve(entry, selection)
+	if err != nil {
+		t.Fatalf("resolving under the entry's own engine: %v", err)
+	}
+	if got := strings.Join(own.Args, " "); got != "-ngl 99 --ctx-size 16384" {
+		t.Errorf("the entry resolves to %q, want its engine file under its own args under the pick", got)
+	}
+
+	// Resolve is exactly this function under the entry's own engine args.
+	same, err := ResolveUnder(entry, selection, entry.EngineArgs)
+	if err != nil {
+		t.Fatalf("resolving under the same engine args: %v", err)
+	}
+	if !reflect.DeepEqual(same, own) {
+		t.Errorf("naming the entry's own engine args resolved to %+v, want what Resolve answers: %+v", same, own)
+	}
+
+	// And with no engine level, the entry's own args are the bottom.
+	none, err := ResolveUnder(entry, selection, nil)
+	if err != nil {
+		t.Fatalf("resolving under no engine args: %v", err)
+	}
+	if got := strings.Join(none.Args, " "); got != "--ctx-size 16384" {
+		t.Errorf("the entry resolves to %q, want nothing of an engine file in it", got)
+	}
+	if none.Quant != "Q8_0" {
+		t.Errorf("the picked quantization is %q; the engine level decides nothing about it", none.Quant)
+	}
+}

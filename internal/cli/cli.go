@@ -110,11 +110,20 @@ type servers interface {
 
 	// The router's own lifecycle (router.go). It is one process per host rather
 	// than one per entry, and its record lives with its engine's state, so it is
-	// read, started, stopped and observed by its own four calls.
+	// read, started, stopped and observed by its own calls.
 	RouterServer() (serve.Server, bool, error)
-	StartRouter(router config.RouterConfig, report tools.Report) (serve.Record, error)
+	StartRouter(tree *config.Tree, report tools.Report) (serve.Record, serve.RouterModels, error)
 	StopRouter(record serve.Record) error
 	RouterSnapshot(record serve.Record) (serve.Status, error)
+
+	// The models under the router (routermodels.go): what the store and the tree
+	// compose it to serve, what a running one says it holds, whether one of them
+	// is answering somebody, and the two verbs that load and unload one.
+	RouterModels(tree *config.Tree) (serve.RouterModels, error)
+	RouterChildren(record serve.Record) serve.RouterChildren
+	RouterGenerating(record serve.Record, id string) serve.Generation
+	RouterLoad(record serve.Record, id string) error
+	RouterUnload(record serve.Record, id string) error
 }
 
 // updater is the part of selfupdate the update subcommand drives — named on the
@@ -136,6 +145,13 @@ type app struct {
 	picksStore func() (picks.Picks, error)        // what was picked before this invocation
 	memoryMB   func() (int, error)                // the machine's memory; refuses off macOS
 	updater    func() updater                     // GitHub's releases and the binary on disk
+
+	// Which models the router holds, and the write that changes it. This store is
+	// the one piece of cria's state the CLI edits: inclusion is settled by a
+	// command rather than in a picker, so include and exclude are its writers
+	// (router.go, internal/picks).
+	routerModels     func() (picks.Router, error)
+	saveRouterModels func(picks.Router) error
 
 	// tui is the program bare `cria` opens. It arrives as a function rather
 	// than an import so this package stays a command-line router: routing to
@@ -169,20 +185,22 @@ func Dispatch(args []string, version string, tui func() error) int {
 // the picks stored beside it.
 func newApp(tui func() error) *app {
 	return &app{
-		out:            os.Stdout,
-		err:            os.Stderr,
-		tree:           loadTree,
-		tools:          tools.Check,
-		servers:        newManager,
-		picksStore:     loadPicks,
-		memoryMB:       physicalMemoryMB,
-		updater:        func() updater { return selfupdate.New() },
-		tui:            tui,
-		interrupts:     watchInterrupt,
-		poll:           waitPoll,
-		startWindow:    waitStartWindow,
-		downloadWindow: waitDownloadWindow,
-		progressEvery:  waitProgressEvery,
+		out:              os.Stdout,
+		err:              os.Stderr,
+		tree:             loadTree,
+		tools:            tools.Check,
+		servers:          newManager,
+		picksStore:       loadPicks,
+		routerModels:     loadRouterModels,
+		saveRouterModels: saveRouterModels,
+		memoryMB:         physicalMemoryMB,
+		updater:          func() updater { return selfupdate.New() },
+		tui:              tui,
+		interrupts:       watchInterrupt,
+		poll:             waitPoll,
+		startWindow:      waitStartWindow,
+		downloadWindow:   waitDownloadWindow,
+		progressEvery:    waitProgressEvery,
 	}
 }
 
@@ -274,6 +292,35 @@ func loadPicks() (picks.Picks, error) {
 		return picks.Picks{}, err
 	}
 	return picks.Load(root)
+}
+
+// loadRouterModels and saveRouterModels are the router's own store, under the
+// router engine's state folder rather than beside choices.json: the models it
+// holds are the router's memory, and their picks may differ from the ones the
+// llama engine starts the same entries under (docs/specs/SERVE.md).
+func loadRouterModels() (picks.Router, error) {
+	dir, err := routerStateDir()
+	if err != nil {
+		return picks.Router{}, err
+	}
+	return picks.LoadRouter(dir)
+}
+
+func saveRouterModels(held picks.Router) error {
+	dir, err := routerStateDir()
+	if err != nil {
+		return err
+	}
+	return picks.SaveRouter(dir, held)
+}
+
+// routerStateDir resolves that folder under the real state root.
+func routerStateDir() (string, error) {
+	root, err := serve.Root()
+	if err != nil {
+		return "", err
+	}
+	return serve.RouterStateDir(root), nil
 }
 
 // storedPicks is what was picked before this invocation. Reading is all the CLI
