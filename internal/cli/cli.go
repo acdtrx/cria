@@ -43,8 +43,8 @@ const (
 var subcommands = []string{"start", "stop", "status", "validate", "bench", "list", "new", "edit", "docs", "wired-limit", "update"}
 
 // The flags the surface has, all booleans (docs/specs/CLI.md). `cria new` takes
-// two because they are peers: the backend it scaffolds can be named either way,
-// and neither is a special case.
+// one per backend besides these; they are the engines' own ids rather than a
+// list, so they are spelled where they are read (new.go, backendFlag).
 //
 // --ignore-busy is spelled for what it lifts and nothing else: it is the one
 // override validate has, and a caller reading it anywhere — a shell history, a
@@ -54,8 +54,6 @@ const (
 	waitFlag       = "--wait"
 	jsonFlag       = "--json"
 	pathsFlag      = "--paths"
-	llamaFlag      = "--llama"
-	mlxFlag        = "--mlx"
 	ignoreBusyFlag = "--ignore-busy"
 )
 

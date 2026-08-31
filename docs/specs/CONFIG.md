@@ -134,3 +134,10 @@ on the same port (settled 2026-08-18, `docs/cria.md`, v1 surface).
   bricks the tree.
 - `cria docs` output = this schema, a complete commented example entry per backend,
   and a `config.toml` example. The examples are the templates agents copy from.
+- **The backend set and its per-key metadata live in the schema** (settled
+  2026-08-31): which backends a file may declare, which keys each of them takes,
+  and the value each key carries in that backend's example. A key states one
+  example that holds under every backend or one per backend — never one
+  backend's value standing in for another's, which would hand an agent a repo
+  the backend it names cannot serve. `cria docs` walks that set, so a backend
+  cria serves is a backend the page teaches.

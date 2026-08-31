@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -49,23 +50,32 @@ func (k kind) holdsKeys() bool {
 // line that documents it. The schemas below are the only place a config key is
 // declared — decoding, validation and `cria docs` all read them, so a schema
 // change updates the documentation by construction (docs/specs/CONFIG.md).
+//
+// Which backend takes a key, and what value it takes there, are declared here
+// too: internal/engine imports this package, so the per-backend metadata cannot
+// live with the engines without a cycle. It is written to be total over
+// Backends() rather than to have a default — see exampleFor.
 type key struct {
-	name           string             // the TOML key
-	kind           kind               // the type the file must use
-	required       bool               // absent is an error on its own
-	onlyBackend    Backend            // the one backend that takes this key; empty means both
-	rules          string             // the docs line: what the key means and what constrains it
-	example        string             // a valid value in TOML syntax, for the generated examples
-	backendExample map[Backend]string // the example where the backends genuinely differ
-	keys           schema             // kindTable only: the sub-table's own keys
-	check          func(v any) error  // the value rules this key can judge on its own
+	name        string             // the TOML key
+	kind        kind               // the type the file must use
+	required    bool               // absent is an error on its own
+	onlyBackend Backend            // the one backend that takes this key; empty means every backend
+	rules       string             // the docs line: what the key means and what constrains it
+	example     string             // a valid value in TOML syntax, the same one under every backend
+	examples    map[Backend]string // a value per backend, where the backends genuinely differ
+	keys        schema             // kindTable only: the sub-table's own keys
+	check       func(v any) error  // the value rules this key can judge on its own
 }
 
-// exampleFor is the value this key takes in one backend's example: the shared
-// example unless the backends genuinely differ — an MLX quantization is its own
-// repo, so each backend's template needs its own repo id.
+// exampleFor is the value this key takes in one backend's example.
+//
+// A key declares either one example that is true under every backend or an
+// example per backend — never one backend's value standing in for another's. A
+// shared default would hand an agent a repo the backend it names cannot serve,
+// and the example would still read as deliberate; TestEveryKeyExamplesEveryBackend
+// holds the declaration to that rule.
 func (k key) exampleFor(backend Backend) string {
-	if value, ok := k.backendExample[backend]; ok {
+	if value, ok := k.examples[backend]; ok {
 		return value
 	}
 	return k.example
@@ -91,22 +101,23 @@ type schema []key
 // resolveEntry, the only place that sees a whole entry next to the tree settings.
 var entrySchema = schema{
 	{
-		name:           "backend",
-		kind:           kindString,
-		required:       true,
-		rules:          `the server program to run: "llama" (llama-server) or "mlx" (mlx_lm.server)`,
-		example:        `"llama"`,
-		backendExample: map[Backend]string{BackendMLX: `"mlx"`},
-		check:          checkBackend,
+		name:     "backend",
+		kind:     kindString,
+		required: true,
+		rules:    `the server program to run: "llama" (llama-server) or "mlx" (mlx_lm.server)`,
+		examples: map[Backend]string{BackendLlama: `"llama"`, BackendMLX: `"mlx"`},
+		check:    checkBackend,
 	},
 	{
-		name:           "repo",
-		kind:           kindString,
-		required:       true,
-		rules:          "Hugging Face repo id, org/name; the server fetches the model itself",
-		example:        `"unsloth/Qwen3-30B-A3B-GGUF"`,
-		backendExample: map[Backend]string{BackendMLX: `"mlx-community/Qwen3-30B-A3B-4bit"`},
-		check:          checkRepo,
+		name:     "repo",
+		kind:     kindString,
+		required: true,
+		rules:    "Hugging Face repo id, org/name; the server fetches the model itself",
+		examples: map[Backend]string{
+			BackendLlama: `"unsloth/Qwen3-30B-A3B-GGUF"`,
+			BackendMLX:   `"mlx-community/Qwen3-30B-A3B-4bit"`,
+		},
+		check: checkRepo,
 	},
 	{
 		name:        "quant",
@@ -131,20 +142,24 @@ var entrySchema = schema{
 		check:   checkNonEmpty,
 	},
 	{
-		name:           "name",
-		kind:           kindString,
-		rules:          "display name; defaults to the entry id",
-		example:        `"Qwen3 30B A3B"`,
-		backendExample: map[Backend]string{BackendMLX: `"Qwen3 30B A3B (MLX 4bit)"`},
-		check:          checkNonEmpty,
+		name:  "name",
+		kind:  kindString,
+		rules: "display name; defaults to the entry id",
+		examples: map[Backend]string{
+			BackendLlama: `"Qwen3 30B A3B"`,
+			BackendMLX:   `"Qwen3 30B A3B (MLX 4bit)"`,
+		},
+		check: checkNonEmpty,
 	},
 	{
-		name:           "args",
-		kind:           kindStringList,
-		rules:          "extra flags passed to the server verbatim; cria composes the model, port and host flags itself",
-		example:        `["--ctx-size", "16384", "--jinja"]`,
-		backendExample: map[Backend]string{BackendMLX: `["--max-tokens", "32768"]`},
-		check:          checkArgs,
+		name:  "args",
+		kind:  kindStringList,
+		rules: "extra flags passed to the server verbatim; cria composes the model, port and host flags itself",
+		examples: map[Backend]string{
+			BackendLlama: `["--ctx-size", "16384", "--jinja"]`,
+			BackendMLX:   `["--max-tokens", "32768"]`,
+		},
+		check: checkArgs,
 	},
 	{
 		name:  "choice",
@@ -183,13 +198,12 @@ var choiceSchema = schema{
 // it is served on.
 var choiceOptionSchema = schema{
 	{
-		name:           "name",
-		kind:           kindString,
-		required:       true,
-		rules:          "the pick's name, unique within its choice; spelled like an entry id",
-		example:        `"q4"`,
-		backendExample: map[Backend]string{BackendMLX: `"4bit"`},
-		check:          checkName,
+		name:     "name",
+		kind:     kindString,
+		required: true,
+		rules:    "the pick's name, unique within its choice; spelled like an entry id",
+		examples: map[Backend]string{BackendLlama: `"q4"`, BackendMLX: `"4bit"`},
+		check:    checkName,
 	},
 	{
 		name:        "quant",
@@ -200,20 +214,24 @@ var choiceOptionSchema = schema{
 		check:       checkNonEmpty,
 	},
 	{
-		name:           "repo",
-		kind:           kindString,
-		rules:          "replaces the entry's repo when this option is picked (an mlx quantization is its own repo); only one choice's options may set it",
-		example:        `"unsloth/Qwen3-30B-A3B-128K-GGUF"`,
-		backendExample: map[Backend]string{BackendMLX: `"mlx-community/Qwen3-30B-A3B-8bit"`},
-		check:          checkRepo,
+		name:  "repo",
+		kind:  kindString,
+		rules: "replaces the entry's repo when this option is picked (an mlx quantization is its own repo); only one choice's options may set it",
+		examples: map[Backend]string{
+			BackendLlama: `"unsloth/Qwen3-30B-A3B-128K-GGUF"`,
+			BackendMLX:   `"mlx-community/Qwen3-30B-A3B-8bit"`,
+		},
+		check: checkRepo,
 	},
 	{
-		name:           "args",
-		kind:           kindStringList,
-		rules:          "appended to the entry's args when this option is picked; a flag set here may not also be set by the entry's args or by another choice's options, since those compose into one launch",
-		example:        `["--n-cpu-moe", "24"]`,
-		backendExample: map[Backend]string{BackendMLX: `["--temp", "0.7"]`},
-		check:          checkArgs,
+		name:  "args",
+		kind:  kindStringList,
+		rules: "appended to the entry's args when this option is picked; a flag set here may not also be set by the entry's args or by another choice's options, since those compose into one launch",
+		examples: map[Backend]string{
+			BackendLlama: `["--n-cpu-moe", "24"]`,
+			BackendMLX:   `["--temp", "0.7"]`,
+		},
+		check: checkArgs,
 	},
 }
 
@@ -417,14 +435,19 @@ func tomlType(value any) string {
 	}
 }
 
-// checkBackend holds the backend enum: the two servers cria knows how to launch.
+// checkBackend holds the backend enum: the servers cria knows how to launch. It
+// reads the registry rather than naming them, so the set a file may declare and
+// the set the examples are rendered for cannot come apart.
 func checkBackend(value any) error {
-	switch Backend(value.(string)) {
-	case BackendLlama, BackendMLX:
+	declared := Backend(value.(string))
+	if slices.Contains(backends, declared) {
 		return nil
-	default:
-		return fmt.Errorf("want %q or %q, got %q", BackendLlama, BackendMLX, value.(string))
 	}
+	named := make([]string, 0, len(backends))
+	for _, backend := range backends {
+		named = append(named, fmt.Sprintf("%q", backend))
+	}
+	return fmt.Errorf("want one of %s, got %q", strings.Join(named, ", "), declared)
 }
 
 // checkRepo holds the Hub reference shape — org/name, the form both servers take

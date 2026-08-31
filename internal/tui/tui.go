@@ -478,7 +478,7 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// switchBackend flips the active backend and records it: the choice is sticky
+// switchBackend moves to the next backend and records it: the choice is sticky
 // across launches, which is the whole reason it is written down
 // (docs/specs/TUI.md). The list is another backend's now, so the cursor starts
 // at its top.
@@ -490,7 +490,7 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // one still speaks — the session has the backend the user asked for, and what
 // was lost is cria's memory of it.
 func (m model) switchBackend() model {
-	m.prefs.Backend = m.prefs.other()
+	m.prefs.Backend = m.prefs.next()
 	m.alert = alert{}
 	if err := savePrefs(m.root, m.prefs); err != nil {
 		m.alert = alert{text: err.Error(), bad: true}

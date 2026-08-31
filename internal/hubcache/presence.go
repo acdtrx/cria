@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 )
 
 // Presence answers, for one config entry, whether starting it would download
@@ -21,18 +22,29 @@ func (c *Cache) Presence(entry config.Entry) Presence {
 	if !cached {
 		return Presence{}
 	}
-	if entry.Backend == config.BackendLlama {
-		return llamaPresence(repo, entry.Quant)
+	// What counts as present is the engine's rule, asked rather than assumed: a
+	// model reference that takes a quantization is one file set out of a repo,
+	// one that does not is the whole repo.
+	served, err := engine.For(entry.Backend)
+	if err != nil {
+		// A backend no engine claims has no rule for what "on disk" means, and
+		// borrowing another engine's would answer a question about a model cria
+		// cannot name. Nothing is known to be present; the backend itself is
+		// refused where entries and records are read.
+		return Presence{}
 	}
-	// An MLX model is its whole repo — the quantization is the repo
-	// (docs/cria.md, principle 2) — so the repo being whole is the answer, and
+	if served.TakesQuant() {
+		return quantPresence(repo, entry.Quant)
+	}
+	// Where the reference takes no quantization the repo is the quantization
+	// (docs/cria.md, principle 2), so the repo being whole is the answer, and
 	// what it occupies is what the entry occupies.
 	return Presence{Cached: repo.Complete, Bytes: repo.Bytes}
 }
 
-// llamaPresence answers for a llama entry, which serves one quantization out of a
-// repo that may hold several.
-func llamaPresence(repo *Repo, quant string) Presence {
+// quantPresence answers for an entry that serves one quantization out of a repo
+// that may hold several.
+func quantPresence(repo *Repo, quant string) Presence {
 	if quant == "" {
 		// The server picks the repo's default quantization and cria cannot know
 		// which file that will be without asking the Hub. Any complete quant is

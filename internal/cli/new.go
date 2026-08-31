@@ -6,11 +6,29 @@ import (
 	"strings"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 	"cria/internal/format"
 )
 
-// newUsage is the one line every refusal of this subcommand ends with.
-const newUsage = "usage: cria new <id> [" + llamaFlag + "|" + mlxFlag + "]"
+// newUsage is the one line every refusal of this subcommand ends with. It names
+// one flag per engine, so the alternatives it offers are the backends cria
+// actually serves.
+var newUsage = "usage: cria new <id> [" + strings.Join(backendFlags(), "|") + "]"
+
+// backendFlag is the flag that scaffolds one engine's entry: the flag prefix and
+// the backend's own id. There is no table mapping flags to backends — a way of
+// serving cria has is one `cria new` can scaffold, spelled the way the entry
+// file spells it.
+func backendFlag(backend config.Backend) string { return "--" + string(backend) }
+
+// backendFlags names them all, in the order engines are declared in.
+func backendFlags() []string {
+	flags := make([]string, 0, len(engine.All()))
+	for _, served := range engine.All() {
+		flags = append(flags, backendFlag(served.ID()))
+	}
+	return flags
+}
 
 // newEntry runs `cria new <id> [--llama|--mlx]`: it creates the entry file and
 // opens it in the user's editor — the two steps of adding a model, in one
@@ -63,39 +81,50 @@ func (a *app) newEntry(args []string) int {
 	return a.reportNewEntry(id, path)
 }
 
-// parseNew reads the command line: one id, and at most one of the two backend
-// flags. Neither flag is llama — the default backend is named as well as
-// implied, so `--mlx` is not the only spelled-out choice. refusal is empty when
-// the invocation is routable.
+// parseNew reads the command line: one id, and at most one backend flag. Every
+// engine has one, the default included — the backend a bare invocation takes is
+// named as well as implied, so none of them is the unspoken one. refusal is
+// empty when the invocation is routable.
 func parseNew(args []string) (id string, backend config.Backend, refusal string) {
 	var ids []string
-	llama, mlx := false, false
+	named := config.Backend("")
 	for _, arg := range args {
-		switch {
-		case arg == llamaFlag:
-			llama = true
-		case arg == mlxFlag:
-			mlx = true
-		case strings.HasPrefix(arg, "-"):
-			return "", "", "unknown flag " + arg
-		default:
+		if !strings.HasPrefix(arg, "-") {
 			ids = append(ids, arg)
+			continue
 		}
+		flagged, ok := backendNamedBy(arg)
+		if !ok {
+			return "", "", "unknown flag " + arg
+		}
+		if named != "" && named != flagged {
+			return "", "", backendFlag(named) + " and " + arg + " name different backends; pass one or neither"
+		}
+		named = flagged
 	}
 
-	if llama && mlx {
-		return "", "", llamaFlag + " and " + mlxFlag + " name different backends; pass one or neither"
-	}
 	if len(ids) == 0 {
 		return "", "", "no entry named"
 	}
 	if len(ids) > 1 {
 		return "", "", "one entry at a time (got " + strings.Join(ids, ", ") + ")"
 	}
-	if mlx {
-		return ids[0], config.BackendMLX, ""
+	if named != "" {
+		return ids[0], named, ""
 	}
-	return ids[0], config.BackendLlama, ""
+	// A bare invocation scaffolds the first engine cria declares: the backend
+	// that exists on every host it runs on (docs/TECH-STACK.md).
+	return ids[0], engine.All()[0].ID(), ""
+}
+
+// backendNamedBy reads one flag as a backend choice.
+func backendNamedBy(flag string) (config.Backend, bool) {
+	for _, served := range engine.All() {
+		if flag == backendFlag(served.ID()) {
+			return served.ID(), true
+		}
+	}
+	return "", false
 }
 
 // reportNewEntry says what the tree makes of the file the editor just closed:

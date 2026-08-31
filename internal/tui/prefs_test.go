@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 )
 
 // What the UI remembers survives the program: a change is written, and the next
@@ -149,14 +150,26 @@ func TestBrokenPrefsResetLoudly(t *testing.T) {
 	}
 }
 
-// The toggle is a toggle: neither backend is a dead end.
-func TestBackendToggleAlternates(t *testing.T) {
-	llama := prefs{Backend: config.BackendLlama}
-	if llama.other() != config.BackendMLX {
-		t.Errorf("llama toggles to %q, want %q", llama.other(), config.BackendMLX)
+// The toggle is a cycle: pressing it reaches every engine cria has and comes
+// back to where it started, so no backend is a dead end and none is unreachable.
+func TestTheBackendToggleWalksEveryEngine(t *testing.T) {
+	engines := engine.All()
+	saved := defaultPrefs()
+	visited := map[config.Backend]bool{saved.Backend: true}
+
+	for press := 1; press < len(engines); press++ {
+		saved.Backend = saved.next()
+		if visited[saved.Backend] {
+			t.Fatalf("press %d came back to %q before every backend had been shown", press, saved.Backend)
+		}
+		visited[saved.Backend] = true
 	}
-	mlx := prefs{Backend: config.BackendMLX}
-	if mlx.other() != config.BackendLlama {
-		t.Errorf("mlx toggles to %q, want %q", mlx.other(), config.BackendLlama)
+	for _, served := range engines {
+		if !visited[served.ID()] {
+			t.Errorf("the toggle never reaches %q", served.ID())
+		}
+	}
+	if back := saved.next(); back != defaultPrefs().Backend {
+		t.Errorf("the press after the last backend left the toggle on %q, want it back on %q", back, defaultPrefs().Backend)
 	}
 }

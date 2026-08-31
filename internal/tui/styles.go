@@ -365,15 +365,29 @@ func (p rowPaint) fill(line string, width int) string {
 	return line + p.pad(strings.Repeat(" ", width-lipgloss.Width(line)))
 }
 
-// backendTone is the colour a backend's name is spelled in. The two are
-// different hues rather than two weights of one: which backend the lists are
-// showing is the one thing about the serve view that changes under the user,
-// and it has to be recognisable without reading (docs/specs/TUI.md).
+// backendTones gives every backend its own hue. They are different hues rather
+// than weights of one: which backend the lists are showing is the one thing
+// about the serve view that changes under the user, and it has to be
+// recognisable without reading (docs/specs/TUI.md).
+//
+// Which hue suits which engine is a display decision, so it is made here rather
+// than by the engine — an engine module renders nothing. The table is looked up,
+// never defaulted through: a backend drawn in another's colour would read as
+// that other one.
+var backendTones = map[config.Backend]color.Color{
+	config.BackendLlama: amber,
+	config.BackendMLX:   blue,
+}
+
+// backendTone is the colour a backend's name is spelled in. A backend with no
+// hue of its own is drawn as plain text: unmistakable for a backend that has
+// one, which is the whole job of the colour.
 func backendTone(backend config.Backend) lipgloss.Style {
-	if backend == config.BackendMLX {
-		return lipgloss.NewStyle().Foreground(blue).Bold(true)
+	tone, assigned := backendTones[backend]
+	if !assigned {
+		tone = ink
 	}
-	return lipgloss.NewStyle().Foreground(amber).Bold(true)
+	return lipgloss.NewStyle().Foreground(tone).Bold(true)
 }
 
 // phaseTone is the colour a phase is spelled in (docs/specs/SERVE.md names the

@@ -739,8 +739,10 @@ func TestSchemaDefinitionsCarryTheirDocs(t *testing.T) {
 				walk(t, k.keys, name+".")
 				continue
 			}
-			if k.example == "" {
-				t.Errorf("key %q has no example value", name)
+			for _, backend := range Backends() {
+				if k.exampleFor(backend) == "" {
+					t.Errorf("key %q has no example value under the %q backend", name, backend)
+				}
 			}
 			if k.keys != nil {
 				t.Errorf("key %q is not a table but declares sub-keys", name)

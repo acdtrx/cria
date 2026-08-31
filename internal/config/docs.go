@@ -29,11 +29,24 @@ func Docs() string {
 	return fmt.Sprintf(docsPage,
 		keyTable(entrySchema),
 		keyTable(treeSchema),
-		ExampleEntry(BackendLlama),
-		ExampleEntry(BackendMLX),
+		entryExamples(),
 		exampleSettings(),
 	)
 }
+
+// entryExamples is one complete entry file per backend, each under its own
+// heading. It walks the registry: a backend cria serves is a backend the page
+// teaches, without this file knowing which they are.
+func entryExamples() string {
+	var sections strings.Builder
+	for _, backend := range Backends() {
+		sections.WriteString(fmt.Sprintf(exampleEntrySection, backend, ExampleEntry(backend)))
+	}
+	return sections.String()
+}
+
+// exampleEntrySection is one such heading and the file under it.
+const exampleEntrySection = "EXAMPLE — models/<id>.toml, backend %q\n\n%s\n"
 
 const docsPage = `cria config — the tree at ~/.config/cria
 
@@ -72,13 +85,7 @@ HOW THE TREE IS READ
   - Everything else belongs in args, passed to the server verbatim. cria types no
     server flags of its own, so read the server's own --help for what goes there.
 
-EXAMPLE — models/<id>.toml, backend "llama"
-
-%s
-EXAMPLE — models/<id>.toml, backend "mlx"
-
-%s
-EXAMPLE — config.toml
+%sEXAMPLE — config.toml
 
 %s
 VALIDATE WHAT YOU WROTE

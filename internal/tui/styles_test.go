@@ -9,6 +9,9 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+
+	"cria/internal/config"
+	"cria/internal/engine"
 )
 
 // The palette is legible by construction, not by taste: every colour the frame
@@ -146,13 +149,39 @@ func TestStylesDrawFromThePalette(t *testing.T) {
 		"band heading": bandHeadingStyle,
 
 		"carry heading": carryHeadingStyle,
-
-		"llama": backendTone("llama"),
-		"mlx":   backendTone("mlx"),
 	} {
 		if !declared[hexOf(style.GetForeground())] {
 			t.Errorf("the %s style draws in %v, which is not in the palette", name, style.GetForeground())
 		}
+	}
+}
+
+// Every engine's name is spelled in a hue of its own, out of the same palette.
+// A backend with no assigned hue would be drawn as plain text — legible, but no
+// longer the thing the eye finds when the serve view changes under the user, so
+// it is the assignment that is checked rather than what backendTone falls back
+// to (docs/specs/TUI.md).
+func TestEveryEngineIsSpelledInItsOwnTone(t *testing.T) {
+	declared := map[string]bool{}
+	for _, colour := range palette {
+		declared[colour.hex] = true
+	}
+
+	spelling := map[string]config.Backend{}
+	for _, served := range engine.All() {
+		tone, assigned := backendTones[served.ID()]
+		if !assigned {
+			t.Errorf("the %q backend has no colour of its own; give it one in backendTones", served.ID())
+			continue
+		}
+		hex := hexOf(tone)
+		if !declared[hex] {
+			t.Errorf("the %q backend draws in %s, which is not in the palette", served.ID(), hex)
+		}
+		if other, taken := spelling[hex]; taken {
+			t.Errorf("the %q and %q backends are drawn in one colour; the active one has to be recognisable at a glance", other, served.ID())
+		}
+		spelling[hex] = served.ID()
 	}
 }
 

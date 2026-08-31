@@ -8,8 +8,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 )
 
 // prefsFile holds the UI's own memory, next to the state records rather than in
@@ -40,17 +42,26 @@ type entryGroup struct {
 	Entries []string `json:"entries"`
 }
 
-// defaultPrefs is a first launch: llama, and nothing started yet. llama is the
-// default because it is the backend that exists on every host cria runs on —
-// mlx_lm.server is Apple silicon only (docs/TECH-STACK.md).
-func defaultPrefs() prefs { return prefs{Backend: config.BackendLlama} }
+// defaultPrefs is a first launch: the first engine cria declares, and nothing
+// started yet. That order puts llama first because it is the backend that exists
+// on every host cria runs on — mlx_lm.server is Apple silicon only
+// (docs/TECH-STACK.md).
+func defaultPrefs() prefs { return prefs{Backend: engine.All()[0].ID()} }
 
-// other is the backend the toggle switches to.
-func (p prefs) other() config.Backend {
-	if p.Backend == config.BackendMLX {
-		return config.BackendLlama
+// next is the backend the toggle moves to: the engine after this one, wrapping
+// at the end, so every engine cria has is reachable by pressing the key again
+// and none of them is a dead end.
+func (p prefs) next() config.Backend {
+	engines := engine.All()
+	for i, served := range engines {
+		if served.ID() == p.Backend {
+			return engines[(i+1)%len(engines)].ID()
+		}
 	}
-	return config.BackendMLX
+	// Preferences naming a backend no engine claims are refused on read, so the
+	// walk always finds its place. Answering with the first engine keeps the
+	// toggle a way out rather than a key that does nothing.
+	return engines[0].ID()
 }
 
 // prefsPath is where one state root keeps the file.
@@ -95,8 +106,8 @@ func decodePrefs(data []byte) (prefs, error) {
 	if decoder.More() {
 		return prefs{}, errors.New("the file holds more than one JSON document")
 	}
-	if saved.Backend != config.BackendLlama && saved.Backend != config.BackendMLX {
-		return prefs{}, fmt.Errorf("backend is %q, want %q or %q", saved.Backend, config.BackendLlama, config.BackendMLX)
+	if _, err := engine.For(saved.Backend); err != nil {
+		return prefs{}, fmt.Errorf("backend is %q, want one of: %s", saved.Backend, strings.Join(engine.IDs(), ", "))
 	}
 	if err := validateGroups(saved.Groups); err != nil {
 		return prefs{}, err

@@ -13,9 +13,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
-// Backend names the server program an entry runs. The two values are the whole
+// Backend names the server program an entry runs. The values below are the whole
 // set cria knows how to launch (docs/specs/TOOLS.md).
 type Backend string
 
@@ -23,6 +24,24 @@ const (
 	BackendLlama Backend = "llama"
 	BackendMLX   Backend = "mlx"
 )
+
+// backends is every backend an entry may declare, in the order `cria docs`
+// presents them. It is the set the parser accepts, the set the examples are
+// rendered for, and the set the per-backend schema metadata is read against — so
+// a backend absent here is a backend no file may name.
+//
+// The engines that implement these backends live in internal/engine, and that
+// package imports this one: the set cannot be read from there without a cycle,
+// which is why it is declared here rather than derived. internal/engine holds
+// the test that checks the two against each other, so a backend that exists on
+// one side only is a red suite rather than a schema that documents a backend
+// nothing serves.
+var backends = []Backend{BackendLlama, BackendMLX}
+
+// Backends lists them for the callers that render or enumerate the set: the
+// examples `cria docs` prints, and the refusal a file naming something else
+// gets.
+func Backends() []Backend { return slices.Clone(backends) }
 
 // Entry is one launchable thing: a models/<id>.toml file whose keys have been
 // validated and whose port and host are already resolved against the tree

@@ -10,6 +10,11 @@ keybinds get detailed as they are built.
 - **Backends are separate lists, never one mixed list.** One backend is active in the
   UI at a time; a keybind toggles. The active backend persists across launches —
   running llama vs mlx is a deliberate, sticky choice, not a per-session question.
+  The key walks the engines cria has and wraps at the end (amended 2026-08-31),
+  so every backend is reachable and none is a dead end; their display order and
+  the colour each name is drawn in are the TUI's own, keyed by engine id — a
+  backend with no colour of its own is drawn as plain text rather than borrowing
+  another's.
 - **The entry list is the picker.** It shows the active backend's entries —
   picking an entry picks everything in one gesture: for a flat entry that is
   model, quant and params directly; for an entry with choices its current picks

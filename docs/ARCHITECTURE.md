@@ -18,8 +18,8 @@ the command line to `cli`, passing `tui.Run` as the program bare `cria` opens.
 | `internal/tools` | which managed programs the host has and what each one's state disables (`specs/TOOLS.md`) | `Check(settings)` | `config` |
 | `internal/engine` | what cria knows about each way of serving: the program, the model reference, the endpoints, the warm and slot rules (`specs/SERVE.md`) | `For(backend)`, `All()` | `config`, `tools` |
 | `internal/procs` | every `ps`/`lsof` exec and every signal cria sends (`specs/SERVE.md`) | `System{}` (a `Host`) | `engine`, `tools` |
-| `internal/hubcache` | the cache walk, true blob-deduped sizes, entry presence, and the delete plans (`specs/CACHE.md`) | `Read(root)`, `Plan*`/`Execute` | `config` |
-| `internal/hubapi` | what a model comes to when complete, and the HF token | `New()`, `Token()` | `config`, `hubcache` |
+| `internal/hubcache` | the cache walk, true blob-deduped sizes, entry presence, and the delete plans (`specs/CACHE.md`) | `Read(root)`, `Plan*`/`Execute` | `config`, `engine` |
+| `internal/hubapi` | what a model comes to when complete, and the HF token | `New()`, `Token()` | `config`, `engine`, `hubcache` |
 | `internal/serve` | a managed server's life: compose, spawn detached, record, observe, stop (`specs/SERVE.md`) | `New(root, host)` | `config`, `tools`, `engine`, `procs`, `hubcache`, `hubapi` |
 | `internal/cli` | parsing, ordering and output for the subcommands (`specs/CLI.md`) | `Dispatch(args, version, tui)` | `config`, `tools`, `engine`, `procs`, `serve`, `format` |
 | `internal/tui` | the program frame and its screens (`specs/TUI.md`) | `Run()` | `config`, `tools`, `engine`, `procs`, `serve`, `hubcache`, `format` |
@@ -39,7 +39,17 @@ way:
   command line, which endpoints it publishes, whether a green server has loaded
   its weights — and does none of it: `serve` spawns, probes and requests.
   Everything else asks rather than branching, and the lookup refuses a backend no
-  engine claims instead of defaulting to one.
+  engine claims instead of defaulting to one. What "already downloaded" means is
+  the same kind of question, so `hubcache` and `hubapi` ask it too (settled
+  2026-08-31): a reference qualified by a quantization is one file set out of a
+  repo, one that is not is the whole repo.
+- **The per-backend schema metadata stays in `config`** (settled 2026-08-31).
+  `engine` imports `config`, so the keys a backend takes and the example values
+  it takes them at cannot be declared with the engines without a cycle; `config`
+  owns that registry and the enum, and `engine`'s own test holds the two sets to
+  being one. Display is the mirror case: which colour an engine's name is drawn
+  in and which order the toggle walks are `tui` decisions keyed by engine id —
+  an engine module renders nothing.
 
 `serve` never imports `hubcache`'s delete side and `hubcache` never imports
 `serve`: the surgery guard takes the running servers as a list its caller
@@ -64,7 +74,9 @@ graph BT
     engine --> tools
     procs --> engine
     hubcache --> config
+    hubcache --> engine
     hubapi --> config
+    hubapi --> engine
     hubapi --> hubcache
 
     serve --> config

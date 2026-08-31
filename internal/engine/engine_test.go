@@ -32,6 +32,26 @@ func TestEveryBackendResolvesToItsOwnEngine(t *testing.T) {
 	}
 }
 
+// The two registries are one set. config declares which backends a file may
+// name (it cannot read them from here — this package imports config, so the
+// dependency only runs one way), and this package declares which of them cria
+// can actually serve. A backend on one side only is a config the parser accepts
+// and nothing serves, or an engine no entry can reach; either way it is silent
+// unless something checks, and this is that check.
+func TestTheEnginesAreExactlyTheBackendsTheTreeMayDeclare(t *testing.T) {
+	declared := config.Backends()
+	for _, engine := range All() {
+		if !slices.Contains(declared, engine.ID()) {
+			t.Errorf("the %q engine serves a backend no entry may declare; add it to config.Backends", engine.ID())
+		}
+	}
+	for _, backend := range declared {
+		if _, err := For(backend); err != nil {
+			t.Errorf("an entry may declare backend %q, which no engine serves: %v", backend, err)
+		}
+	}
+}
+
 // A backend nothing claims is refused, and the refusal names the ones that
 // exist. The default it must never take is another engine's answers: a stranger
 // inheriting llama's endpoints and warm rule would show up as a server that

@@ -64,6 +64,36 @@ func TestRunningStatusShowsTheFacts(t *testing.T) {
 	}
 }
 
+// A server on the other backend fills the same box: its own backend word, and a
+// model reference that stops at the repo — a quantization there is its own repo
+// (docs/cria.md, principle 2), so there is nothing to qualify the reference
+// with.
+func TestAnMLXServerFillsTheStatusBox(t *testing.T) {
+	status := liveStatus(serve.PhaseRunning)
+	status.EntryID = "qwen-mlx"
+	status.Backend = config.BackendMLX
+	status.Repo = "mlx-community/Qwen3-30B-A3B-4bit"
+	status.Quant = ""
+	status.Identity = procs.Identity{Command: "mlx_lm.server", StartedAt: "Tue Aug 18 14:57:30 2026"}
+	status.Command = []string{"mlx_lm.server"}
+	status.Health = serve.Health{URL: "http://127.0.0.1:8080/v1/models", Green: true, Status: 200, Detail: "200 OK"}
+
+	lines := box(serve.StatusListing{Servers: []serve.Status{status}}, nil, prefs{Backend: config.BackendMLX})
+	if len(lines) != 1 {
+		t.Fatalf("an mlx server drew %d lines, want 1: %q", len(lines), lines)
+	}
+
+	for _, fact := range []string{"qwen-mlx", "running", "mlx", "mlx-community/Qwen3-30B-A3B-4bit",
+		"pid 4242", ":8080", "up 3m12s", "20.0 GiB", "42.5% cpu", "200 OK"} {
+		if !strings.Contains(lines[0], fact) {
+			t.Errorf("the status line reads %q, want it to carry %q", lines[0], fact)
+		}
+	}
+	if strings.Contains(lines[0], status.Repo+":") {
+		t.Errorf("the status line reads %q, want the model reference to stop at the repo", lines[0])
+	}
+}
+
 // A pid the process table had nothing to say about costs the line its two
 // numbers rather than reporting a server that uses no memory.
 func TestUnmeasuredServerReportsNoCost(t *testing.T) {

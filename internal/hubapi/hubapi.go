@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 	"cria/internal/hubcache"
 )
 
@@ -72,17 +73,25 @@ func newClient(baseURL, token string, timeout time.Duration) *Client {
 	return &Client{baseURL: baseURL, token: token, timeout: timeout, http: &http.Client{}}
 }
 
-// Total answers for one entry: the bytes of the quantization a llama entry
-// names, or the whole repo for an mlx entry, whose quantization is its repo
-// (docs/cria.md, principle 2).
+// Total answers for one entry: the bytes of the quantization its reference
+// names, or the whole repo where the repo is itself the quantization
+// (docs/cria.md, principle 2). Which of the two an entry is, is the engine's
+// answer rather than this package's guess.
 func (c *Client) Total(ctx context.Context, entry config.Entry) Total {
-	if entry.Backend == config.BackendLlama && entry.Quant == "" {
-		// llama-server picks a quantization out of the repo and cria cannot know
+	served, err := engine.For(entry.Backend)
+	if err != nil {
+		// A total measured under another engine's rule would be a denominator
+		// for a download nobody is doing. There is no total, and the reason is
+		// the refusal itself.
+		return unknown(err.Error())
+	}
+	if served.TakesQuant() && entry.Quant == "" {
+		// The server picks a quantization out of the repo and cria cannot know
 		// which. Naming the whole repo instead would be a denominator many times
 		// the file that is actually downloading, so there is no total — the one
 		// case where the cache's numerator (the repo's bytes) and a total would
 		// not be measuring the same thing.
-		return unknown("the entry names no quantization, so which file llama-server downloads is known only once it starts")
+		return unknown("the entry names no quantization, so which file the server downloads is known only once it starts")
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
@@ -92,7 +101,7 @@ func (c *Client) Total(ctx context.Context, entry config.Entry) Total {
 	if err != nil {
 		return unknown(err.Error())
 	}
-	if entry.Backend == config.BackendLlama {
+	if served.TakesQuant() {
 		return quantTotal(files, entry.Repo, entry.Quant)
 	}
 	return repoTotal(files, entry.Repo)
@@ -131,7 +140,7 @@ func quantTotal(files []treeFile, repo, quant string) Total {
 }
 
 // repoTotal sums a whole repo — every file, weights and tokenizer alike, since
-// an MLX server fetches the repo entire.
+// a server whose model reference names no quantization fetches the repo entire.
 func repoTotal(files []treeFile, repo string) Total {
 	total := Total{Known: true}
 	for _, file := range files {
