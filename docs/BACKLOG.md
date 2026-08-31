@@ -168,15 +168,39 @@ Group entries under headings as themes emerge.
   what-is-its-state — process spawn/kill for llama and mlx, load/unload API
   calls against one resident process for the router, preset-ini
   materialization instead of argv composition.
-  Router facts docs-verified 2026-08-27 (see git history of the router
-  entry for the full list): HF-cache discovery, on-demand autoload,
-  `--models-max` residency with idle sleep, `GET /models` +
-  `POST /models/load|unload`. Revisit trigger: the confined live probe — a
-  hand-written preset run on a machine with room, proving discovery sees
-  the cached quants and sections accept the keys the entries actually use
-  (`ctk`, `spec-type`, …), and how load/unload, sleep and `?model=`
-  addressing behave — build nothing before it passes; graduates to
-  `docs/plans/` after.
+  **Live probe PASSED 2026-08-31** (build 10450, dev Mac, port 11437, qwen
+  stopped for headroom and restored after; probe.ini was hand-written, no
+  cria code). Findings, all load-bearing for the plan:
+  - Discovery lists the whole HF cache **per quant** (12 models here), each
+    row tagged `source: cache|preset` with status and the child's full argv.
+  - **The router is a supervisor**: each loaded model is a child
+    llama-server process (`--port 0`, proxied) — load/unload is supervised
+    spawn/kill behind one port. The Engine interface's lifecycle altitude is
+    therefore make-serve/stop-serve via the router's API; cria never touches
+    the children.
+  - Ini keys: short forms **canonicalize upstream** (`temp`→`--temperature`,
+    `c`→`--ctx-size`, `fa`→`--flash-attn`) and `GET /models` echoes the
+    canonical preset back — cria needs no key mapping at all. Spec keys
+    (`spec-type`, `spec-draft-n-max`) accepted. A bogus key **fails startup
+    loudly**, naming key and section.
+  - Autoload-on-request works; both models resident at `--models-max 2`;
+    unload is async (success, then a grace-period transition); at
+    `--models-max 1` requesting the other model auto-evicts the resident
+    one — client-driven stop-one-start-another, live.
+  - `GET /props?model=` and **`GET /slots?model=` both work** — the llama
+    engine's stats collector transfers to the router engine wholesale.
+  - Wrinkle, naming: section quant tags **normalize** (`UD-Q4_K_XL` section
+    → listed id `Q4_K_XL`), so section names are not verbatim client names;
+    each child gets `--alias <id>` — an `alias = <entry-id>` preset key is
+    the untested lever for making entry ids the `model` field. Verify early
+    in the plan.
+  - Wrinkle, context semantics: on the SAME build, qwen with explicit
+    `--parallel 2` divides its pool (131072/slot from `-c 262144`) while
+    the LFM child under auto-parallel got 4 slots each reporting the FULL
+    `n_ctx 8192` — auto-parallel appears to multiply up, exactly the
+    per-conversation semantics the context ruling leans toward. Verify
+    before settling `context × parallel` composition.
+  Gate passed — next step is `docs/plans/engines/`.
 
 ## Cache view
 
