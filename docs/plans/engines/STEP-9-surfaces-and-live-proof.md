@@ -1,8 +1,44 @@
 # STEP 9 — surfaces, specs, and the live proof; plan closes
 
-Status: **code and specs done (2026-08-31); the live e2e is owed** — suite green,
-the surfaces and the four specs are in, and the nine-item checklist at the bottom
-is staged for the user's session. The plan does not close until it is run.
+Status: done (2026-09-05) — live e2e run with the user; plan closes
+
+## Live e2e record (2026-09-05, user present; qwen38-27 serving on 11434
+throughout, pid verified identical before and after)
+
+Router on 11437 from a four-line `engines/router.toml` (port + `-ngl 99`),
+branch binary at eaa1507. Every mechanical item passed:
+
+1–2. `router include lfm25-26b-q8` and `router include gemma4-e4b-mini
+   ctx=32k` (router picks differing from the entry's llama defaults — the
+   doctrine live); `models.json` held exactly the two combinations; start
+   composed the preset as specced — `[*]` with the engine default, one
+   aliased section per entry, gemma's pick landing as `c = 32768`.
+3. Supervisor green with nothing loaded; every model `unloaded`; the
+   `[*]`-only case was already live-verified at STEP-7 review.
+4. A chat completion with `"model": "lfm25-26b-q8"` routed and answered —
+   autoload on demand by entry id.
+5. **The plan's one unverified request shape held**: `cria router load
+   gemma4-e4b-mini` → loaded (the `{"model": …}` body read from llama.cpp
+   source was correct); unload likewise.
+6. Busy gate: unload during a live generation refused with the
+   let-it-finish wording, exit 1; `--ignore-busy` warned naming the cost
+   and unloaded, exit 0.
+7. `router include gemma4-e4b-mini ctx=64k` + restart → preset diff was
+   exactly one line: `c = 32768` → `c = 65536`.
+8. (mechanical half) pi-llama-cpp's protocol reproduced: `GET /models`
+   lists by alias; a completion naming the other model autoloaded it —
+   swap-by-naming observed. The real-client half runs on the installed
+   binary after the merge (below).
+9. qwen38-27: same pid, same launch stamp, completions answering on 11434
+   after all of it.
+13. `cria status --json` carries the `router` block (pid, port, phase,
+   12 models).
+
+Deferred to the user on the installed binary, minutes after the merge:
+item 8's real half (pi-llama-cpp pointed at 11437) and items 10–12 (the
+TUI router view, `p` writing `models.json`, `l`/`s` on the router row) —
+interactive checks that want the user's own terminal. The router was left
+running for exactly that.
 
 ## Intent
 
