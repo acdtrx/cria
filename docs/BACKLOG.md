@@ -56,6 +56,18 @@ Group entries under headings as themes emerge.
   the first time a profile that serves fine on its own is skipped or fails under
   the router and the difference has to be found by hand.
 
+- **Router discovery exposes the whole cache to clients.** Upstream's
+  `GET /models` lists every HF-cached model with no flag to narrow it;
+  inclusion controls only the preset and the aliases, so a client can name
+  and (within `--models-max`) autoload any cached model — the residency cap
+  is the only guard, and nothing upstream is memory-aware. Found in live pi
+  use 2026-09-05 (pi listed the full cache; only `/model` filtered to the
+  aliased set). Nothing for cria to build today — the listing is upstream's;
+  `--models-max` in `router_args` plus `--no-models-autoload` (if the
+  client drives explicit loads) are the levers, both documented in
+  SERVE.md. Revisit trigger: upstream grows a preset-only/discovery-off
+  flag — adopt it in the composed argv the moment it exists.
+
 - **Keyed servers vs cria's own requests.** An entry carrying
   `--api-key-file` makes llama-server 401 everything but `/health`: phases
   and start/stop survive, but the mlx warm, validate's prove, `cria bench`

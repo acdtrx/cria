@@ -278,6 +278,13 @@ table: it asks the router, which publishes one row per model it holds
   is a `router_args` flag rather than anything cria carries a default for
   (`docs/specs/CONFIG.md`). What cria shows is the result: the router's own word
   per model, changing under the refresh.
+- **Discovery is upstream's and covers the whole HF cache** (observed in live
+  use 2026-09-05): `GET /models` lists every cached model, and this build has
+  no flag to narrow it — inclusion controls the preset and the aliases, never
+  the listing. A client can therefore name any cached model and, within
+  `--models-max`, autoload it; upstream's default of 4 is why a household
+  `engines/router.toml` should set `--models-max` deliberately (the memory cap
+  is the residency cap — nothing upstream is memory-aware).
 
 ## Foreign servers (settled 2026-08-18)
 
