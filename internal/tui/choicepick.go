@@ -81,9 +81,15 @@ func (m model) openPicker() model {
 // the cursor stands on, picked along for the combination the *router* holds it
 // under. The box, the rows and the keys are the entry view's — only the store
 // the pick lands in differs (routerview.go).
+//
+// It opens on an inclusion and nothing else. The store's key *is* the inclusion,
+// so picking on a profile the router does not hold would have to include it as a
+// side effect of a key that means "edit the picks" — the write nobody asked this
+// key for. The row's own key is the one that includes it, and the bar draws that
+// one there instead (tui.go, rebindContext).
 func (m model) openRouterPicker() model {
 	row, ok := m.selectedRouterRow()
-	if !ok || row.skipped() {
+	if !ok || !row.included || row.skipped() {
 		return m
 	}
 	entry, found := m.entryNamed(row.id)

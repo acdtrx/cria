@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 	"cria/internal/hubcache"
 	"cria/internal/picks"
 	"cria/internal/serve"
@@ -68,6 +69,14 @@ type fakeServers struct {
 	routerChildren serve.RouterChildren
 	routerErr      error
 	routerModelErr error
+	routerStartErr error
+	startedRouter  int
+
+	// storeBacked asks routerFrame to point this fixture at the test's own
+	// router store, so a composition answers what the frame has just written to
+	// it rather than a canned listing (RouterModels, routerFrame).
+	storeBacked bool
+	routerStore string
 }
 
 // The router's half of the seam. A fixture that says nothing about a router is a
@@ -91,11 +100,58 @@ func (f *fakeServers) RouterSnapshot(record serve.Record) (serve.Status, error) 
 	return serve.Status{Record: record, Phase: phase, Uptime: time.Minute}, nil
 }
 
-func (f *fakeServers) RouterModels(*config.Tree) (serve.RouterModels, error) {
+// RouterModels answers with the listing a fixture scripted, or — for a fixture
+// pointed at a store — with the ids that store holds right now, composed against
+// the tree it was given.
+//
+// The store-backed answer is what lets the inclusion checkbox be exercised: the
+// frame writes models.json and asks for the composition again in the same
+// keypress, and a fake that answered from a canned listing could never show the
+// mark move. The composition's own rules stay serve's — what is reproduced here
+// is only that the store is what it reads.
+func (f *fakeServers) RouterModels(tree *config.Tree) (serve.RouterModels, error) {
 	if f.routerModelErr != nil {
 		return serve.RouterModels{}, f.routerModelErr
 	}
-	return f.routerModels, nil
+	if f.routerStore == "" {
+		return f.routerModels, nil
+	}
+
+	held, err := picks.LoadRouter(f.routerStore)
+	if err != nil {
+		return serve.RouterModels{}, err
+	}
+	var models serve.RouterModels
+	for _, id := range held.IDs() {
+		entry, found := tree.Entry(id)
+		if !found || entry.Backend != config.BackendLlama {
+			models.Skipped = append(models.Skipped, engine.Skipped{
+				ID:     id,
+				Reason: "the tree declares no llama entry named " + id + " any more",
+			})
+			continue
+		}
+		models.Served = append(models.Served, serve.ServedModel{
+			ID: id, Repo: entry.Repo, Quant: entry.Quant, Selection: held.Picks(id),
+			Section: "[" + entry.Repo + "]\nalias = " + id + "\n",
+		})
+	}
+	return models, nil
+}
+
+// StartRouter is the start the router's own view fires, recorded the way every
+// other action here is.
+func (f *fakeServers) StartRouter(*config.Tree, tools.Report) (serve.Record, serve.RouterModels, error) {
+	f.startedRouter++
+	if f.routerStartErr != nil {
+		return serve.Record{}, serve.RouterModels{}, f.routerStartErr
+	}
+	record := f.routerRecord
+	if record.EntryID == "" {
+		record = routerRecord()
+	}
+	f.routerFound, f.routerRecord = true, record
+	return record, f.routerModels, nil
 }
 
 func (f *fakeServers) RouterChildren(serve.Record) serve.RouterChildren { return f.routerChildren }
@@ -239,7 +295,8 @@ func (h *testHost) host() host {
 // usableTools is a host with every managed tool found and fit.
 func usableTools() tools.Report {
 	return tools.Report{
-		LlamaServer: tools.Tool{Name: tools.LlamaServer, Status: tools.StatusFound, Path: "/opt/homebrew/bin/llama-server", Build: 7000},
+		LlamaServer: tools.Tool{Name: tools.LlamaServer, Status: tools.StatusFound,
+			Path: "/opt/homebrew/bin/llama-server", Build: 7000, Router: true},
 		MLXLMServer: tools.Tool{Name: tools.MLXLMServer, Status: tools.StatusFound, Path: "/opt/homebrew/bin/mlx_lm.server"},
 		HF:          tools.Tool{Name: tools.HF, Status: tools.StatusFound, Path: "/opt/homebrew/bin/hf"},
 	}

@@ -29,10 +29,11 @@ func missingLlamaServer() tools.Tool {
 // errUnreadableCache is a hub cache no walk could read.
 var errUnreadableCache = errors.New("cannot read the hub cache at /home/u/.cache/huggingface/hub")
 
-// enter is ⏎, and escape is esc, as the terminal reports them.
+// enter is ⏎, escape is esc and space is ␣, as the terminal reports them.
 var (
 	enter  = tea.KeyPressMsg{Code: tea.KeyEnter}
 	escape = tea.KeyPressMsg{Code: tea.KeyEsc}
+	space  = tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 )
 
 // startFrame is a frame with the test tree loaded and the cursor on qwen — the

@@ -58,12 +58,14 @@ type servers interface {
 	PortUse(port int) (serve.PortUse, error)
 	KillHolder(holder serve.Holder) error
 
-	// The router, which the frame only reads: its record and one observation of
-	// it, what the store and the tree compose it to serve, and what the running
-	// one says it holds (routerview.go). Its life is `cria router start|stop`
-	// (docs/specs/CLI.md) — what is on the seam here is stop, which every server
-	// shares, and the three questions the view is drawn from.
+	// The router: its record and one observation of it, what the store and the
+	// tree compose it to serve, what the running one says it holds
+	// (routerview.go), and the start its own view fires. Stopping it is the same
+	// stop every server shares; starting it is its own call because the router is
+	// composed from the whole tree rather than from one entry
+	// (docs/specs/SERVE.md).
 	RouterServer() (serve.Server, bool, error)
+	StartRouter(tree *config.Tree, report tools.Report) (serve.Record, serve.RouterModels, error)
 	RouterSnapshot(record serve.Record) (serve.Status, error)
 	RouterModels(tree *config.Tree) (serve.RouterModels, error)
 	RouterChildren(record serve.Record) serve.RouterChildren
@@ -326,6 +328,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.loaded(msg), nil
 	case startedMsg:
 		return m.started(msg)
+	case routerStartedMsg:
+		return m.routerStarted(msg)
 	case actedMsg:
 		return m.acted(msg)
 	case warmedMsg:
@@ -486,6 +490,10 @@ func (m model) press(pressed tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.reselect(m.cursor() + 1), nil
 	case key.Matches(pressed, m.keys.start):
 		return m.startSelected()
+	case key.Matches(pressed, m.keys.startRouter):
+		return m.startRouter()
+	case key.Matches(pressed, m.keys.includeModel), key.Matches(pressed, m.keys.excludeModel):
+		return m.toggleRouterInclusion(), nil
 	case key.Matches(pressed, m.keys.pickChoices):
 		return m.openPicker(), nil
 	case key.Matches(pressed, m.keys.moveEntry):
@@ -592,16 +600,28 @@ func (m model) rebindContext() model {
 	model, hasModel := m.selectedRouterRow()
 	onEntryList := m.view == viewServe && !m.onRouter() && hasEntry
 	onCacheList := m.view == viewCache && hasCached
-	// The router's list is walked and picked over like the entry list, and
-	// nothing else: which entries it holds is settled by a verb rather than in
-	// this list, and loading one of them is a deliberate request with a busy gate
-	// in front of it (docs/specs/CLI.md, routerview.go).
+	// The router's list is walked, checked and picked over: the mark in front of
+	// a row is set here, and the combination behind it is edited here
+	// (routerview.go). Loading a model is still a CLI verb — it is a deliberate
+	// request about memory whose refusal needs an override this screen has no
+	// vocabulary for (docs/specs/CLI.md).
 	onRouterList := m.onRouter() && hasModel
-	pickableModel := onRouterList && !model.skipped() && m.entryHasChoices(model.id)
+	pickableModel := onRouterList && model.included && !model.skipped() && m.entryHasChoices(model.id)
 
 	m.keys.up.SetEnabled(onEntryList || onCacheList || onRouterList)
 	m.keys.down.SetEnabled(onEntryList || onCacheList || onRouterList)
 	m.keys.start.SetEnabled(onEntryList && entry.broken == nil)
+	// The router is started from its own view, and only while there is none
+	// running: the list is about a server that has to exist before its rows mean
+	// anything (lifecycle.go, startRouter).
+	m.keys.startRouter.SetEnabled(m.onRouter() && m.tree != nil && !m.router.live())
+	// The checkbox needs to know which side it is on, so a store cria could not
+	// read offers neither spelling — the row's mark is "·" there, and toggling
+	// from an unknown state would be a guess about what the user meant. A refused
+	// file cannot be included for the reason it cannot be started, and an
+	// inclusion whose profile is gone can only come out.
+	m.keys.includeModel.SetEnabled(onRouterList && m.router.composed && !model.included && model.includable())
+	m.keys.excludeModel.SetEnabled(onRouterList && m.router.composed && model.included)
 	// The picker needs axes to pick between: a flat entry offers none, so the
 	// key is not on the bar and does nothing when pressed (docs/specs/TUI.md,
 	// choicepick.go). A refused file has no choices cria could read either.
@@ -681,6 +701,7 @@ func (m model) observeRouter() routerState {
 		// The tree has not been read on the very first refresh, and there is
 		// nothing to compose a model list against until it has.
 		held.models, held.failure = m.host.servers.RouterModels(m.tree)
+		held.composed = held.failure == nil
 	}
 
 	server, found, err := m.host.servers.RouterServer()
@@ -915,8 +936,13 @@ func (m model) groups() []keyGroup {
 	}
 
 	return []keyGroup{
-		{label: selectionScope, bindings: []key.Binding{m.keys.start, m.keys.pickChoices, m.keys.moveEntry, m.keys.remove}},
-		{label: serverScope, bindings: []key.Binding{m.keys.stop, m.keys.forceKill, m.keys.log, m.keys.restart, m.keys.dismiss}},
+		{label: selectionScope, bindings: []key.Binding{
+			m.keys.start, m.keys.includeModel, m.keys.excludeModel, m.keys.pickChoices, m.keys.moveEntry, m.keys.remove}},
+		// Starting the router is a server key rather than a selection one: it acts
+		// on the engine the screen is about, whatever row the cursor is on, and it
+		// reads as the pair of the stop beside it.
+		{label: serverScope, bindings: []key.Binding{
+			m.keys.startRouter, m.keys.stop, m.keys.forceKill, m.keys.log, m.keys.restart, m.keys.dismiss}},
 		{label: globalScope, bindings: []key.Binding{m.keys.backend, m.keys.cache, m.keys.manageGroups, m.keys.clearAlert, m.keys.back, m.keys.tools, m.keys.bench, m.keys.quit}},
 	}
 }
@@ -936,12 +962,15 @@ func (m model) frameWidth() int {
 // keymap is every key the frame binds, in the three scopes the bar groups them
 // by plus the two a screen taking the keyboard offers.
 type keymap struct {
-	start       key.Binding
-	pickChoices key.Binding
-	moveEntry   key.Binding
-	remove      key.Binding
-	up          key.Binding
-	down        key.Binding
+	start        key.Binding
+	startRouter  key.Binding
+	includeModel key.Binding
+	excludeModel key.Binding
+	pickChoices  key.Binding
+	moveEntry    key.Binding
+	remove       key.Binding
+	up           key.Binding
+	down         key.Binding
 
 	stop      key.Binding
 	forceKill key.Binding
@@ -1014,6 +1043,13 @@ type keymap struct {
 // time it is pressed, so there is nothing for either to undo
 // (managegroups.go).
 //
+// ␣ is the router list's checkbox, and include and exclude are its two
+// spellings for the same reason grab and place are ⏎'s: the bar's word is the
+// state of the row under the cursor, so the key always says what pressing it
+// would do (routerview.go). ⏎ has a second spelling of its own there — the
+// router's list has no row to start, so the key starts the router the list is
+// about, and it is drawn only while there is none running (lifecycle.go).
+//
 // The picker's ←/→ is the exception to the cursor-key rule: it is the gesture
 // that picks rather than the one that moves, and nothing else in cria is bound
 // to those keys — so the bar spells the pair once, on the binding that walks
@@ -1028,6 +1064,9 @@ type keymap struct {
 func newKeymap() keymap {
 	return keymap{
 		start:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "start")),
+		startRouter:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("⏎", "start router")),
+		includeModel:  key.NewBinding(key.WithKeys("space"), key.WithHelp("␣", "include")),
+		excludeModel:  key.NewBinding(key.WithKeys("space"), key.WithHelp("␣", "exclude")),
 		pickChoices:   key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "picks")),
 		moveEntry:     key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "move")),
 		remove:        key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "delete")),

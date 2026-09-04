@@ -45,7 +45,10 @@ keybinds get detailed as they are built.
   always acts on what the box shows.
 - **Stop is global, start is scoped.** Stop/kill keybinds act on the running server
   no matter what is selected; only starting requires selecting an entry. A
-  restart-last keybind covers the one-keypress swap-back.
+  restart-last keybind covers the one-keypress swap-back. The one start with no
+  row to be scoped to is the router's (amended 2026-09-05): it is composed from
+  the whole tree rather than from one entry, so its own view starts it and the
+  key sits in the server group with the stop that ends it.
 - **All keybinds live in one bottom bar, grouped by scope**: *selection* keys read
   the highlighted item (start; delete in the cache view), *server* keys act on the
   running server from anywhere (stop, log, restart-last; dismiss while an exited
@@ -182,17 +185,71 @@ keybinds get detailed as they are built.
   a list, a detail pane beside it, the same cursor and the same picker floating
   over the list — because it is the same gesture: stand on a thing and read what
   serving it would come to. Contracts:
-  - **The rows are the store's, not the running router's.** They are the models
-    included in it, in id order, whether or not a router is running: the list
-    answers "what would the next start serve", and what is being served right now
-    is drawn onto it. A model included since the router started therefore reads as
-    *not served* — with the pane saying the preset is composed at every start —
-    rather than vanishing from a list the operator just wrote.
+  - **The rows are every profile the router could serve** (amended 2026-09-05,
+    user-requested: "see all the profiles in the router UI and be able to pick
+    which to include"): every llama entry of the tree, under the same group
+    headings, in the same order the entry list draws them — the same list asked a
+    different question, so a profile sits in the same place in both positions of
+    the toggle. An mlx entry is never on it (another program serves it, so the
+    mark could not be set); an entry file cria refused is, for the reason it
+    appears under both other lists — a file nobody can see is one nobody fixes;
+    and an included id the tree no longer declares trails at the end, with the
+    reason it can no longer be served. Inclusion is never auto-pruned
+    (`docs/specs/SERVE.md`), so that trailing row *is* how a ghost is seen and
+    taken out. Replaced: a list of the store's models alone — it answered "what
+    would the next start serve" and gave no way to see, or change, what else
+    could be in it.
+  - **A leading mark says whether the router holds the profile**: ● held, ○ not,
+    · a store cria could not read — the entry list's own glyphs asked this list's
+    question, with green meaning there what it means there ("the next start
+    serves it" against "starting it serves what is on disk"). "Not included" is
+    never claimed for a store that could not be read. The mark is fixed width and
+    leads the row, so setting it moves nothing beside it.
+  - **␣ sets it** (settled 2026-09-05, user-designed — a checkbox before the
+    model, toggled by one key). It holds the profile under the cursor, or stops
+    holding it, writing `models.json` **at the keypress**: an inclusion is a
+    decision "until I change it", so leaving the view is never a discard — the
+    same doctrine the picker and the group modes are built on. Including takes
+    the entry at its config defaults (`{}` in the store); excluding drops the
+    picks the router held it under, which is what exclude means. The bar spells
+    the key by the row it is standing on — `␣ include` or `␣ exclude` — the way
+    ⏎ spells grab and place. A refused entry file can only come out, never in:
+    the key that would say which program serves it is exactly the key that could
+    not be read. A store cria could not read offers neither spelling.
+  - **`cria router include|exclude` stay** (amended 2026-09-05): the gesture and
+    the verb write one store, and the verb is how a coding agent settles an
+    inclusion without a terminal to look at. Mechanism and trigger are separate.
+  - **`p` edits an inclusion, and only an inclusion.** The store's key *is* the
+    inclusion, so opening the picker on a profile the router does not hold would
+    include it as a side effect of a key that means "edit the picks". On an
+    excluded row the key is not drawn and does nothing — the answer a flat entry
+    already gets.
+  - **Load and unload stay CLI verbs** (settled 2026-08-31, upheld 2026-09-05
+    when inclusion became a gesture): including is a decision with no gate,
+    written and done; loading is a request about memory whose refusal — a model
+    answering somebody right now — is lifted by `--ignore-busy`, and this screen
+    has no vocabulary for an override. That one would need a modal to be honest,
+    and a modal is what the picker doctrine exists to avoid.
+  - **⏎ starts the router** (settled 2026-09-05, user-found: the bar taught stop
+    and never start, so starting one was CLI-only). This screen is about a server
+    rather than about a row, so the key that starts things starts it, and it is
+    drawn only while there is none running — a server key rather than a selection
+    one, reading as the pair of the stop beside it. The sequence and every
+    refusal are `cria router start`'s, in the same order. A held port refuses on
+    the notice line rather than in the held-port modal: that modal offers to kill
+    on one entry's behalf, and the router is not an entry.
   - **Each row carries the router's own word**, and cria's phase is only what
     colours it. Three of the six states a router publishes have no phase in cria's
     vocabulary, so a row with no colour is normal and never missing data. The
     state column is a fixed width — a row that reflows as a model loads is a row
-    nobody can read.
+    nobody can read. The word is drawn onto a row whatever the store now says
+    (amended 2026-09-05): the store is the next start and the running router is
+    right now, so a profile excluded a minute ago still reads `loaded` while that
+    router serves it, and one included since the router started reads *not
+    served* — with the pane saying the preset is composed at every start — rather
+    than vanishing from a list the operator just wrote. A profile neither of them
+    holds has an empty state column: the mark in front of it is the whole answer,
+    and the column keeps its width.
   - **A model the preset could not carry is a row, not a footnote**: it reads
     `skipped`, and the pane carries the reason in the words whoever included it
     has to act on. A dropped model hidden away is a client's 404 hours later.
@@ -200,14 +257,14 @@ keybinds get detailed as they are built.
     through the picks the *router* holds it under, and the preset section a start
     would write for it — where the entry view shows the composed command line. `p`
     opens the same picker over the same axes and writes the router's own store, so
-    one entry carries two combinations and each is edited where it is used.
-  - **Include, exclude, load and unload are CLI verbs** (settled 2026-08-31, and
-    deliberately not gestures here). Inclusion is a decision about which entry, made
-    from outside this list; loading is a deliberate request about memory with a
-    busy gate whose refusal is a sentence to read (`docs/specs/CLI.md`). Both would
-    need a modal to be honest, and a modal is what the picker doctrine exists to
-    avoid. The empty list names `cria router include` rather than pretending to be
-    the place.
+    one entry carries two combinations and each is edited where it is used. A
+    profile the router does not hold is read through the entry's config defaults —
+    what including it would hold it under — with a `not included` state line and
+    no preset section, because nothing was composed for it.
+  - **An empty list is a tree with no llama entry in it**, so it says where
+    entries are written and what prints the schema, exactly as the entry list's
+    does. It no longer names `cria router include`: this list is where inclusion
+    begins now.
 - **The router is a server in the status box** (settled 2026-08-31): cria started
   it, and the box shows what cria started — hiding it would make "what is running
   here" a lie in the one view that answers it. Its row names the engine where an

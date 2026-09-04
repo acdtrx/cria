@@ -62,6 +62,11 @@ type (
 		use   serve.PortUse
 		err   error
 	}
+	// routerStartedMsg is one attempt at starting this host's router: the
+	// refusal that stopped it, or nothing at all when it launched. What it
+	// composed travels nowhere — the list is drawn from the store and the tree,
+	// and the observation this answer triggers redraws it (routerview.go).
+	routerStartedMsg struct{ err error }
 )
 
 // pendingActions is what cria is in the middle of doing, entry id → the word for
@@ -206,6 +211,101 @@ func startEntry(entry config.Entry, selection config.Selection, settings config.
 		return startedMsg{entry: entry, err: err}
 	}
 	return startedMsg{entry: entry, record: record}
+}
+
+// startRouter is ⏎ in the router's view while nothing is routing: start this
+// host's router. The screen is about the router, so the key that starts things
+// starts it — where the entry list's ⏎ starts the row under the cursor, this
+// list's rows are models of a server that has to exist first (docs/specs/TUI.md).
+//
+// It is the same sequence `cria router start` runs, in the same order, and every
+// refusal it gives is that command's (routerStartSequence).
+func (m model) startRouter() (tea.Model, tea.Cmd) {
+	if m.tree == nil || m.router.live() {
+		return m, nil
+	}
+	tree, settings := m.tree, m.settings()
+	check, servers := m.host.tools, m.host.servers
+	return m.pend(string(config.BackendRouter), verbStarting), func() tea.Msg {
+		return routerStartSequence(tree, settings, check, servers)
+	}
+}
+
+// routerStartSequence is that start off the UI thread, refusing in the order
+// docs/specs/SERVE.md sets: what the tree declares, then whether one is already
+// running, then the tool, then the port — each answered before anything on the
+// host has changed.
+func routerStartSequence(tree *config.Tree, settings config.Settings, check func(config.Settings) tools.Report, servers servers) routerStartedMsg {
+	port, err := serve.RouterPort(tree.Router)
+	if err != nil {
+		return routerStartedMsg{err: err}
+	}
+	held, found, err := servers.RouterServer()
+	if err != nil {
+		return routerStartedMsg{err: err}
+	}
+	if found && held.Live {
+		return routerStartedMsg{err: fmt.Errorf("the router is already running as pid %d on port %d; stop it first",
+			held.PID, held.Port)}
+	}
+
+	served, err := engine.For(config.BackendRouter)
+	if err != nil {
+		return routerStartedMsg{err: err}
+	}
+	report := check(settings)
+	if _, err := engine.LaunchTool(served, report); err != nil {
+		return routerStartedMsg{err: err}
+	}
+
+	use, err := servers.PortUse(port)
+	if err != nil {
+		return routerStartedMsg{err: err}
+	}
+	if refusal := routerPortRefusal(tree.Router, port, use); refusal != "" {
+		return routerStartedMsg{err: errors.New(refusal)}
+	}
+	if _, _, err := servers.StartRouter(tree, report); err != nil {
+		return routerStartedMsg{err: err}
+	}
+	return routerStartedMsg{}
+}
+
+// routerStarted takes that start's answer. A router that launched says nothing:
+// the status box shows it on the observation this fires, and a line announcing
+// what the box is about to say is one more true thing to read (tui.go). What it
+// composed is drawn on the list the same way — the models it holds, and the ones
+// it skipped, are rows there already.
+func (m model) routerStarted(msg routerStartedMsg) (model, tea.Cmd) {
+	m = m.settled(string(config.BackendRouter))
+	m.alert = alert{}
+	if msg.err != nil {
+		m.alert = alert{text: msg.err.Error(), bad: true}
+	}
+	return m, m.refresh
+}
+
+// routerPortRefusal is why the router cannot have the port its engine file names
+// (docs/specs/SERVE.md): a server cria started is stopped by naming it, and a
+// process cria did not start is reported and left alone. The held-port modal is
+// not offered here — it kills on one entry's behalf, and the router is not an
+// entry — so the refusal is a sentence naming the holder and the file that would
+// give the router a port of its own.
+func routerPortRefusal(router config.RouterConfig, port int, use serve.PortUse) string {
+	if held := use.Managed; held != nil {
+		return fmt.Sprintf("port %d is already serving %s (pid %d); stop %s first, or give the router a port of its own in %s",
+			port, held.EntryID, held.PID, held.EntryID, router.Path)
+	}
+	if len(use.Holders) == 0 {
+		return ""
+	}
+
+	holders := make([]string, 0, len(use.Holders))
+	for _, holder := range use.Holders {
+		holders = append(holders, fmt.Sprintf("pid %d (%s)", holder.PID, orUnreadable(holder.Command)))
+	}
+	return fmt.Sprintf("port %d is held by a process cria did not start: %s; stop it, or give the router a port of its own in %s",
+		port, strings.Join(holders, ", "), router.Path)
 }
 
 // managedRefusal is a port held by a server cria started. It needs no modal: the
