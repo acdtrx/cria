@@ -185,6 +185,7 @@ func usableReport() tools.Report {
 	return tools.Report{
 		LlamaServer: tools.Tool{Name: tools.LlamaServer, Status: tools.StatusFound, Path: "/opt/homebrew/bin/llama-server", Build: 9000},
 		MLXLMServer: tools.Tool{Name: tools.MLXLMServer, Status: tools.StatusFound, Path: "/opt/homebrew/bin/mlx_lm.server"},
+		VLLM:        tools.Tool{Name: tools.VLLM, Status: tools.StatusFound, Path: "/usr/local/bin/vllm"},
 		HF:          tools.Tool{Name: tools.HF, Status: tools.StatusFound, Path: "/opt/homebrew/bin/hf"},
 	}
 }

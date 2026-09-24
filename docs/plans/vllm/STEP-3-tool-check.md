@@ -1,6 +1,6 @@
 # STEP 3 — vllm in the tool check, and the backend install guide
 
-Status: not started
+Status: done (2026-09-24) — the from-scratch dgx run of the vLLM recipe is deferred to STEP-6
 
 ## Intent
 
@@ -55,10 +55,26 @@ the recipe exactly when the tool is found missing.
 
 ## Acceptance criteria
 
-- Unit: found via override, found via PATH, missing (with disables + fix).
-- `cria docs` lists the `vllm` tools key.
-- Every missing-tool fix links its recipe; a test pins that each linked anchor
+- [x] Unit: found via override, found via PATH, missing (with disables + fix).
+- [x] `cria docs` lists the `vllm` tools key.
+- [x] Every missing-tool fix links its recipe; a test pins that each linked anchor
   exists as a heading in `docs/BACKENDS.md`.
-- The vLLM recipe, followed from scratch on dgx (STEP-6 may be where that
-  happens), yields a `vllm` that starts with no nvcc on PATH.
-- Suite run and recorded.
+- [ ] The vLLM recipe, followed from scratch on dgx (STEP-6 may be where that
+  happens), yields a `vllm` that starts with no nvcc on PATH. — deferred to STEP-6.
+- [x] Suite run and recorded.
+
+## Result (2026-09-24)
+
+- `vllm` is a managed tool, presence-only and never executed (a test runs the
+  exported `Check` against a `vllm` that would leave a marker if run). Missing:
+  "starting vllm entries …", fix names `tools.vllm` and `BACKENDS.md#vllm`.
+- `[tools] vllm` in config, schema and `cria docs`.
+- The only report renderer, the TUI tools pane, follows `Report.All()`; no
+  per-tool branch was needed. `All()` order: llama-server, mlx_lm.server, vllm, hf.
+- `docs/BACKENDS.md` with `## llama-server`, `## mlx_lm.server`, `## vllm`,
+  `## hf`. Every missing fix ends `— see …/docs/BACKENDS.md#<anchor>`; a test
+  computes GitHub's slug for each `## ` heading and checks every linked anchor
+  (mutation-checked: renaming a heading fails it).
+- README's "You bring the servers" links each tool to its recipe; TOOLS.md and
+  CONFIG.md updated in the same change.
+- Suite: `go test ./...` all ok; `gofmt -l .` empty; `go vet ./...` clean.

@@ -254,7 +254,7 @@ there rather than repeated in fifteen profiles.
 | -------------- | ------- | ------------------------------------------------------------------ |
 | `default_port` | integer | optional; the port for entries that declare none                   |
 | `default_host` | string  | optional; the bind address for entries that declare none; `0.0.0.0` when absent |
-| `[tools]`      | table   | optional; `llama_server`, `mlx_lm_server`, `hf` — absolute paths overriding `PATH` lookup |
+| `[tools]`      | table   | optional; `llama_server`, `mlx_lm_server`, `vllm`, `hf` — absolute paths overriding `PATH` lookup |
 
 `default_port` exists because entries are expected to share one port — a stable
 endpoint the consuming agent never reconfigures; swapping models is stop-then-start

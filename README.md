@@ -30,13 +30,15 @@ or build from source (Go, no cgo): `git clone … && cd cria && go build -o ~/.l
 
 Once installed, `cria update` fetches and swaps in the latest release.
 
-You bring the servers — cria orchestrates and never installs:
+You bring the servers — cria orchestrates and never installs. One recipe per
+tool, with the version gotchas, is in [docs/BACKENDS.md](docs/BACKENDS.md):
 
-- [`llama-server`](https://github.com/ggml-org/llama.cpp) — build b8498 or newer
+- [`llama-server`](docs/BACKENDS.md#llama-server) (llama.cpp) — build b8498 or newer
   (older builds keep a private model cache cria can't see; the tool check tells you)
-- [`mlx_lm.server`](https://github.com/ml-explore/mlx-lm) — optional, Apple silicon
-- [`hf`](https://huggingface.co/docs/huggingface_hub/en/guides/cli) — only for
-  `hf auth login` if you use gated repos
+- [`mlx_lm.server`](docs/BACKENDS.md#mlx_lmserver) (mlx-lm) — optional, Apple silicon
+- [`vllm`](docs/BACKENDS.md#vllm) (vLLM) — optional, Linux with an NVIDIA GPU
+- [`hf`](docs/BACKENDS.md#hf) (Hugging Face CLI) — only for `hf auth login` if
+  you use gated repos
 
 ## Quick start
 

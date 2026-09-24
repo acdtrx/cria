@@ -47,6 +47,7 @@ func TestToolsPaneRendersTheReport(t *testing.T) {
 	for _, fact := range []string{
 		"llama-server", "/opt/homebrew/bin/llama-server", "build 7000", "hub cache ok",
 		"mlx_lm.server", "/opt/homebrew/bin/mlx_lm.server",
+		"vllm", "/usr/local/bin/vllm",
 		"hf", "/opt/homebrew/bin/hf",
 	} {
 		if !strings.Contains(drawn, fact) {

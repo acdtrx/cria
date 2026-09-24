@@ -101,6 +101,7 @@ func loadSettings(path string) (Settings, error) {
 		settings.Tools = Tools{
 			LlamaServer: optString(tools, "llama_server"),
 			MLXLMServer: optString(tools, "mlx_lm_server"),
+			VLLM:        optString(tools, "vllm"),
 			HF:          optString(tools, "hf"),
 		}
 	}

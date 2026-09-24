@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 
 	"cria/internal/config"
 )
@@ -57,7 +58,7 @@ func modernVersion(_, flag string) (string, error) {
 }
 
 func TestCheckResolvesEveryToolFromPath(t *testing.T) {
-	dir := pathWith(t, LlamaServer, MLXLMServer, HF)
+	dir := pathWith(t, LlamaServer, MLXLMServer, VLLM, HF)
 
 	report := check(config.Settings{}, modernVersion)
 
@@ -87,7 +88,7 @@ func TestReportAllIsInSpecOrder(t *testing.T) {
 	for _, tool := range check(config.Settings{}, modernVersion).All() {
 		names = append(names, string(tool.Name))
 	}
-	if got, want := strings.Join(names, ","), "llama-server,mlx_lm.server,hf"; got != want {
+	if got, want := strings.Join(names, ","), "llama-server,mlx_lm.server,vllm,hf"; got != want {
 		t.Errorf("All() lists %s, want %s", got, want)
 	}
 }
@@ -122,6 +123,9 @@ func TestCheckReportsMissingTools(t *testing.T) {
 	if !strings.Contains(report.MLXLMServer.Disables, "mlx entries") {
 		t.Errorf("mlx_lm.server disables %q, want it to name mlx entries", report.MLXLMServer.Disables)
 	}
+	if !strings.Contains(report.VLLM.Disables, "vllm entries") {
+		t.Errorf("vllm disables %q, want it to name vllm entries", report.VLLM.Disables)
+	}
 	if !strings.Contains(report.HF.Disables, "gated repos") {
 		t.Errorf("hf disables %q, want it to name gated repos", report.HF.Disables)
 	}
@@ -130,6 +134,7 @@ func TestCheckReportsMissingTools(t *testing.T) {
 	for tool, key := range map[Tool]string{
 		report.LlamaServer: "tools.llama_server",
 		report.MLXLMServer: "tools.mlx_lm_server",
+		report.VLLM:        "tools.vllm",
 		report.HF:          "tools.hf",
 	} {
 		if !strings.Contains(tool.Fix, key) {
@@ -222,11 +227,12 @@ func TestAnUnusableLlamaServerIsTheRoutersAnswerToo(t *testing.T) {
 // The override exists to bypass PATH, so it wins even when PATH would have found
 // something.
 func TestCheckPrefersTheConfigOverride(t *testing.T) {
-	pathWith(t, LlamaServer, MLXLMServer, HF)
+	pathWith(t, LlamaServer, MLXLMServer, VLLM, HF)
 	elsewhere := t.TempDir()
 	settings := config.Settings{Tools: config.Tools{
 		LlamaServer: fakeBin(t, elsewhere, LlamaServer, "#!/bin/sh\nexit 0\n"),
 		MLXLMServer: fakeBin(t, elsewhere, MLXLMServer, "#!/bin/sh\nexit 0\n"),
+		VLLM:        fakeBin(t, elsewhere, VLLM, "#!/bin/sh\nexit 0\n"),
 		HF:          fakeBin(t, elsewhere, HF, "#!/bin/sh\nexit 0\n"),
 	}}
 
@@ -283,7 +289,7 @@ func TestCheckRefusesAnUnusableOverride(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			pathWith(t, LlamaServer, MLXLMServer, HF)
+			pathWith(t, LlamaServer, MLXLMServer, VLLM, HF)
 			override := test.override(t, t.TempDir())
 			settings := config.Settings{Tools: config.Tools{LlamaServer: override}}
 
@@ -300,8 +306,8 @@ func TestCheckRefusesAnUnusableOverride(t *testing.T) {
 				t.Errorf("llama-server fix is %q, want it to name %q and %q", llama.Fix, override, test.wantReason)
 			}
 			// The bad override disables its own tool only.
-			if !report.MLXLMServer.Usable() || !report.HF.Usable() {
-				t.Errorf("a bad llama_server override also disabled %s / %s", report.MLXLMServer.Status, report.HF.Status)
+			if !report.MLXLMServer.Usable() || !report.VLLM.Usable() || !report.HF.Usable() {
+				t.Errorf("a bad llama_server override also disabled %s / %s / %s", report.MLXLMServer.Status, report.VLLM.Status, report.HF.Status)
 			}
 		})
 	}
@@ -538,4 +544,70 @@ func TestCheckReadsAVersionPrintedOnStderr(t *testing.T) {
 	if llama.Build != 9999 {
 		t.Errorf("llama-server build is %d, want 9999", llama.Build)
 	}
+}
+
+// vllm's check is presence alone: `vllm --version` imports torch and takes
+// seconds, and the check runs on the TUI's startup path, so cria never executes
+// the program to judge it.
+func TestVLLMIsFoundWithoutBeingRun(t *testing.T) {
+	dir := t.TempDir()
+	ran := filepath.Join(dir, "ran")
+	fakeBin(t, dir, VLLM, "#!/bin/sh\ntouch '"+ran+"'\nexit 1\n")
+	t.Setenv("PATH", dir)
+
+	vllm := Check(config.Settings{}).VLLM
+
+	if !vllm.Usable() {
+		t.Fatalf("vllm is %s (%s), want found", vllm.Status, vllm.Disables)
+	}
+	if want := filepath.Join(dir, string(VLLM)); vllm.Path != want {
+		t.Errorf("vllm resolved to %q, want %q", vllm.Path, want)
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Error("the tool check executed vllm; presence is its whole contract")
+	}
+}
+
+// Every missing tool's fix links its recipe in docs/BACKENDS.md, and every
+// anchor it links is a heading there: the guide's headings are the contract the
+// fix lines point at, so renaming one without the other fails here.
+func TestMissingToolFixesLinkARecipeInTheBackendsGuide(t *testing.T) {
+	pathWith(t)
+	guide, err := os.ReadFile(filepath.Join("..", "..", "docs", "BACKENDS.md"))
+	if err != nil {
+		t.Fatalf("cannot read the backends guide: %v", err)
+	}
+	anchors := map[string]bool{}
+	for _, line := range strings.Split(string(guide), "\n") {
+		if heading, ok := strings.CutPrefix(line, "## "); ok {
+			anchors[githubAnchor(heading)] = true
+		}
+	}
+
+	for _, tool := range check(config.Settings{}, modernVersion).All() {
+		_, anchor, linked := strings.Cut(tool.Fix, backendsGuide+"#")
+		if !linked {
+			t.Errorf("%s is missing and its fix %q links no recipe in %s", tool.Name, tool.Fix, backendsGuide)
+			continue
+		}
+		if !anchors[anchor] {
+			t.Errorf("%s's fix links #%s, which no heading in docs/BACKENDS.md produces", tool.Name, anchor)
+		}
+	}
+}
+
+// githubAnchor is the id GitHub gives a Markdown heading: lowercased, every
+// character but letters, digits, spaces, hyphens and underscores dropped, and
+// spaces turned into hyphens.
+func githubAnchor(heading string) string {
+	var anchor strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(heading)) {
+		switch {
+		case r == ' ':
+			anchor.WriteRune('-')
+		case r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r):
+			anchor.WriteRune(r)
+		}
+	}
+	return anchor.String()
 }

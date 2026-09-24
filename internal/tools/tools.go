@@ -1,5 +1,5 @@
 // Package tools resolves the external programs cria drives — llama-server,
-// mlx_lm.server and hf — and reports what each one's state disables
+// mlx_lm.server, vllm and hf — and reports what each one's state disables
 // (docs/specs/TOOLS.md). cria installs nothing: the host provides the tools, so a
 // missing or unfit one degrades a feature instead of failing cria.
 //
@@ -25,6 +25,7 @@ type Name string
 const (
 	LlamaServer Name = "llama-server"
 	MLXLMServer Name = "mlx_lm.server"
+	VLLM        Name = "vllm"
 	HF          Name = "hf"
 )
 
@@ -73,12 +74,13 @@ type Tool struct {
 // enumerating statuses, so a new failure mode cannot silently read as usable.
 func (t Tool) Usable() bool { return t.Status == StatusFound }
 
-// Report is the whole tool check. The set is fixed at the three programs
+// Report is the whole tool check. The set is fixed at the programs
 // docs/specs/TOOLS.md names, so each is its own field: there is no lookup that
 // can miss.
 type Report struct {
 	LlamaServer Tool
 	MLXLMServer Tool
+	VLLM        Tool
 	HF          Tool
 }
 
@@ -88,7 +90,7 @@ type Report struct {
 // The router is not among them: it is llama-server in another mode, so it is one
 // program to install and one row to read, and its own verdict is derived from
 // that row rather than listed beside it (RouterMode).
-func (r Report) All() []Tool { return []Tool{r.LlamaServer, r.MLXLMServer, r.HF} }
+func (r Report) All() []Tool { return []Tool{r.LlamaServer, r.MLXLMServer, r.VLLM, r.HF} }
 
 // RouterMode is the llama-server finding read for the router's requirement: the
 // same binary, asked whether this build takes the router flags cria composes
@@ -122,6 +124,7 @@ func check(settings config.Settings, probe probeRunner) Report {
 	return Report{
 		LlamaServer: checkLlamaServer(settings.Tools.LlamaServer, probe),
 		MLXLMServer: checkMLXLMServer(settings.Tools.MLXLMServer),
+		VLLM:        checkVLLM(settings.Tools.VLLM),
 		HF:          checkHF(settings.Tools.HF),
 	}
 }
@@ -136,7 +139,7 @@ func checkLlamaServer(override string, version probeRunner) Tool {
 	if !found.ok() {
 		tool.Status = StatusMissing
 		tool.Disables = unstartable(llamaServing, "")
-		tool.Fix = found.fix("llama_server", "install llama.cpp so llama-server is on PATH")
+		tool.Fix = found.fix("llama_server", "install llama.cpp so llama-server is on PATH", "llama-server")
 		return tool
 	}
 
@@ -194,7 +197,22 @@ func checkMLXLMServer(override string) Tool {
 	if !found.ok() {
 		tool.Status = StatusMissing
 		tool.Disables = unstartable("mlx entries", "")
-		tool.Fix = found.fix("mlx_lm_server", "install mlx-lm so mlx_lm.server is on PATH (Apple silicon only)")
+		tool.Fix = found.fix("mlx_lm_server", "install mlx-lm so mlx_lm.server is on PATH (Apple silicon only)", "mlx_lmserver")
+	}
+	return tool
+}
+
+// checkVLLM resolves vllm. Presence is the whole contract, as for mlx_lm.server:
+// nothing cria asks of vLLM is tied to a version. And it is never executed here —
+// `vllm --version` imports torch and takes seconds, and this check runs on the
+// TUI's startup path. Absence is normal on any host without an NVIDIA GPU.
+func checkVLLM(override string) Tool {
+	found := resolve(VLLM, override)
+	tool := Tool{Name: VLLM, Path: found.path, Override: found.override != ""}
+	if !found.ok() {
+		tool.Status = StatusMissing
+		tool.Disables = unstartable("vllm entries", "")
+		tool.Fix = found.fix("vllm", "install vLLM so vllm is on PATH (NVIDIA GPU hosts)", "vllm")
 	}
 	return tool
 }
@@ -208,7 +226,7 @@ func checkHF(override string) Tool {
 	if !found.ok() {
 		tool.Status = StatusMissing
 		tool.Disables = "no cria feature — cria never runs hf; without `hf auth login` there is no token, so gated repos fail to download"
-		tool.Fix = found.fix("hf", "install the Hugging Face CLI so hf is on PATH, then run `hf auth login`")
+		tool.Fix = found.fix("hf", "install the Hugging Face CLI so hf is on PATH, then run `hf auth login`", "hf")
 	}
 	return tool
 }
@@ -260,15 +278,21 @@ func (r resolution) ok() bool { return r.path != "" }
 
 // fix names the one action that would make this lookup succeed. A refused
 // override is a configuration mistake with its own answer; anything else is the
-// host missing a program. settingsKey is the key under [tools] that overrides
-// this tool, and install is the sentence that describes getting it onto PATH.
-func (r resolution) fix(settingsKey, install string) string {
+// host missing a program, answered with the install and a link to that tool's
+// recipe in the backend guide (docs/specs/TOOLS.md). settingsKey is the key under
+// [tools] that overrides this tool, install is the sentence that describes
+// getting it onto PATH, and anchor is the recipe's heading anchor in the guide.
+func (r resolution) fix(settingsKey, install, anchor string) string {
 	if r.err != nil {
 		return fmt.Sprintf("config.toml sets tools.%s to %s, which cria cannot run (%v); correct it, or drop the key to search PATH",
 			settingsKey, r.override, r.err)
 	}
-	return install + ", or set tools." + settingsKey + " in config.toml"
+	return install + ", or set tools." + settingsKey + " in config.toml — see " + backendsGuide + "#" + anchor
 }
+
+// backendsGuide is the install guide a missing tool's fix points at: one recipe
+// per tool, each under a heading whose GitHub anchor the fix names.
+const backendsGuide = "https://github.com/acdtrx/cria/blob/main/docs/BACKENDS.md"
 
 // resolve finds one tool: the config.toml [tools] override when the tree sets
 // one, a PATH lookup otherwise (docs/specs/TOOLS.md). An override that names

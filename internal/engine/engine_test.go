@@ -143,6 +143,7 @@ func TestEveryEngineAnswersEveryQuestion(t *testing.T) {
 	report := tools.Report{
 		LlamaServer: tools.Tool{Name: tools.LlamaServer, Status: tools.StatusFound, Path: "/bin/llama-server"},
 		MLXLMServer: tools.Tool{Name: tools.MLXLMServer, Status: tools.StatusFound, Path: "/bin/mlx_lm.server"},
+		VLLM:        tools.Tool{Name: tools.VLLM, Status: tools.StatusFound, Path: "/bin/vllm"},
 		HF:          tools.Tool{Name: tools.HF, Status: tools.StatusFound, Path: "/bin/hf"},
 	}
 

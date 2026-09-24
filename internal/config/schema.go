@@ -352,6 +352,13 @@ var treeSchema = schema{
 				check:   checkAbsPath,
 			},
 			{
+				name:    "vllm",
+				kind:    kindString,
+				rules:   "absolute path to vllm",
+				example: `"/home/me/vllm/.venv/bin/vllm"`,
+				check:   checkAbsPath,
+			},
+			{
 				name:    "hf",
 				kind:    kindString,
 				rules:   "absolute path to hf",

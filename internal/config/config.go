@@ -150,6 +150,7 @@ type Settings struct {
 type Tools struct {
 	LlamaServer string
 	MLXLMServer string
+	VLLM        string
 	HF          string
 }
 

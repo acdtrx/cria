@@ -666,12 +666,13 @@ func TestSettingsAccept(t *testing.T) {
 		{
 			name: "defaults and every tool override",
 			settings: "default_port = 8080\n[tools]\nllama_server = \"/opt/homebrew/bin/llama-server\"\n" +
-				"mlx_lm_server = \"/opt/homebrew/bin/mlx_lm.server\"\nhf = \"/opt/homebrew/bin/hf\"\n",
+				"mlx_lm_server = \"/opt/homebrew/bin/mlx_lm.server\"\nvllm = \"/home/me/vllm/.venv/bin/vllm\"\nhf = \"/opt/homebrew/bin/hf\"\n",
 			want: Settings{
 				DefaultPort: 8080,
 				Tools: Tools{
 					LlamaServer: "/opt/homebrew/bin/llama-server",
 					MLXLMServer: "/opt/homebrew/bin/mlx_lm.server",
+					VLLM:        "/home/me/vllm/.venv/bin/vllm",
 					HF:          "/opt/homebrew/bin/hf",
 				},
 			},
