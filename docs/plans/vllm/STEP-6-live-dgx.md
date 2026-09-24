@@ -50,3 +50,17 @@ script retires.
 - A llama entry on dgx still starts and stops unchanged.
 - Plan end: suite green, branch rebased on main, ff-merged, worktree pruned,
   release tagged so dgx can `cria update`.
+
+## Live findings
+
+- **2026-09-24 — `--wait` gave up on a healthy vLLM start.** `cria start
+  qwen38-27b-nvfp4 --wait` failed with "it is still starting after 2m0s" while
+  the server came up fine: vLLM binds its port only after load, torch.compile,
+  CUDA-graph capture and memory profiling. Measured here (27B NVFP4, 256K ctx,
+  MTP2): green at ~5m14s with warm kernel caches, ~6–8.5 min cold. The fixed
+  2-minute window was llama/mlx knowledge; `cria validate` shares the wait and
+  would have failed the same way. Fix: the start window is the engine's answer
+  (`Engine.StartWithin`) — 2m for llama, mlx and the router, 15m for vLLM; the
+  30m download window is unchanged (`docs/specs/SERVE.md`, Start 4, amended
+  2026-09-24). Re-run `start --wait` and `validate` on dgx with the rebuilt
+  binary to clear it.

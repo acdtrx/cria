@@ -515,13 +515,56 @@ func TestStartWaitReportsAFailedStart(t *testing.T) {
 func TestStartWaitTimesOut(t *testing.T) {
 	fake := &fakeServers{record: testRecord(), phases: []serve.Phase{serve.PhaseStarting}}
 	app, _, errOut := newTestApp(testTree(), fake)
-	app.startWindow = 20 * time.Millisecond
+	app.startWindow = startWindowOf(20 * time.Millisecond)
 
 	if code := app.start([]string{"qwen", "--wait"}); code != exitFailure {
 		t.Fatalf("exit code %d, want %d", code, exitFailure)
 	}
 	if !strings.Contains(errOut.String(), "still starting after") {
 		t.Errorf("cria printed %q, want the phase it gave up in", errOut)
+	}
+}
+
+// The start window is the engine's answer: a vLLM start still coming up after
+// llama's budget is not failed, because vLLM binds its port only after its
+// compile and graph capture (docs/specs/SERVE.md, Start 4). The same slow start
+// under llama times out. Both run on the suite's clock (testStartWindow), where
+// llama's two minutes are 200ms and vLLM's fifteen are 1.5s; the server comes
+// up after at least 400ms of starting.
+func TestStartWaitWindowIsTheEngines(t *testing.T) {
+	slowStart := make([]serve.Phase, 40)
+	for i := range slowStart {
+		slowStart[i] = serve.PhaseStarting
+	}
+	slowStart = append(slowStart, serve.PhaseRunning)
+
+	cases := []struct {
+		backend config.Backend
+		settles bool
+	}{
+		{backend: config.BackendLlama, settles: false},
+		{backend: config.BackendVLLM, settles: true},
+	}
+	for _, test := range cases {
+		t.Run(string(test.backend), func(t *testing.T) {
+			record := testRecord()
+			record.Backend = test.backend
+			fake := &fakeServers{
+				record: record,
+				phases: slowStart,
+				health: serve.Health{URL: "http://127.0.0.1:8080/health", Green: true, Status: 200, Detail: "200 OK"},
+			}
+			app, _, errOut := newTestApp(testTree(), fake)
+			app.poll = 10 * time.Millisecond
+
+			_, _, err := app.awaitGreen(fake, record, uninterrupted)
+			if test.settles && err != nil {
+				t.Fatalf("the wait failed a start its engine's window covers: %v (stderr: %s)", err, errOut)
+			}
+			if !test.settles && (err == nil || !strings.Contains(err.Error(), "still starting after")) {
+				t.Fatalf("the wait answered %v, want it to give up while still starting", err)
+			}
+		})
 	}
 }
 
@@ -538,7 +581,7 @@ func TestStartWaitFollowsADownload(t *testing.T) {
 	app, out, errOut := newTestApp(testTree(), fake)
 	// A window that has already run out for a start, so only the download's own
 	// budget can carry this wait to its verdict.
-	app.startWindow = time.Nanosecond
+	app.startWindow = startWindowOf(time.Nanosecond)
 	app.downloadWindow = 2 * time.Second
 
 	if code := app.start([]string{"qwen", "--wait"}); code != exitOK {

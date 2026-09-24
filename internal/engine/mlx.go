@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"time"
+
 	"cria/internal/config"
 	"cria/internal/tools"
 )
@@ -39,3 +41,8 @@ func (mlx) LoadsLazily() bool { return true }
 // deriving one from something adjacent would hand back a guess spelled like a
 // measurement.
 func (mlx) SlotsPath() (string, bool) { return "", false }
+
+// StartWithin is two minutes: mlx_lm.server binds its port before it reads any
+// weights, so its green costs only the process coming up — the load itself is
+// the warm's, under that request's own budget.
+func (mlx) StartWithin() time.Duration { return 2 * time.Minute }

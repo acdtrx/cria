@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"time"
+
 	"cria/internal/config"
 	"cria/internal/tools"
 )
@@ -44,3 +46,11 @@ func (vllm) LoadsLazily() bool { return false }
 // SlotsPath publishes nothing cria reads: vLLM has no per-slot endpoint, and its
 // Prometheus counters are a different signal, not read today.
 func (vllm) SlotsPath() (string, bool) { return "", false }
+
+// StartWithin is fifteen minutes. vLLM binds its port only after the load,
+// torch.compile, CUDA-graph capture and memory profiling: measured on a DGX
+// Spark with a 27B NVFP4 model at 256K context, green took about five minutes
+// with warm compile caches and six to eight and a half with cold ones. A larger
+// model compiles longer, so the budget is well above the measured worst and
+// still bounded.
+func (vllm) StartWithin() time.Duration { return 15 * time.Minute }

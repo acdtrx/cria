@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 	"cria/internal/picks"
 	"cria/internal/procs"
 	"cria/internal/serve"
@@ -325,7 +326,9 @@ func (f *fakeServers) PortUse(port int) (serve.PortUse, error) {
 
 // newTestApp builds an invocation over fakes, with the --wait windows wound down
 // to milliseconds: the wait is about which phase settles it, and a real
-// two-minute budget would only make the suite slow.
+// minutes-long budget would only make the suite slow. The start window is the
+// engine's own answer on a clock 600 times faster (testStartWindow), so a test
+// still sees each engine's budget, in proportion.
 func newTestApp(tree *config.Tree, fake *fakeServers) (*app, *bytes.Buffer, *bytes.Buffer) {
 	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
 	return &app{
@@ -341,10 +344,20 @@ func newTestApp(tree *config.Tree, fake *fakeServers) (*app, *bytes.Buffer, *byt
 		tui:              func() error { return nil },
 		interrupts:       func() (func() bool, func()) { return uninterrupted, func() {} }, // nobody hits Ctrl-C in a test unless it says so
 		poll:             time.Millisecond,
-		startWindow:      200 * time.Millisecond,
+		startWindow:      testStartWindow,
 		downloadWindow:   400 * time.Millisecond,
 		progressEvery:    time.Millisecond,
 	}, out, errOut
+}
+
+// testStartWindow is an engine's start window on the suite's clock: two minutes
+// become 200ms, fifteen become 1.5s.
+func testStartWindow(served engine.Engine) time.Duration { return served.StartWithin() / 600 }
+
+// startWindowOf is a start window that answers the same for every engine — for a
+// test about the window itself rather than whose it is.
+func startWindowOf(window time.Duration) func(engine.Engine) time.Duration {
+	return func(engine.Engine) time.Duration { return window }
 }
 
 // usableReport is a tool check that found both servers on a llama.cpp that can

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"cria/internal/config"
 	"cria/internal/tools"
@@ -78,6 +79,17 @@ type Engine interface {
 	// missing signal is an answer of its own — cria reports that it cannot tell,
 	// never idleness derived from silence.
 	SlotsPath() (path string, published bool)
+
+	// StartWithin is how long a server of this engine may take, from its spawn,
+	// to serve a model already in the cache — the budget a wait for green is
+	// bound by before it reports the start as stuck (docs/specs/SERVE.md). How
+	// long a cached model takes to come up is what the engine does between
+	// spawn and green, so it is the engine's to answer: bounded, because a
+	// wedged start must be reported rather than waited out, and generous enough
+	// that a slow but healthy start never reads as a failure. A model still
+	// being fetched is bound by the network instead, and waited for under the
+	// download budget, not this one.
+	StartWithin() time.Duration
 }
 
 // engines is every engine cria has, in the order docs/specs/TOOLS.md presents

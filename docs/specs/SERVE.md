@@ -106,7 +106,17 @@ failure states.
    (amended 2026-08-18): the pid listening on the port must be the pid cria
    spawned — a green answered by some other process fails the wait naming both
    pids. Attribution that cannot be obtained degrades to a note, never a
-   failure: the health signal is primary, `lsof` corroborates.
+   failure: the health signal is primary, `lsof` corroborates. The wait is
+   bounded: a start still downloading its model gets 30 minutes (the network's
+   budget, selected by the `downloading` phase and kept once seen); a cached
+   model gets its **engine's start window** (amended 2026-09-24) — 2 minutes for
+   llama-server, mlx_lm.server and the router, which are green within seconds
+   of loading, and 15 minutes for vLLM, which binds its port only after load,
+   torch.compile, CUDA-graph capture and memory profiling (measured on a DGX
+   Spark, 27B NVFP4 at 256K context: ~5 min with warm compile caches, 6–8.5 min
+   cold; larger models compile longer). A single fixed 2-minute window failed
+   healthy vLLM starts; the window stays bounded so a wedged start is still
+   reported. `cria validate` waits under the same budget.
 5. Lazily-loading backends are **warmed by default** (settled 2026-08-18):
    mlx_lm.server answers green before loading any weights, so a green `--wait`
    sends one minimal completion (`POST /v1/completions`, one token, the

@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"time"
+
 	"cria/internal/config"
 	"cria/internal/tools"
 )
@@ -44,6 +46,11 @@ func (llama) HealthPath() string { return llamaHealthPath }
 func (llama) LoadsLazily() bool { return false }
 
 func (llama) SlotsPath() (string, bool) { return llamaSlotsPath, true }
+
+// StartWithin is two minutes: llama-server goes green once a cached model is
+// read into memory, which takes seconds, and one that has not managed it in two
+// minutes has a problem worth reporting.
+func (llama) StartWithin() time.Duration { return 2 * time.Minute }
 
 // hubReference spells the model a llama launch serves the way llama-server takes
 // it: the repo, qualified by the quantization when there is one. Without a quant

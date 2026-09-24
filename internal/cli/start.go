@@ -305,7 +305,7 @@ func (a *app) await(manager servers, record serve.Record) int {
 //
 // The window is that budget, and the phase chooses it: a start that has to fetch
 // its model is bound by the network, one that does not is bound by how long a
-// cached model takes to load. Once a download has been seen the larger budget
+// cached model takes to come up under the record's engine. Once a download has been seen the larger budget
 // stays — a fetch that finishes and hands over to a slow load must not be cut
 // off by the smaller one.
 //
@@ -313,7 +313,11 @@ func (a *app) await(manager servers, record serve.Record) int {
 // stop waiting and get on with whatever it must not leave undone (validate.go).
 func (a *app) awaitGreen(manager servers, record serve.Record, interrupted func() bool) (serve.Status, time.Duration, error) {
 	began := time.Now()
-	window := a.startWindow
+	served, err := engine.For(record.Backend)
+	if err != nil {
+		return serve.Status{}, since(began), err
+	}
+	window := a.startWindow(served)
 	var lastProgress time.Time
 
 	for {

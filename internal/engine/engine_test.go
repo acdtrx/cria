@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"cria/internal/config"
 	"cria/internal/tools"
@@ -270,6 +271,30 @@ func TestTheProcessScanLooksForEveryEnginesProgram(t *testing.T) {
 	}
 }
 
+// Each engine's start window is pinned: it is the budget a --wait gives a cached
+// model before reporting the start as stuck (docs/specs/SERVE.md, Start 4), and
+// vLLM's is the one measured against its compile and graph capture on a DGX
+// Spark — a 27B NVFP4 model took up to eight and a half minutes from cold. Every
+// engine answers, and no answer is zero, which would fail every start at once.
+func TestEveryEngineAnswersItsStartWindow(t *testing.T) {
+	want := map[config.Backend]time.Duration{
+		config.BackendLlama:  2 * time.Minute,
+		config.BackendMLX:    2 * time.Minute,
+		config.BackendVLLM:   15 * time.Minute,
+		config.BackendRouter: 2 * time.Minute,
+	}
+	for _, engine := range All() {
+		window, pinned := want[engine.ID()]
+		if !pinned {
+			t.Errorf("engine %q has no pinned start window; add it here", engine.ID())
+			continue
+		}
+		if got := engine.StartWithin(); got != window {
+			t.Errorf("engine %q starts within %s, want %s", engine.ID(), got, window)
+		}
+	}
+}
+
 // programless is an engine that serves through no program of its own — the
 // shape the gate has to answer without calling it a missing tool. It answers
 // every other question the way an engine speaking to something already running
@@ -284,3 +309,4 @@ func (programless) TakesQuant() bool                     { return false }
 func (programless) HealthPath() string                   { return "/health" }
 func (programless) LoadsLazily() bool                    { return false }
 func (programless) SlotsPath() (string, bool)            { return "", false }
+func (programless) StartWithin() time.Duration           { return time.Minute }

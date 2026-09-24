@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"time"
 
 	"cria/internal/config"
 	"cria/internal/tools"
@@ -97,6 +98,11 @@ func (router) HealthPath() string { return routerHealthPath }
 func (router) LoadsLazily() bool { return false }
 
 func (router) SlotsPath() (string, bool) { return routerSlotsPath, true }
+
+// StartWithin is two minutes: the router loads no weights as it comes up, so
+// its green costs the process alone. A model under it loads on the request that
+// names it, under that request's budget.
+func (router) StartWithin() time.Duration { return 2 * time.Minute }
 
 // PresetArgs names the preset one router process serves from, the way
 // llama-server takes it — the router's answer to what the other engines spell as

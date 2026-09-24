@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"cria/internal/config"
+	"cria/internal/engine"
 	"cria/internal/picks"
 	"cria/internal/procs"
 	"cria/internal/selfupdate"
@@ -64,15 +65,15 @@ const (
 // responsive without asking the host anything it has not had time to change.
 //
 // The two windows are budgets, chosen from what actually takes the time. A model
-// already in the cache only has to be loaded and answered for, and a server that
-// has not managed that in two minutes has a problem worth reporting rather than
-// waiting out. A model that is still being fetched is bound by the network and
-// by tens of gigabytes: half an hour is the window that lets a real download
-// finish unattended, and the phase is what selects it — an entry never pays the
-// download budget for a start that is not downloading.
+// already in the cache only has to be brought up by its engine, and how long
+// that takes is the engine's own answer (engine.Engine.StartWithin): seconds for
+// llama-server, many minutes for vLLM's compile and graph capture. A model that
+// is still being fetched is bound by the network and by tens of gigabytes: half
+// an hour is the window that lets a real download finish unattended, and the
+// phase is what selects it — an entry never pays the download budget for a
+// start that is not downloading.
 const (
 	waitPoll           = 2 * time.Second
-	waitStartWindow    = 2 * time.Minute
 	waitDownloadWindow = 30 * time.Minute
 
 	// waitProgressEvery is how often a download prints where it has got to.
@@ -166,10 +167,11 @@ type app struct {
 	// suite runs in.
 	interrupts func() (interrupted func() bool, disarm func())
 
-	// The --wait windows, held rather than read from the constants so a test can
-	// drive a whole wait — including its timeout — without waiting one out.
+	// The --wait windows, held rather than read from the constants and the
+	// engines so a test can drive a whole wait — including its timeout — without
+	// waiting one out. startWindow answers for the engine a start runs under.
 	poll           time.Duration
-	startWindow    time.Duration
+	startWindow    func(engine.Engine) time.Duration
 	downloadWindow time.Duration
 	progressEvery  time.Duration
 }
@@ -198,7 +200,7 @@ func newApp(tui func() error) *app {
 		tui:              tui,
 		interrupts:       watchInterrupt,
 		poll:             waitPoll,
-		startWindow:      waitStartWindow,
+		startWindow:      engine.Engine.StartWithin,
 		downloadWindow:   waitDownloadWindow,
 		progressEvery:    waitProgressEvery,
 	}
