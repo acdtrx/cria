@@ -1,6 +1,6 @@
 # STEP 2 — stop signals the spawned server's process group
 
-Status: not started
+Status: done (2026-09-24) — unit criteria met; live checks deferred (see Result)
 
 ## Intent
 
@@ -36,9 +36,36 @@ children), and changes nothing for a single-process one.
 
 ## Acceptance criteria
 
-- Unit: a stop of a spawned record signals the group (SIGTERM, then SIGKILL on
+- [x] Unit: a stop of a spawned record signals the group (SIGTERM, then SIGKILL on
   grace expiry); a foreign-holder kill signals the pid; both pinned by tests.
-- Live on the dev Mac *when cleared*: llama entry and the router stop as before;
+- [ ] Live on the dev Mac *when cleared*: llama entry and the router stop as before;
   a router stop leaves no child llama-server behind.
-- Live on dgx (STEP-6): kill during a loaded vLLM leaves no `VLLM::EngineCore`.
-- Suite run and recorded.
+- [ ] Live on dgx (STEP-6): kill during a loaded vLLM leaves no `VLLM::EngineCore`.
+- [x] Suite run and recorded.
+
+## Result
+
+- `procs.Host` sends signals three ways: `TerminateGroup` / `KillGroup`
+  (`kill(-pgid)`) for servers cria spawned, `Kill` (one pid) for a foreign port
+  holder. The pid-directed `Terminate` is gone — nothing sends SIGTERM to a lone
+  pid. The guard refuses pid < 1 and, for a group, pgid < 2 (`-1` would be
+  "everything this user can signal").
+- `serve.Stop` / `serve.Kill` (and so the router stop, validate's displace, the
+  TUI's stop and kill keys) signal the record's group; liveness and the wait stay
+  on the recorded pid. An ESRCH from a group signal reads as gone and the record
+  is removed after the usual confirmation.
+- `serve.KillHolder` stays `Kill(pid)`; its doc comment says why.
+- Tests: the fake host records `TERM group N` / `KILL group N` apart from
+  `KILL N`; the escalation, router-stop and displace tests pin the group path,
+  the foreign-holder test pins the pid path, and a new test covers the empty
+  group (ESRCH) for stop and kill. In procs, a real-process test proves a group
+  kill/terminate ends a shell helper's child while a pid kill leaves it running;
+  the refusal test covers group 1.
+- `docs/specs/SERVE.md`: Stop section amended (2026-09-24); the router
+  paragraph no longer says cria "never touches" the children.
+- Suite: `go test ./...` all packages ok; `gofmt -l .` empty; `go vet ./...`
+  clean.
+- **Deferred:** the live checks — dev Mac llama/router stop leaving no child
+  llama-server, and the dgx kill during a loaded vLLM leaving no
+  `VLLM::EngineCore` — run in STEP-6 or on a cleared machine; no real server
+  was touched for this step.

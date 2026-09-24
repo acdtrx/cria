@@ -153,7 +153,7 @@ func TestDisplaceStopsTheServerAndHoldsWhatPutsItBack(t *testing.T) {
 		t.Fatalf("displacing %s: %v", running.EntryID, err)
 	}
 
-	if len(host.sent) != 1 || host.sent[0] != "TERM 4242" {
+	if len(host.sent) != 1 || host.sent[0] != "TERM group 4242" {
 		t.Errorf("the swap sent %v, want the ordinary stop's SIGTERM", host.sent)
 	}
 	if left := records(t, manager); len(left) != 0 {

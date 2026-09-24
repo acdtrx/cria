@@ -129,6 +129,14 @@ failure states.
   skips the grace.
 - `cria stop` with no argument stops the only running server; with several
   running, the entry id is required.
+- **Signals go to the spawned server's process group** (amended 2026-09-24).
+  A server cria spawned leads its own session, so `kill(-pid)` reaches it and
+  everything it started — vLLM's engine core, the router's child servers. On
+  dgx a SIGKILL to vLLM's pid alone orphaned its engine core holding ~84 GB,
+  while SIGTERM to the group cleared everything. Whether the server is gone is
+  still asked of the recorded pid; a group already empty (ESRCH) reads as gone.
+  The kill offered on a foreign port holder stays pid-only: cria did not make
+  it a group leader, so a group signal could miss it or reach someone else's.
 
 ## Logs
 
@@ -141,9 +149,9 @@ failure states.
 
 One `llama-server` per host, started in router mode: it supervises a child server
 per model it holds and proxies all of them on one port (probe-verified
-2026-08-31). cria starts, watches and stops that one process and never touches its
-children — which models it holds is asked through the router's documented API
-(STEP-8).
+2026-08-31). cria starts, watches and stops that one process and never manages its
+children one by one — a stop's group signal ends them with it (Stop), and which
+models it holds is asked through the router's documented API (STEP-8).
 
 - **It is not an entry.** No `models/<id>.toml` declares it; it is configured by
   `engines/router.toml` and started as itself (`cria router start`,

@@ -85,7 +85,8 @@ func TestPortUseDescribesAForeignHolder(t *testing.T) {
 }
 
 // The kill the TUI offers on a foreign holder ends that process and nothing
-// else (docs/specs/SERVE.md).
+// else (docs/specs/SERVE.md): its pid, never a group — cria did not spawn it and
+// cannot know it leads one.
 func TestKillHolderEndsAForeignProcess(t *testing.T) {
 	host := &fakeHost{
 		alive:     map[int]procs.Identity{99: identityOf("/opt/homebrew/bin/llama-server -m gemma.gguf --port 8080")},
@@ -98,7 +99,7 @@ func TestKillHolderEndsAForeignProcess(t *testing.T) {
 		t.Fatalf("killing the process holding the port: %v", err)
 	}
 	if len(host.sent) != 1 || host.sent[0] != "KILL 99" {
-		t.Errorf("cria sent %v, want one SIGKILL to the holder", host.sent)
+		t.Errorf("cria sent %v, want one SIGKILL to the holder's pid", host.sent)
 	}
 	if _, alive := host.alive[99]; alive {
 		t.Error("the holder outlived the kill")

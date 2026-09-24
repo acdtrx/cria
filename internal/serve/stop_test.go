@@ -8,7 +8,8 @@ import (
 
 // The stop escalation, in the order docs/specs/SERVE.md settles it: SIGTERM
 // first, SIGKILL only once the grace period has passed, and never a signal to a
-// server that is already gone.
+// server that is already gone. Every signal goes to the server's process group,
+// so what it started cannot outlive it.
 func TestStopEscalation(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -22,24 +23,24 @@ func TestStopEscalation(t *testing.T) {
 			name:      "a server that answers SIGTERM is never killed",
 			dieOnTerm: true,
 			stop:      (*Manager).Stop,
-			want:      []string{"TERM 4242"},
+			want:      []string{"TERM group 4242"},
 		},
 		{
 			name:      "a server that ignores SIGTERM is killed after the grace",
 			dieOnKill: true,
 			stop:      (*Manager).Stop,
-			want:      []string{"TERM 4242", "KILL 4242"},
+			want:      []string{"TERM group 4242", "KILL group 4242"},
 		},
 		{
 			name:      "a kill skips the grace",
 			dieOnKill: true,
 			stop:      (*Manager).Kill,
-			want:      []string{"KILL 4242"},
+			want:      []string{"KILL group 4242"},
 		},
 		{
 			name:  "a server nothing ends keeps its record",
 			stop:  (*Manager).Stop,
-			want:  []string{"TERM 4242", "KILL 4242"},
+			want:  []string{"TERM group 4242", "KILL group 4242"},
 			fails: true,
 		},
 	}
@@ -150,5 +151,36 @@ func TestStopNeverSignalsAReusedPID(t *testing.T) {
 	}
 	if _, found, _ := manager.loadRecord(record.EntryID); found {
 		t.Error("the record of a server whose pid was reused survived the stop")
+	}
+}
+
+// A server that exits between the liveness check and the signal leaves a group
+// with nobody in it. kill(2) answers ESRCH, and that is the stop succeeding, not
+// failing: the record goes, as it does for any confirmed exit.
+func TestStopTreatsAnEmptyGroupAsGone(t *testing.T) {
+	for _, stop := range []struct {
+		name string
+		call func(*Manager, Record) error
+		want string
+	}{
+		{"stop", (*Manager).Stop, "TERM group 4242"},
+		{"kill", (*Manager).Kill, "KILL group 4242"},
+	} {
+		t.Run(stop.name, func(t *testing.T) {
+			host := &fakeHost{}
+			manager := newManager(t, host)
+			record, _ := startOne(t, manager, host, llamaEntry(), 4242)
+			host.groupGone = true
+
+			if err := stop.call(manager, record); err != nil {
+				t.Fatalf("a %s that found the group already empty failed: %v", stop.name, err)
+			}
+			if !slices.Equal(host.sent, []string{stop.want}) {
+				t.Errorf("cria sent %v, want %v", host.sent, []string{stop.want})
+			}
+			if _, found, err := manager.loadRecord(record.EntryID); found || err != nil {
+				t.Errorf("the record survived: found=%v, err=%v", found, err)
+			}
+		})
 	}
 }

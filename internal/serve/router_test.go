@@ -272,7 +272,7 @@ func TestStoppingTheRouterRemovesItsRecord(t *testing.T) {
 	if err := manager.Stop(record); err != nil {
 		t.Fatalf("stopping the router: %v", err)
 	}
-	if want := []string{"TERM 4242"}; strings.Join(host.sent, ",") != strings.Join(want, ",") {
+	if want := []string{"TERM group 4242"}; strings.Join(host.sent, ",") != strings.Join(want, ",") {
 		t.Errorf("cria sent %v, want %v", host.sent, want)
 	}
 	if _, err := os.Stat(manager.routerRecordPath()); !os.IsNotExist(err) {

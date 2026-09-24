@@ -86,6 +86,10 @@ func (m *Manager) ListensOn(record Record) (bool, []int, error) {
 // signals a process it has no record of (docs/specs/SERVE.md). The CLI never
 // offers it (docs/specs/CLI.md).
 //
+// The signal goes to the pid alone. A server cria spawned is signalled by its
+// process group because cria made it a group leader; a foreign process carries
+// no such promise, and a group signal could miss it or reach someone else's.
+//
 // A pid that belongs to a live record is refused: that is a server cria started,
 // and stopping it by its entry is what removes its record too. Killing it here
 // would leave the record behind as a crash report for something the user asked

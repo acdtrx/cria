@@ -1,7 +1,9 @@
 package serve
 
 import (
+	"errors"
 	"fmt"
+	"syscall"
 	"time"
 )
 
@@ -13,8 +15,15 @@ import (
 // Stopping a server that has already exited is not a failure: it removes the
 // record, which is the state the caller asked for.
 //
+// Every signal goes to the server's process group, not its pid. cria spawned it
+// leading a session of its own, so the group is the server and everything it
+// started: a multi-process server's workers — vLLM's engine core, the router's
+// child servers — would otherwise outlive a SIGKILL holding their memory.
+// Whether the server is gone is still asked of its pid alone: that is the
+// process the record names.
+//
 // It ends the router as readily as an entry's server: the escalation is the
-// same signal at the same pid, and where the record to remove lives is the
+// same signal at the same group, and where the record to remove lives is the
 // record's own answer (recordPathOf).
 func (m *Manager) Stop(record Record) error {
 	return m.end(record, m.grace)
@@ -51,7 +60,7 @@ func (m *Manager) end(record Record, grace time.Duration) error {
 	}
 
 	if live && grace > 0 {
-		if err := m.host.Terminate(record.PID); err != nil {
+		if err := signalled(m.host.TerminateGroup(record.PID)); err != nil {
 			return err
 		}
 		gone, err := m.waitGone(record, grace)
@@ -62,7 +71,7 @@ func (m *Manager) end(record Record, grace time.Duration) error {
 	}
 
 	if live {
-		if err := m.host.Kill(record.PID); err != nil {
+		if err := signalled(m.host.KillGroup(record.PID)); err != nil {
 			return err
 		}
 		gone, err := m.waitGone(record, m.confirm)
@@ -77,6 +86,17 @@ func (m *Manager) end(record Record, grace time.Duration) error {
 		}
 	}
 	return removeRecordAt(m.recordPathOf(record))
+}
+
+// signalled judges a group signal's answer. ESRCH says no process is left in the
+// group — the server exited between the liveness check and the signal — which
+// is the outcome the signal was for, not a failure; the wait that follows
+// confirms it the same way it confirms any exit.
+func signalled(err error) error {
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return err
 }
 
 // waitGone watches one pid until it stops being the server the record names, or

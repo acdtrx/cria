@@ -143,8 +143,8 @@ func TestSystemIdentifiesARealProcess(t *testing.T) {
 		t.Errorf("working directory is %q (found %v), want %q", gotDir, found, wantDir)
 	}
 
-	if err := host.Terminate(pid); err != nil {
-		t.Fatalf("terminating pid %d: %v", pid, err)
+	if err := host.TerminateGroup(pid); err != nil {
+		t.Fatalf("terminating the group of pid %d: %v", pid, err)
 	}
 	// Reaped, not merely signalled: a child that has exited but not been waited
 	// for is still a row in `ps`.
@@ -180,6 +180,89 @@ func TestSystemKillsARealProcess(t *testing.T) {
 	}
 	if _, found, err := host.Identify(pid); err != nil || found {
 		t.Errorf("a killed pid identified as found=%v, err=%v; want a clean absence", found, err)
+	}
+}
+
+// A group signal reaches what the leader started, and a pid signal does not:
+// the difference between stopping a multi-process server whole and orphaning
+// its workers. The helper is a shell script that starts a child of its own and
+// names it, so the child's fate can be asked directly.
+func TestSystemSignalsTheGroupOrThePid(t *testing.T) {
+	if testing.Short() {
+		t.Skip("starts real processes")
+	}
+	cases := []struct {
+		name       string
+		signal     func(System, int) error
+		childLives bool
+	}{
+		{"a group kill ends the child too", System.KillGroup, false},
+		{"a group terminate ends the child too", System.TerminateGroup, false},
+		{"a pid kill leaves the child running", System.Kill, true},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			host := System{}
+			dir := t.TempDir()
+			childFile := filepath.Join(dir, "child")
+			script := filepath.Join(dir, "server")
+			body := "#!/bin/sh\nsleep 30 &\necho $! > " + childFile + "\nwait\n"
+			if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+				t.Fatalf("writing %s: %v", script, err)
+			}
+			helper := startHelper(t, script, dir)
+			child := waitChild(t, childFile)
+
+			if err := test.signal(host, helper.Process.Pid); err != nil {
+				t.Fatalf("signalling pid %d: %v", helper.Process.Pid, err)
+			}
+			_ = helper.Wait()
+
+			if lives := stillRunning(t, host, child); lives != test.childLives {
+				t.Errorf("the child at pid %d is running=%v, want %v", child, lives, test.childLives)
+			}
+		})
+	}
+}
+
+// waitChild reads the pid the helper script wrote once it started its child.
+// The script writes it within milliseconds; the loop is bounded by the helper's
+// own lifetime ceiling.
+func waitChild(t *testing.T, path string) int {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if raw, err := os.ReadFile(path); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil {
+				return pid
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the helper never named its child in %s", path)
+	return 0
+}
+
+// stillRunning reports whether a pid is still a running sleep after a short
+// settling window. A signalled child is reaped by whoever inherits it, not at
+// the instant of the signal, so absence is watched for rather than read once;
+// a row that no longer runs sleep — a zombie awaiting that reap — counts as
+// gone.
+func stillRunning(t *testing.T, host System, pid int) bool {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		identity, found, err := host.Identify(pid)
+		if err != nil {
+			t.Fatalf("identifying pid %d: %v", pid, err)
+		}
+		if !found || !strings.Contains(identity.Command, "sleep") || strings.Contains(identity.Command, "defunct") {
+			return false
+		}
+		if !time.Now().Before(deadline) {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -276,13 +359,23 @@ func TestSystemAttributesARealPort(t *testing.T) {
 }
 
 // kill(2) reads 0 as "my whole process group" and -1 as "everything this user
-// can signal". A pid that arrived wrong must never become either.
+// can signal". A pid that arrived wrong must never become either — and a group
+// signal to pgid 1 is that same -1.
 func TestSignalRefusesWhatIsNotAProcess(t *testing.T) {
 	host := System{}
+	if err := host.TerminateGroup(1); err == nil {
+		t.Error("TerminateGroup(1) was allowed")
+	}
+	if err := host.KillGroup(1); err == nil {
+		t.Error("KillGroup(1) was allowed")
+	}
 	for _, pid := range []int{0, -1, -12345} {
 		t.Run(strconv.Itoa(pid), func(t *testing.T) {
-			if err := host.Terminate(pid); err == nil {
-				t.Errorf("Terminate(%d) was allowed", pid)
+			if err := host.TerminateGroup(pid); err == nil {
+				t.Errorf("TerminateGroup(%d) was allowed", pid)
+			}
+			if err := host.KillGroup(pid); err == nil {
+				t.Errorf("KillGroup(%d) was allowed", pid)
 			}
 			if err := host.Kill(pid); err == nil {
 				t.Errorf("Kill(%d) was allowed", pid)

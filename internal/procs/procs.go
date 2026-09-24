@@ -111,9 +111,12 @@ type Host interface {
 	// Listeners names the pids listening on a TCP port, each one once. Empty
 	// means the port is free.
 	Listeners(port int) ([]int, error)
-	// Terminate asks a pid to stop (SIGTERM).
-	Terminate(pid int) error
-	// Kill ends a pid outright (SIGKILL).
+	// TerminateGroup asks a process group to stop (SIGTERM): the leader and
+	// everything it started that stayed in its group.
+	TerminateGroup(pgid int) error
+	// KillGroup ends a process group outright (SIGKILL).
+	KillGroup(pgid int) error
+	// Kill ends one pid outright (SIGKILL), and nothing it started.
 	Kill(pid int) error
 }
 
@@ -121,27 +124,46 @@ type Host interface {
 // delivered to a live pid. It holds nothing, so the zero value is the value.
 type System struct{}
 
-// Terminate asks a process to stop. What happens next — the grace period, the
-// escalation to Kill, when the record goes away — is serve's policy
-// (docs/specs/SERVE.md); this is only the signal.
-func (System) Terminate(pid int) error { return signal(pid, syscall.SIGTERM, "SIGTERM") }
+// TerminateGroup asks a process group to stop. What happens next — the grace
+// period, the escalation to KillGroup, when the record goes away — is serve's
+// policy (docs/specs/SERVE.md); this is only the signal.
+//
+// The group is named by its leader's pid: a server cria spawns leads its own
+// session, so its pgid is its pid, and the group is that server and every
+// process it started — vLLM's engine core, the router's child servers.
+func (System) TerminateGroup(pgid int) error { return signal(pgid, true, syscall.SIGTERM, "SIGTERM") }
 
-// Kill ends a process that did not answer SIGTERM.
-func (System) Kill(pid int) error { return signal(pid, syscall.SIGKILL, "SIGKILL") }
+// KillGroup ends a process group that did not answer SIGTERM.
+func (System) KillGroup(pgid int) error { return signal(pgid, true, syscall.SIGKILL, "SIGKILL") }
 
-// signal delivers one signal to one pid. A signal is a syscall, not an exec:
-// nothing is spawned here and nothing is parsed. The name is carried alongside
-// the number because a syscall.Signal prints as its description ("terminated"),
-// which does not read as the thing that was sent.
-func signal(pid int, number syscall.Signal, name string) error {
+// Kill ends one process and leaves its group alone. It is for a process cria
+// did not spawn, which cria cannot know leads a group: signalling -pid for a
+// process that is not a group leader would miss, or reach a group that is
+// someone else's.
+func (System) Kill(pid int) error { return signal(pid, false, syscall.SIGKILL, "SIGKILL") }
+
+// signal delivers one signal to one pid, or to the process group that pid
+// leads. A signal is a syscall, not an exec: nothing is spawned here and nothing
+// is parsed. The name is carried alongside the number because a syscall.Signal
+// prints as its description ("terminated"), which does not read as the thing
+// that was sent.
+//
+// A group with no process left in it fails with ESRCH exactly as a gone pid
+// does; the error wraps it, and judging it is the caller's.
+func signal(pid int, group bool, number syscall.Signal, name string) error {
 	// kill(2) reads 0 as "every process in my own process group" and -1 as
 	// "everything this user can signal", so a pid that arrived wrong has to be
 	// refused here — delivering it would take cria's own session down with it.
-	if pid < 1 {
-		return fmt.Errorf("refusing to send %s to pid %d: that is not a process", name, pid)
+	// A group signal is sent to -pid, so pid 1 would become that -1.
+	target, kind, floor := pid, "pid", 1
+	if group {
+		target, kind, floor = -pid, "process group", 2
 	}
-	if err := syscall.Kill(pid, number); err != nil {
-		return fmt.Errorf("sending %s to pid %d: %w", name, pid, err)
+	if pid < floor {
+		return fmt.Errorf("refusing to send %s to %s %d: that is not a process cria may signal", name, kind, pid)
+	}
+	if err := syscall.Kill(target, number); err != nil {
+		return fmt.Errorf("sending %s to %s %d: %w", name, kind, pid, err)
 	}
 	return nil
 }

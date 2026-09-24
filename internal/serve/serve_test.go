@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -45,7 +46,8 @@ type fakeHost struct {
 	dirs       map[int]string      // where each pid runs, for the pids a test placed one
 	listening  map[int][]int       // port → the pids holding it
 	statsAsked []int               // the pids Stats was called for, in order
-	sent       []string            // "TERM 42", "KILL 42", in the order they were sent
+	sent       []string            // "TERM group 42", "KILL group 42", "KILL 42", in the order they were sent
+	groupGone  bool                // a group signal finds no process left (ESRCH), as when the server exits just before it
 	dieOnTerm  bool                // the process exits when it is asked to
 	dieOnKill  bool                // ... and when it is killed
 	failWith   error               // Identify answers with this instead of the table
@@ -73,10 +75,29 @@ func (h *fakeHost) Identify(pid int) (procs.Identity, bool, error) {
 	return identity, found, nil
 }
 
-func (h *fakeHost) Terminate(pid int) error {
-	h.sent = append(h.sent, fmt.Sprintf("TERM %d", pid))
+// The group signals and the pid signal are recorded apart — "TERM group 42"
+// against "KILL 42" — so a test pins which one each stop or kill reaches for:
+// the group of a server cria spawned, the lone pid of a foreign holder.
+func (h *fakeHost) TerminateGroup(pgid int) error {
+	h.sent = append(h.sent, fmt.Sprintf("TERM group %d", pgid))
+	if h.groupGone {
+		delete(h.alive, pgid)
+		return fmt.Errorf("sending SIGTERM to process group %d: %w", pgid, syscall.ESRCH)
+	}
 	if h.dieOnTerm {
-		delete(h.alive, pid)
+		delete(h.alive, pgid)
+	}
+	return nil
+}
+
+func (h *fakeHost) KillGroup(pgid int) error {
+	h.sent = append(h.sent, fmt.Sprintf("KILL group %d", pgid))
+	if h.groupGone {
+		delete(h.alive, pgid)
+		return fmt.Errorf("sending SIGKILL to process group %d: %w", pgid, syscall.ESRCH)
+	}
+	if h.dieOnKill {
+		delete(h.alive, pgid)
 	}
 	return nil
 }
