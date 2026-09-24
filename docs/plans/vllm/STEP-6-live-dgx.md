@@ -68,8 +68,9 @@ Every command ran from a non-login `ssh dgx.local '~/cria-vllm-test …'`
 - [x] `cria stop` and the TUI kill each leave no `VLLM::EngineCore`; memory returns.
 - [x] `cria status` / TUI box track starting → running → stopped.
 - [x] A llama entry on dgx still starts and stops unchanged.
-- [ ] Plan end: suite green, branch rebased on main, ff-merged, worktree pruned,
-  release tagged so dgx can `cria update` — pushing the release waits on the user.
+- [x] Plan end: suite green, ff-merged (main needed no rebase), worktree pruned,
+  released as v0.10.0 (2026-09-24); dgx updated 0.9.0 → 0.10.0 and serves the
+  vLLM entry under cria.
 - Open for the user: retire `~/spark-setup/vllm.sh` / `manage.py`; the
   BACKENDS.md vLLM recipe has not been followed from an empty machine (dgx's
   venv predates it and gained the FlashInfer step by hand).

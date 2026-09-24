@@ -1,6 +1,6 @@
 # STEP 2 — stop signals the spawned server's process group
 
-Status: done (2026-09-24) — unit criteria met; live checks deferred (see Result)
+Status: done (2026-09-24) — all criteria met, live on the dev Mac and dgx
 
 ## Intent
 
@@ -38,8 +38,9 @@ children), and changes nothing for a single-process one.
 
 - [x] Unit: a stop of a spawned record signals the group (SIGTERM, then SIGKILL on
   grace expiry); a foreign-holder kill signals the pid; both pinned by tests.
-- [ ] Live on the dev Mac *when cleared*: llama entry and the router stop as before;
-  a router stop leaves no child llama-server behind.
+- [x] Live on the dev Mac (2026-09-24, cria 9d7b7e8, llama.cpp build 11146): the
+  router with `qwen38-27` loaded (child in the router's group) stopped in <1 s
+  leaving 0 group members; `lfm25-26b-q8` started green and stopped clean.
 - [x] Live on dgx (STEP-6, 2026-09-24): `cria stop` and the TUI `K` on a loaded vLLM
   left no `VLLM::EngineCore`; memory back to 118 GB available.
 - [x] Suite run and recorded.
