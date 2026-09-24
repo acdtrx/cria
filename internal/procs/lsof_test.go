@@ -2,11 +2,11 @@ package procs
 
 import "testing"
 
-// The outputs here are real `lsof -a -p PID -d cwd -F n` from macOS 26.6: one
-// field per line, the first byte naming the field. `lsof` emits the process (p)
-// and file-descriptor (f) fields whatever else is asked for, and the working
-// directory is the name that follows the cwd slot — not simply the first name in
-// the output.
+// The outputs here are real `lsof -a -p PID -d cwd -F fn`, from macOS 26.6
+// (lsof 4.91) and from Ubuntu on a DGX Spark (lsof 4.99.4): one field per line,
+// the first byte naming the field. The working directory is the name that
+// follows the cwd slot — not simply the first name in the output. The real probe
+// is exercised on the host the suite runs on by TestSystemIdentifiesARealProcess.
 func TestParseWorkingDir(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -14,6 +14,12 @@ func TestParseWorkingDir(t *testing.T) {
 		want   string
 		wantOK bool
 	}{
+		{
+			name:   "lsof-org 4.99 on linux",
+			out:    "p456347\nfcwd\nn/home/acdtrx\n",
+			want:   "/home/acdtrx",
+			wantOK: true,
+		},
 		{
 			name:   "a real answer",
 			out:    "p79831\nfcwd\nn/Users/acdtrx/projects/cria\n",

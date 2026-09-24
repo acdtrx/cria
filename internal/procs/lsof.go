@@ -13,10 +13,13 @@ const lsofProgram = "lsof"
 // columns for reading, and a file name in it can contain the very spaces that
 // would have to separate the columns (docs/TECH-STACK.md). In -F output every
 // line is one field: the first byte names the field, the rest is its value.
-// `lsof` always emits the process field (p) and the file-descriptor field (f)
-// whatever else is asked for, and a file's fields follow that file's f line —
-// which is what makes "the working directory of this process" and "the pid
-// holding this port" readable without guessing.
+// Every field read is asked for by name. macOS's `lsof` (4.91) adds the
+// file-descriptor field (f) to any selection, but lsof-org's (4.99, what linux
+// distributions ship) emits only the process field (p) and what was asked — a
+// working-directory probe that asks for names alone gets a name with no f line
+// ahead of it, and cannot tell the cwd slot from any other. A file's fields
+// follow that file's f line, which is what makes "the working directory of this
+// process" readable without guessing.
 const (
 	lsofFields    = "-F"
 	lsofAND       = "-a"  // AND the filters; without it `lsof` ORs them and answers about everything
@@ -41,7 +44,7 @@ const cwdFD = "cwd"
 //
 //	lsof -a -p PID -d cwd -F n
 func (System) WorkingDir(pid int) (string, bool, error) {
-	out, err := run(lsofProgram, lsofAND, lsofSelectPID, strconv.Itoa(pid), lsofSelectFD, cwdFD, lsofFields, string(lsofName))
+	out, err := run(lsofProgram, lsofAND, lsofSelectPID, strconv.Itoa(pid), lsofSelectFD, cwdFD, lsofFields, string(lsofFD)+string(lsofName))
 	if dir, ok := parseWorkingDir(out); ok {
 		return dir, true, nil
 	}
