@@ -452,10 +452,21 @@ size, through its OpenAI HTTP endpoint — a deliberate user action against a
 documented interface, uniform across backends by construction:
 
 - **Client-side measurement only.** Prefill = the server's own
-  `usage.prompt_tokens` over time-to-first-token; decode = streamed tokens over
-  the first-to-last-token window (the first token closes the prefill and is not
-  counted in decode). llama-server's proprietary `timings` field is never read —
+  `usage.prompt_tokens` over time-to-first-token; decode = the server's own
+  `usage.completion_tokens`, less the first token, over the first-to-last
+  content-chunk window (the first token closes the prefill and is not counted
+  in decode). llama-server's proprietary `timings` field is never read —
   asymmetric data would break the llama-vs-mlx comparison the bench exists for.
+- **Tokens are the server's count; chunks are only timestamps** (amended
+  2026-09-24, from a live failure). A streamed chunk is not a token: under
+  speculative decoding a server streams several accepted tokens per chunk —
+  vLLM 0.30.0 with MTP2 delivered a `max_tokens: 256` stream in 133 content
+  chunks with `usage.completion_tokens` 256. Counting chunks under-reported
+  decode ~2× and fired the ended-early note falsely. The first content chunk
+  is counted as exactly one token (a prefill produces one token; drafting
+  starts from it); every other token the server reports is in the decode
+  window, and the ended-early judgement reads the same count. A usage without
+  `completion_tokens` fails the run rather than falling back to chunks.
 - **Streaming facts, verified live (2026-08-19)**: `stream_options.include_usage`
   is always sent (mlx_lm.server reports usage only with it; llama-server always
   does); SSE comment lines are skipped (mlx emits `: keepalive` while

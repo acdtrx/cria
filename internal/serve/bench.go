@@ -209,10 +209,15 @@ func (s BenchSize) Measured() bool { return len(s.Runs) > 0 }
 // server reports having read over the wait for the first one it wrote. Decode
 // is the tokens after that first one over the window they arrived in — the
 // first token is not in the window, it is what ended the prefill.
+//
+// Both token counts are the server's; only the times are cria's. A streamed
+// chunk is when tokens arrived, not how many: under speculative decoding a
+// server streams several accepted tokens per chunk (vLLM with MTP2 delivered
+// 256 tokens in 133 chunks, measured 2026-09-24).
 type BenchRun struct {
 	PromptTokens int           // usage.prompt_tokens: the server is the tokenizer
 	CachedTokens int           // usage.prompt_tokens_details.cached_tokens: prefix the server did not have to read
-	GenTokens    int           // content chunks streamed back
+	GenTokens    int           // usage.completion_tokens: what the server says it wrote
 	TTFT         time.Duration // request sent → first content chunk
 	Decode       time.Duration // first content chunk → last
 	PrefillRate  float64       // prompt tokens per second
@@ -536,8 +541,9 @@ type benchChunk struct {
 		Text string `json:"text"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens int `json:"prompt_tokens"`
-		Details      struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		Details          struct {
 			CachedTokens int `json:"cached_tokens"`
 		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
@@ -607,8 +613,8 @@ func newHTTPBench() bencher {
 	}
 }
 
-// readBenchStream times one stream: when the first token arrived, when the last
-// one did, and what the server said it read.
+// readBenchStream times one stream: when the first content chunk arrived, when
+// the last one did, and what the server said it read and wrote.
 //
 // Every timestamp is taken the moment the line is off the socket, before the
 // chunk is parsed — the parse is cria's cost, not the server's.
@@ -616,6 +622,7 @@ func readBenchStream(body io.Reader, sent time.Time) (BenchRun, error) {
 	var (
 		run          BenchRun
 		first, last  time.Time
+		chunks       int
 		usageArrived bool
 	)
 
@@ -639,14 +646,15 @@ func readBenchStream(body io.Reader, sent time.Time) (BenchRun, error) {
 			return BenchRun{}, fmt.Errorf("streamed a chunk cria cannot read: %w", err)
 		}
 		if len(chunk.Choices) > 0 && chunk.Choices[0].Text != "" {
-			if run.GenTokens == 0 {
+			if chunks == 0 {
 				first = at
 			}
 			last = at
-			run.GenTokens++
+			chunks++
 		}
 		if chunk.Usage != nil {
 			run.PromptTokens = chunk.Usage.PromptTokens
+			run.GenTokens = chunk.Usage.CompletionTokens
 			run.CachedTokens = chunk.Usage.Details.CachedTokens
 			usageArrived = true
 		}
@@ -655,11 +663,14 @@ func readBenchStream(body io.Reader, sent time.Time) (BenchRun, error) {
 		return BenchRun{}, err
 	}
 
-	if run.GenTokens == 0 {
+	if chunks == 0 {
 		return BenchRun{}, errors.New("streamed no tokens at all")
 	}
 	if !usageArrived {
 		return BenchRun{}, errors.New("streamed no usage, so cria cannot tell how many tokens it read")
+	}
+	if run.GenTokens < 1 {
+		return BenchRun{}, errors.New("streamed text but a usage with no completion_tokens, so cria cannot tell how many tokens it wrote")
 	}
 
 	run.TTFT = first.Sub(sent)
@@ -674,6 +685,11 @@ func readBenchStream(body io.Reader, sent time.Time) (BenchRun, error) {
 // the end of the prefill, and counting it against the window it did not spend
 // would report a rate the model never ran at. A single token has no decode rate
 // for the same reason — there is no window yet.
+//
+// The first content chunk is taken to carry exactly one token, even when later
+// chunks carry several: a prefill produces one token, and speculative drafting
+// only starts from it, so what the first chunk holds is the prefill's single
+// token and every other token the server wrote belongs to the window.
 func benchRates(run BenchRun) BenchRun {
 	if run.TTFT > 0 {
 		run.PrefillRate = float64(run.PromptTokens) / run.TTFT.Seconds()

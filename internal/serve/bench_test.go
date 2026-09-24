@@ -25,6 +25,7 @@ type benchScript struct {
 	prefill   time.Duration // before the first token: what a TTFT measures
 	interval  time.Duration // between tokens: what a decode rate measures
 	tokens    int           // content chunks streamed
+	completed int           // usage.completion_tokens when chunks carry several tokens (speculative decoding); zero means one per chunk
 	prompt    int           // usage.prompt_tokens
 	tokenizer int           // chars per token: when set, usage.prompt_tokens is counted off the prompt instead
 	cached    int           // usage.prompt_tokens_details.cached_tokens
@@ -90,8 +91,12 @@ func (s benchScript) stream(w http.ResponseWriter) {
 		flush.Flush()
 	}
 
+	completed := s.tokens
+	if s.completed > 0 {
+		completed = s.completed
+	}
 	usage := fmt.Sprintf(`"usage":{"prompt_tokens":%d,"completion_tokens":%d,"prompt_tokens_details":{"cached_tokens":%d}}`,
-		s.prompt, s.tokens, s.cached)
+		s.prompt, completed, s.cached)
 	switch {
 	case s.noUsage:
 		io.WriteString(w, `data: {"choices":[{"text":"","index":0,"finish_reason":"length"}]}`+"\n\n")
@@ -239,6 +244,65 @@ func TestASizeWithoutUsageIsReportedRatherThanGuessed(t *testing.T) {
 	}
 	if !strings.Contains(result.Sizes[0].Err.Error(), "streamed no usage") {
 		t.Errorf("the failure reads %q, want it to name the usage that never arrived", result.Sizes[0].Err)
+	}
+}
+
+// Under speculative decoding a server streams several accepted tokens per
+// chunk (vLLM with MTP2 streamed 256 tokens in 133 chunks, 2026-09-24), so the
+// token count is the server's usage and chunks only say when tokens arrived.
+// The first chunk is the prefill's single token; every other token the server
+// wrote is in the decode window.
+func TestBenchCountsTokensFromUsageNotChunks(t *testing.T) {
+	listener := newBenchListener(t, benchScript{
+		prefill:   50 * time.Millisecond,
+		interval:  20 * time.Millisecond,
+		tokens:    10,
+		completed: 19,
+		prompt:    300,
+	})
+	manager, record := benchManager(t, listener, llamaEntry())
+
+	result := manager.Bench(record, BenchSpec{Sizes: []int{300}, Runs: 1, GenTokens: 19}, nil)
+	if result.Failed() {
+		t.Fatalf("the sweep reported %v, want a measurement", result.Sizes[0].Err)
+	}
+	size := result.Sizes[0]
+	run := size.Runs[0]
+
+	if run.GenTokens != 19 {
+		t.Errorf("the run counted %d generated tokens, want the 19 the server's usage reports rather than the 10 chunks", run.GenTokens)
+	}
+	if want := 18 / run.Decode.Seconds(); run.DecodeRate != want {
+		t.Errorf("the decode rate is %.3f, want the 18 tokens after the first over their window (%.3f)", run.DecodeRate, want)
+	}
+	// 18 tokens over a ~180ms window is ~100 t/s; counting chunks would say ~50.
+	if run.DecodeRate < 70 {
+		t.Errorf("the decode rate is %.1f t/s, want roughly 18 tokens over the ~180ms window", run.DecodeRate)
+	}
+	if size.EndedEarly(19) {
+		t.Errorf("a size whose server wrote every token asked for reports it ended early (%.0f of 19)", size.Mean.GenTokens)
+	}
+}
+
+// A usage that carries no completion_tokens leaves nothing to count the answer
+// by, and cria refuses to fall back to counting chunks.
+func TestASizeWithoutCompletionTokensIsReportedRatherThanGuessed(t *testing.T) {
+	listener := &benchListener{}
+	listener.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, `data: {"choices":[{"text":" token","index":0,"finish_reason":null}]}`+"\n\n")
+		io.WriteString(w, `data: {"choices":[{"text":"","index":0,"finish_reason":"length"}],"usage":{"prompt_tokens":100}}`+"\n\n")
+		io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(listener.Close)
+	manager, record := benchManager(t, listener, llamaEntry())
+
+	result := manager.Bench(record, oneSize(128, 1), nil)
+	if !result.Failed() {
+		t.Fatalf("a usage with no completion_tokens was reported as a measurement: %+v", result.Sizes[0])
+	}
+	if !strings.Contains(result.Sizes[0].Err.Error(), "completion_tokens") {
+		t.Errorf("the failure reads %q, want it to name the missing completion_tokens", result.Sizes[0].Err)
 	}
 }
 

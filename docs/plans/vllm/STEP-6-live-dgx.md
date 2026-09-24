@@ -64,3 +64,15 @@ script retires.
   30m download window is unchanged (`docs/specs/SERVE.md`, Start 4, amended
   2026-09-24). Re-run `start --wait` and `validate` on dgx with the rebuilt
   binary to clear it.
+- **2026-09-24 — bench counted chunks as tokens.** `cria bench` against vLLM
+  (MTP2) under-reported decode ~2× and printed "the model ended its answer
+  early (141 of 256 tokens)" on answers that ran the full length. Proof: a
+  `/v1/completions` stream with `max_tokens: 256` delivered 133 content chunks
+  while `usage.completion_tokens` was 256 — speculative decoding streams
+  several accepted tokens per chunk. Fix: the generated-token count is the
+  server's `usage.completion_tokens` (already requested via
+  `stream_options.include_usage`); chunks only timestamp TTFT and the decode
+  window, the first chunk counted as the prefill's one token
+  (`docs/specs/SERVE.md`, Benchmarking, amended 2026-09-24). Re-run `cria
+  bench` on dgx with the rebuilt binary to clear it; whether llama-server with
+  MTP or a draft model batches tokens per chunk too is unverified.
