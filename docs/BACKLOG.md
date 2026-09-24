@@ -38,6 +38,27 @@ Group entries under headings as themes emerge.
 
 ## Serve
 
+- **Memory for GPU servers on unified memory.** Status shows a server's RSS
+  (`ps`), which on the DGX Spark reads ~3.6 GiB for a vLLM holding ~85 GB: CUDA
+  allocations on unified memory belong to no process's RSS, and summing the
+  process group does not help (the engine core's RSS is ~3.7 GiB too). The
+  number is honest about what it measures and wrong about what a reader wants.
+  Candidates: `nvidia-smi --query-compute-apps` per pid (exec of a tool cria
+  does not drive today — CODING-RULES §7 bar), or labelling the column "RSS" on
+  hosts where it undercounts. (noted 2026-09-24, vllm STEP-6.) Revisit trigger:
+  deciding what fits on dgx from cria's numbers and getting it wrong.
+- **Does llama-server with MTP stream several tokens per chunk?** The bench now
+  counts tokens from `usage` (fixed 2026-09-24 for vLLM), so llama's numbers are
+  right either way; what is unverified is whether earlier llama MTP benchmarks
+  recorded outside cria's current build under-reported decode. Revisit trigger:
+  comparing a new llama MTP bench against one taken before 0.10.
+- **The router view's key bar omits `K`.** Stop and kill are global by design
+  (`docs/specs/TUI.md`), so `K` in the router view kills whatever server is
+  running — on dgx it killed a vLLM server from the router view — but that
+  view's bar does not draw it. Either draw the global server keys in every view
+  or make the bar say they are global. (noted 2026-09-24.) Revisit trigger:
+  the next time a key acts without being shown.
+
 - **Router-aware `cria validate`.** `cria validate <id>` proves an entry serves
   under the **llama** engine: it displaces whatever holds the entry's own port,
   starts that one entry, asks it for a completion and puts the displaced server
@@ -118,6 +139,12 @@ Group entries under headings as themes emerge.
 
 ## Cache view
 
+- **Label safetensors repos.** vLLM serves plain safetensors repos (NVFP4,
+  FP8, AWQ via `quantization_config`, or unquantized); the cache view calls
+  them "other". A format label (`safetensors`) beside `gguf`/`mlx` would say
+  what is on disk without claiming an engine — `repoKind` in
+  `internal/hubcache/walk.go`. (noted 2026-09-24, user: leave for now.)
+  Revisit trigger: a second vLLM model in the cache, or looking for one.
 - **`entriesUsing` matches declared repo/quant, not picks.** The cache view's
   "used by" attribution reads each entry's declared repo/quant; an entry whose
   repo or quant lives in choice options is not matched under those options'

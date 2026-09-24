@@ -1,6 +1,6 @@
 # STEP 6 — live on dgx: cria replaces vllm.sh
 
-Status: not started
+Status: done (2026-09-24) — every live check passed on dgx; plan-end steps below
 
 ## Intent
 
@@ -39,17 +39,40 @@ script retires.
 - `vllm.sh` / `manage.py` retirement is the user's act; this step proves it is
   safe and says what to delete.
 
+## Result (2026-09-24, dgx.local, branch builds up to 93786e6)
+
+Every command ran from a non-login `ssh dgx.local '~/cria-vllm-test …'`
+(`PATH` without nvcc or `~/.local/bin`). The tree gained
+`models/qwen38-27b-nvfp4.toml` (choices context 256k/128k, mtp 2/off) and
+`[tools] vllm`; no `engines/vllm.toml` was needed.
+
+- Foreign detection: with `vllm.sh`'s server on 11434, `cria start` refused,
+  naming its pid and full command line (the working directory read
+  "unreadable" — a linux lsof bug, fixed in 68fc4c8, see findings).
+- `start --wait`: green in 4m31s (warm caches); completion answered `323`.
+- `stop`: 0.46 s, record removed, no `VLLM::EngineCore`, memory back to 118 GB
+  available. TUI `K`: same result.
+- `validate`: displaced the running server, started, proved, stopped, restored
+  — exit 0.
+- `bench` (after the token-count fix): prefill 803 / 2722 / 2392 t/s and decode
+  16.3 / 16.1 / 16.0 t/s at 106 / 4114 / 16666 prompt tokens; no early-end notes.
+- `status` and the TUI box tracked starting → running → stopped throughout.
+- llama regression: `qwen38-27b` started green in 6 s, answered, stopped clean.
+- The run ends with vLLM serving under cria (pid 460322, context=256k mtp=2).
+
 ## Acceptance criteria
 
-- `cria start <id> --wait` green (cold-cache run optional, warm required); one
-  completion answers.
-- `cria validate <id>` passes and restores what held the port.
-- `cria bench` reports prefill/decode.
-- `cria stop` and the TUI kill each leave no `VLLM::EngineCore`; memory returns.
-- `cria status` / TUI box track starting → running → stopped.
-- A llama entry on dgx still starts and stops unchanged.
-- Plan end: suite green, branch rebased on main, ff-merged, worktree pruned,
-  release tagged so dgx can `cria update`.
+- [x] `cria start <id> --wait` green (warm); one completion answers.
+- [x] `cria validate <id>` passes and restores what held the port.
+- [x] `cria bench` reports prefill/decode.
+- [x] `cria stop` and the TUI kill each leave no `VLLM::EngineCore`; memory returns.
+- [x] `cria status` / TUI box track starting → running → stopped.
+- [x] A llama entry on dgx still starts and stops unchanged.
+- [ ] Plan end: suite green, branch rebased on main, ff-merged, worktree pruned,
+  release tagged so dgx can `cria update` — pushing the release waits on the user.
+- Open for the user: retire `~/spark-setup/vllm.sh` / `manage.py`; the
+  BACKENDS.md vLLM recipe has not been followed from an empty machine (dgx's
+  venv predates it and gained the FlashInfer step by hand).
 
 ## Live findings
 
@@ -76,3 +99,12 @@ script retires.
   (`docs/specs/SERVE.md`, Benchmarking, amended 2026-09-24). Re-run `cria
   bench` on dgx with the rebuilt binary to clear it; whether llama-server with
   MTP or a draft model batches tokens per chunk too is unverified.
+- **2026-09-24 — linux lsof never reported a working directory.** Every
+  foreign-server report on dgx said the directory was "unreadable". lsof-org
+  4.99 (linux) emits only `p` and the fields asked for, and the probe asked for
+  names alone, so no `fcwd` line preceded the name; macOS's lsof 4.91 adds `f`
+  unasked. Fix (68fc4c8): ask for `-F fn`; the procs suite passes on dgx.
+- **2026-09-24 — noted, not fixed** (backlog): vLLM's memory reads ~3.6 GiB in
+  status while ~85 GB is in use — GPU allocations on the Spark's unified memory
+  are in no process's RSS; the router view's key bar omits `K`, which acts
+  there because stop/kill are global by design.
