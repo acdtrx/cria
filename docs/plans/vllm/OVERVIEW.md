@@ -56,11 +56,18 @@ and bind this plan.
    program nor its kernels depend on how cria was launched. The table was
    acceptable to the user; it was dropped because nothing needs it.
 
+4. **Backend install guidance is a doc** (settled 2026-09-24, user):
+   `docs/BACKENDS.md`, visible on GitHub so people prepare a machine instead of
+   assuming cria makes backends work; cria's missing-tool fix lines point at
+   it. Rejected: a `cria --backends` command (see STEP-3).
+
 ## Scope
 
 - `internal/engine`: the vllm engine (program, model args, health, not lazy, no
   slots signal).
 - `internal/tools` + `config.toml [tools]`: `vllm` detection, presence-only.
+- `docs/BACKENDS.md`: install recipes for every tool cria drives, linked from
+  the README and from the tool check's missing-tool fix lines (ruling 4).
 - `internal/config`: `vllm` as a backend (schema examples, `cria docs`, `cria new`).
 - `internal/procs` + `internal/serve`: stop signals the spawned server's process
   group.
@@ -103,7 +110,8 @@ and bind this plan.
 **Phase 2 — the engine** (steps 2–4).
 
 - STEP-2 — stop signals the process group of servers cria spawned. SERVE.md Stop.
-- STEP-3 — `vllm` in the tool check and `[tools]`. TOOLS.md, CONFIG.md.
+- STEP-3 — `vllm` in the tool check and `[tools]`; `docs/BACKENDS.md` and the
+  fix lines that link it. TOOLS.md, CONFIG.md, README.
 - STEP-4 — the vllm engine and backend: engine, schema, `cria docs`, `cria new`,
   TUI color. CONFIG.md, SERVE.md.
   Phase end: suite green, committed.
