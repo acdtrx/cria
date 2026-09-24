@@ -3,7 +3,8 @@
 *A cría is a baby llama: something you raise, feed, and keep track of.*
 
 cria is a single-binary TUI that manages local LLM serving on one host: it starts,
-watches and stops llama.cpp's `llama-server` and mlx-lm's `mlx_lm.server`, and it
+watches and stops llama.cpp's `llama-server`, mlx-lm's `mlx_lm.server` and vLLM's
+`vllm`, and it
 manages the models they serve — downloads, quant-by-quant disk usage, and the cache
 surgery the `hf` CLI cannot do. It succeeds llama-runner (a Node webapp with the same
 goal) and inherits exactly one lesson from it: stay simple, and parse nothing you
@@ -12,13 +13,13 @@ don't own.
 ## Principles
 
 1. **Manage the tools you already have; never replace them.** The host provides
-   `llama-server`, `mlx_lm.server` and `hf`; cria orchestrates them. No bundled
+   `llama-server`, `mlx_lm.server`, `vllm` and `hf`; cria orchestrates them. No bundled
    runtimes, no private model registry, no downloader of its own. A missing tool
    disables its features and is reported — nothing gets installed.
 2. **The Hugging Face cache is the single source of truth** (settled 2026-08-18).
    Every model on disk lives in the HF hub cache, and servers launch **by Hub
    reference** (`-hf org/repo:QUANT` for llama-server, `--model org/repo` for
-   mlx_lm.server), fetching anything missing into that same cache themselves — cria
+   mlx_lm.server and `vllm serve`), fetching anything missing into that same cache themselves — cria
    moves no model bytes of its own, so an agent can write a model + profile and the
    first start does the rest. This relies on 2026+ llama.cpp, which stores `-hf`
    downloads in the standard hub cache (older builds kept a private
@@ -84,7 +85,7 @@ don't own.
 - **Lifecycle subcommands** — `cria start`, `cria stop`, `cria status` (with
   `--json`) alongside the TUI, sharing the same lifecycle layer (settled 2026-08-18:
   agent validation of freshly written entries is the use case).
-- **Foreign servers** — `llama-server` / `mlx_lm.server` processes cria didn't start
+- **Foreign servers** — `llama-server` / `mlx_lm.server` / `vllm` processes cria didn't start
   are detected and shown with pid, command line and working directory, with an
   offered kill (settled 2026-08-18) — the forgotten-terminal case, and the answer to
   "who is holding my port".
@@ -94,7 +95,7 @@ don't own.
   writes the same schema-rendered example `cria docs` prints (create-only, never
   overwrites) and opens the editor on it (reinstated 2026-08-18: the backlog's
   revisit trigger — a human onboarding models without an agent — fired).
-- **Tool check** — on start, report which of `hf` / `llama-server` / `mlx_lm.server`
+- **Tool check** — on start, report which of `hf` / `llama-server` / `mlx_lm.server` / `vllm`
   are present, which features their absence disables, and whether `llama-server` is
   recent enough to share the hub cache.
 

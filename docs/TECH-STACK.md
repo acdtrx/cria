@@ -84,14 +84,19 @@ cria orchestrates tools the host already has; it installs nothing.
   check must flag). Status via its documented HTTP endpoints, never its log format.
 - **`mlx_lm.server`** (mlx-lm) — MLX serving, Apple silicon only, launched with
   `--model org/repo`; fetches via huggingface_hub into the same cache.
+- **`vllm`** (vLLM) — safetensors serving on NVIDIA GPU hosts, launched as
+  `vllm serve --model org/repo`; fetches via huggingface_hub into the same cache.
+  Its install must carry FlashInfer's prebuilt kernels so it runs without `nvcc`
+  on `PATH` (settled 2026-09-24, `docs/BACKENDS.md`).
 - **`ps` / `lsof`** (settled 2026-08-18) — foreign-process detection: finding
-  `llama-server` / `mlx_lm.server` processes cria didn't start, and attributing a
+  `llama-server` / `mlx_lm.server` / `vllm` processes cria didn't start, and attributing a
   busy port (pid, command line, working directory, offered kill). Both ship with
   macOS; exec'd with explicit field selectors (`ps -o ...`, `lsof -F`), never
   parsing the human-format tables. macOS has no `/proc`, so exec is the only
   cgo-free route (CODING-RULES §7 bar: confirmed 2026-08-18).
 - Each found on `PATH`, overridable in `config.toml`. Missing tools degrade features
-  and are reported; `mlx_lm.server` absent on Linux is normal, not an error.
+  and are reported; `mlx_lm.server` absent on Linux, or `vllm` on a Mac, is normal,
+  not an error.
 
 ## HTTP
 
