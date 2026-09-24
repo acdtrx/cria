@@ -40,7 +40,8 @@ children), and changes nothing for a single-process one.
   grace expiry); a foreign-holder kill signals the pid; both pinned by tests.
 - [ ] Live on the dev Mac *when cleared*: llama entry and the router stop as before;
   a router stop leaves no child llama-server behind.
-- [ ] Live on dgx (STEP-6): kill during a loaded vLLM leaves no `VLLM::EngineCore`.
+- [x] Live on dgx (STEP-6, 2026-09-24): `cria stop` and the TUI `K` on a loaded vLLM
+  left no `VLLM::EngineCore`; memory back to 118 GB available.
 - [x] Suite run and recorded.
 
 ## Result
