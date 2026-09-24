@@ -103,7 +103,7 @@ func TestRecordsAreValidatedLoudly(t *testing.T) {
 		},
 		{
 			name:    "a backend cria cannot launch",
-			content: strings.Replace(validRecord, `"backend": "llama"`, `"backend": "vllm"`, 1),
+			content: strings.Replace(validRecord, `"backend": "llama"`, `"backend": "sglang"`, 1),
 			want:    "backend",
 		},
 		{

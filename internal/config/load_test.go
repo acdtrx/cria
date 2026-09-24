@@ -360,11 +360,11 @@ func TestAnEngineFileRefusesAnotherEnginesKeys(t *testing.T) {
 // after nothing cria serves is somebody's note, not a config it silently obeys.
 func TestOnlyTheEnginesOwnFilesAreRead(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		settingsFile:         "default_port = 8080\n",
-		"engines/vllm.toml":  "nonsense = true\n",
-		"engines/README.md":  "# what this machine serves each engine with\n",
-		"engines/llama.toml": "args = [\"-ngl\", \"99\"]\n",
-		"models/one.toml":    "backend = \"llama\"\nrepo = \"org/one\"\n",
+		settingsFile:          "default_port = 8080\n",
+		"engines/sglang.toml": "nonsense = true\n",
+		"engines/README.md":   "# what this machine serves each engine with\n",
+		"engines/llama.toml":  "args = [\"-ngl\", \"99\"]\n",
+		"models/one.toml":     "backend = \"llama\"\nrepo = \"org/one\"\n",
 	})
 
 	tree, err := Load(root)

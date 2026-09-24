@@ -14,6 +14,7 @@ import (
 const (
 	llamaFlag  = "--llama"
 	mlxFlag    = "--mlx"
+	vllmFlag   = "--vllm"
 	routerFlag = "--router"
 )
 

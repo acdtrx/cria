@@ -203,7 +203,7 @@ history-narrating comment you meet up to this rule.
   cria only creates the root + `AGENTS.md`) and runtime state in `~/.local/state/cria/` (pidfiles,
   server state records, server logs). The Hugging Face cache is **managed, not owned** —
   cria mutates it only through deliberate cache operations, never as a side effect.
-- The host provides the tools (`llama-server`, `mlx_lm.server`, `hf`); cria detects and
+- The host provides the tools (`llama-server`, `mlx_lm.server`, `vllm`, `hf`); cria detects and
   reports what is missing, and never installs anything.
 
 ## Feature-Building Mode (No Backwards Compatibility) `[PROJECT]`
@@ -230,7 +230,7 @@ Replace this section with a migration policy when the project graduates.
 > Generic principles belong in `docs/CODING-RULES.md`, not here.
 
 - **Exec is the product** (CODING-RULES §7, applied): cria's job is driving external
-  binaries — `hf`, `llama-server`, `mlx_lm.server`. Shelling out to *these managed
+  binaries — `hf`, `llama-server`, `mlx_lm.server`, `vllm`. Shelling out to *these managed
   tools* is the design and needs no per-case justification; any other CLI dependency
   still meets the §7 bar (prefer native/API access, confirm first).
 - **Never parse server logs for data** (settled 2026-08-18). llama-runner, this

@@ -80,7 +80,7 @@ failure states.
   sizes (filesystem observation; when the Hub API is unreachable, bytes show
   without a total). The server does the fetching; cria only watches the cache.
 - `running` — the backend's documented health signal is green: llama-server's
-  `/health`; for a backend without a health endpoint, a successful response from
+  and vLLM's `/health`; for a backend without a health endpoint, a successful response from
   a documented endpoint (`/v1/models`).
 - `unhealthy` — process alive but the health signal is red or the port stopped
   answering.
@@ -119,7 +119,9 @@ failure states.
    was loading fine); a pid that dies during the wait ends it silently — the
    box shows exited, the log is the evidence. The TUI fires the same warm in
    the background after an mlx start. llama loads at startup and is never
-   warmed; which backends load lazily is their engine's own answer. A no-wait start
+   warmed; nor is vLLM, which binds its port only once its engine has loaded
+   (probed 2026-09-24), so its green is already loaded. Which backends load
+   lazily is their engine's own answer. A no-wait start
    cannot carry the request and says so in a note.
 
 ## Stop
@@ -296,10 +298,12 @@ table: it asks the router, which publishes one row per model it holds
 
 ## Foreign servers (settled 2026-08-18)
 
-- Any `llama-server` or `mlx_lm.server` process without a matching live record is
-  foreign: shown with pid, command line and working directory, with an offered
-  kill — the forgotten-terminal case. Detection is `ps` with explicit field
-  selectors (`docs/TECH-STACK.md`); a busy port is attributed with `lsof`.
+- Any `llama-server`, `mlx_lm.server` or `vllm` process without a matching live
+  record is foreign (a script-installed server counts under its interpreter, the
+  script's path in argv[1] — how `vllm serve` shows): shown with pid, command
+  line and working directory, with an offered kill — the forgotten-terminal
+  case. Detection is `ps` with explicit field selectors (`docs/TECH-STACK.md`); a
+  busy port is attributed with `lsof`.
 
 ## `cria status`
 
@@ -374,7 +378,8 @@ nobody holds means nothing to displace and nothing to restore — start, prove, 
   idle keep-alive socket to that port, so a connection count refuses on the
   caller's ghost.
 - **Unverifiable is a third answer, never a cautious idle.** A backend that
-  publishes no such signal is not asked at all (mlx_lm.server documents none); a
+  publishes no such signal is not asked at all (mlx_lm.server documents none, and
+  vLLM publishes no per-slot endpoint); a
   llama server whose `/slots` is unreachable, refuses, or answers something that is
   not a slot listing — an empty listing included — is unverifiable too. That case
   warns, naming what could not be checked and what a swap would cost, and proceeds:

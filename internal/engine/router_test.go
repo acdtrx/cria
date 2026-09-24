@@ -101,7 +101,7 @@ func TestOnlyTheEntriesTheRoutersProgramServesCanBeIncluded(t *testing.T) {
 	if err := RouterServes(config.BackendRouter); err == nil {
 		t.Error("the router was accepted as one of its own models")
 	}
-	if err := RouterServes("vllm"); err == nil {
+	if err := RouterServes("sglang"); err == nil {
 		t.Error("a backend cria has no engine for was accepted into the router")
 	}
 }

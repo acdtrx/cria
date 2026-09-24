@@ -43,9 +43,9 @@ carries the reality.
 
 | key       | type     | rules                                                                    |
 | --------- | -------- | ------------------------------------------------------------------------ |
-| `backend` | string   | required; `"llama"` or `"mlx"`                                            |
+| `backend` | string   | required; `"llama"`, `"mlx"` or `"vllm"`                                  |
 | `repo`    | string   | required; Hugging Face repo id (`org/name`)                               |
-| `quant`   | string   | llama only (error on mlx); omitted → the server picks the repo's default  |
+| `quant`   | string   | llama only (error on mlx and vllm); omitted → the server picks the repo's default |
 | `port`    | integer  | optional when `config.toml` sets `default_port`, required otherwise       |
 | `host`    | string   | optional; bind address, default `0.0.0.0` (via `config.toml` `default_host` if set) |
 | `name`    | string   | optional display name; defaults to the id                                 |
@@ -82,15 +82,30 @@ group with its dashes stripped, derived where the preset is composed.
 - **A list may pass one flag twice.** It is a command line, and llama takes
   repeated flags (`--override-kv`); within one list there is no more specific side
   to prefer, so the list stands as written.
-- cria composes the model-reference, port and host flags itself (`-hf repo[:quant]` /
-  `--model repo`, `--port N`, `--host A`); `args` restating a cria-owned flag
+- cria composes the model-reference, port and host flags itself (`-hf repo[:quant]`
+  for llama, `--model repo` for mlx, `serve --model repo` for vllm, `--port N`,
+  `--host A`); `args` restating a cria-owned flag
   (`-hf`, `--model`, `--host`, `--port`, in either the separate-value or
   `--flag=value` spelling) is a loud error, never a silent override. Which flag
   carries a backend's model reference is declared in the schema beside the backend
   set; the engine passes it, and `internal/engine`'s test holds the two together.
+- **vLLM's model reference is `serve --model <repo>`** (settled 2026-09-24):
+  `vllm serve` takes the model positionally or as `--model` (both in 0.30.0's
+  `--help=all`); cria composes the flag, so vllm has a model flag args may not
+  restate like every other backend. A stray positional token in args is not
+  specially refused — args are verbatim, and vLLM rejects a second model itself.
+  A vLLM quantization (FP8, NVFP4, AWQ…) is its own repo, so `quant` is refused
+  on a vllm entry, as on mlx. `--served-model-name` is left to the entry: vLLM's
+  default is the repo, which is what cria's completion probes send.
+- **Revision pinning stays in args** (settled 2026-09-24): `--revision <sha>` is
+  passthrough like every server flag. Cache presence and download progress
+  follow the repo's `main` — a pinned revision that differs is a known, accepted
+  imprecision. So is a repo that ships more than the server fetches (vLLM loads
+  safetensors, not a repo's other formats): presence counts what is on disk,
+  and the Hub total counts the whole repo.
 - The bind default is `0.0.0.0` (settled 2026-08-18): servers are reachable from the
-  rest of the LAN out of the box — both backends default to loopback on their own,
-  so cria always passes the flag. A host that should stay private sets
+  rest of the LAN out of the box — the servers' own defaults differ (llama-server
+  and mlx_lm.server bind loopback), so cria always passes the flag. A host that should stay private sets
   `default_host = "127.0.0.1"` or a per-entry `host`. cria probes health on
   loopback when the bind is `0.0.0.0`, on the bound address otherwise.
 - Display follows the same rule: the TUI shows the files' own `args`, one flag
@@ -125,7 +140,7 @@ next to the options, where fit measurements already live.
 | `[[choice]]` `name`          | string   | required; unique within the entry; id charset                 |
 | `[[choice.option]]` `name`   | string   | required; unique within its choice; id charset                |
 | `[[choice.option]]` `quant`  | string   | optional; replaces the entry's `quant`; llama entries only    |
-| `[[choice.option]]` `repo`   | string   | optional; replaces the entry's `repo` (an MLX quant is its own repo) |
+| `[[choice.option]]` `repo`   | string   | optional; replaces the entry's `repo` (an MLX or vLLM quant is its own repo) |
 | `[[choice.option]]` `args`   | string[] | optional; merged over the entry's args when the option is picked |
 
 - A choice needs at least one option, and the **first option is the config
@@ -189,10 +204,10 @@ there rather than repeated in fifteen profiles.
 | `router_args` | string[] | router only; the router process's own flags, verbatim                |
 
 - One file per engine, named after it (`engines/llama.toml`, `engines/mlx.toml`,
-  `engines/router.toml`). Both the directory and every file in it are optional: an
+  `engines/vllm.toml`, `engines/router.toml`). Both the directory and every file in it are optional: an
   engine with no file serves entries with what they declare themselves.
 - **An engine is not always a backend an entry may declare** (settled 2026-08-31).
-  `llama` and `mlx` run one server per entry, and an entry names one of them in its
+  `llama`, `mlx` and `vllm` run one server per entry, and an entry names one of them in its
   `backend` key. The router runs **one server for the host** that serves the models
   included in it — ordinary entries — so no entry declares it: `backend = "router"`
   is refused, naming the backends that do serve an entry, and `cria new --router`
@@ -276,7 +291,7 @@ on the same port (settled 2026-08-18, `docs/cria.md`, v1 surface).
   2026-08-31): which engines the tree may configure, which of them a file may
   declare as its backend, which keys each of them takes, the value each key carries
   in that engine's example, and the flag cria composes that engine's models under
-  (`-hf`, `--model`, `--models-preset`) — the flag no args list may restate. A key states one example that holds
+  (`-hf`, `--model` — mlx and vllm share it —, `--models-preset`) — the flag no args list may restate. A key states one example that holds
   under every backend or one per backend — never one backend's value standing in
   for another's, which would hand an agent a repo the backend it names cannot
   serve. `cria docs` walks that set, so a backend cria serves is a backend the

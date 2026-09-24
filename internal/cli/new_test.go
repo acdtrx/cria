@@ -64,7 +64,8 @@ func TestNewWritesTheBackendsExample(t *testing.T) {
 	}{
 		{name: "llama is what a bare invocation takes", args: []string{"qwen"}, backend: config.BackendLlama},
 		{name: "--llama says the same thing out loud", args: []string{"qwen", llamaFlag}, backend: config.BackendLlama},
-		{name: "--mlx takes the other backend", args: []string{"qwen", mlxFlag}, backend: config.BackendMLX},
+		{name: "--mlx takes the mlx backend", args: []string{"qwen", mlxFlag}, backend: config.BackendMLX},
+		{name: "--vllm takes the vllm backend", args: []string{"qwen", vllmFlag}, backend: config.BackendVLLM},
 	}
 
 	for _, test := range cases {
@@ -85,7 +86,7 @@ func TestNewWritesTheBackendsExample(t *testing.T) {
 			}
 
 			// quant is the key one backend alone takes, so it is the visible
-			// difference between the two templates.
+			// difference between llama's template and the others'.
 			hasQuant := strings.Contains(read(t, path), "quant = ")
 			if hasQuant != (test.backend == config.BackendLlama) {
 				t.Errorf("the %q file %s a quant key", test.backend, map[bool]string{true: "holds", false: "lacks"}[hasQuant])
@@ -292,7 +293,7 @@ func TestNewRefusesWhatItCannotRoute(t *testing.T) {
 			if code := app.newEntry(test.args); code != exitUsage {
 				t.Errorf("exit code %d, want %d", code, exitUsage)
 			}
-			for _, want := range []string{test.contains, "usage: cria new <id> [--llama|--mlx]"} {
+			for _, want := range []string{test.contains, "usage: cria new <id> [--llama|--mlx|--vllm]"} {
 				if !strings.Contains(errOut.String(), want) {
 					t.Errorf("cria printed %q, want it to contain %q", errOut, want)
 				}

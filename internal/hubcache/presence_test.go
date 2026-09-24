@@ -140,6 +140,50 @@ func TestPresenceOfAnMLXEntry(t *testing.T) {
 	}
 }
 
+// A vLLM quantization is its own repo too (FP8, NVFP4, AWQ…), so a vllm entry is
+// presence-checked the way an mlx one is: the whole repo, whole or not, is the
+// entry's model. The cache tags such a repo "other" — the kind is the cache
+// view's, and it is the engine's rule that decides presence.
+func TestPresenceOfAVLLMEntryCountsTheWholeRepo(t *testing.T) {
+	tree := newCacheTree(t)
+	tree.repo("models--Qwen--Qwen3-30B-A3B-FP8").
+		snapshot("revision-one",
+			cachedFile{name: "config.json", text: upstreamConfig},
+			cachedFile{name: "model-00001-of-00002.safetensors", size: 3000},
+			cachedFile{name: "model-00002-of-00002.safetensors", size: 3000},
+			cachedFile{name: "tokenizer.json", size: 100}).
+		main("revision-one")
+	tree.repo("models--nvidia--Qwen3-30B-A3B-FP4").
+		snapshot("revision-one",
+			cachedFile{name: "config.json", text: upstreamConfig},
+			cachedFile{name: "model-00001-of-00002.safetensors", size: 3000}).
+		partial("eeee.incomplete", 1200).
+		main("revision-one")
+
+	cache := read(t, tree.Root)
+
+	tests := []struct {
+		name       string
+		repo       string
+		wantCached bool
+	}{
+		{name: "the whole repo is on disk", repo: "Qwen/Qwen3-30B-A3B-FP8", wantCached: true},
+		{name: "one of two shards, and one still downloading", repo: "nvidia/Qwen3-30B-A3B-FP4"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			presence := cache.Presence(config.Entry{Backend: config.BackendVLLM, Repo: test.repo})
+			if presence.Cached != test.wantCached {
+				t.Errorf("cached is %v, want %v", presence.Cached, test.wantCached)
+			}
+			if want := repoOf(t, cache, test.repo).Bytes; presence.Bytes != want {
+				t.Errorf("presence reports %d bytes, want the repo's %d", presence.Bytes, want)
+			}
+		})
+	}
+}
+
 // A provider who republishes a quant leaves the copy on disk whole while the new
 // one lands beside it, so nothing about presence says a download is running. What
 // says it is the unfinished blob's own name: the hash the Hub publishes for that

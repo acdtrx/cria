@@ -88,7 +88,13 @@ func TestEveryEnginesModelFlagIsTheFlagTheTreeRefuses(t *testing.T) {
 			if !perEntry {
 				t.Fatalf("the engine composes %v for one entry, but no entry may declare it", args)
 			}
-			if flag, refused := args[0], config.ModelFlag(engine.ID()); flag != refused {
+			// The model reference closes the head, under the flag right before it;
+			// anything ahead of that flag is the program's own subcommand (vllm
+			// serve), which names no model.
+			if len(args) < 2 || args[len(args)-1] != launch.Repo && !strings.HasPrefix(args[len(args)-1], launch.Repo+":") {
+				t.Fatalf("the engine composes %v, want the head to end with the model reference", args)
+			}
+			if flag, refused := args[len(args)-2], config.ModelFlag(engine.ID()); flag != refused {
 				t.Errorf("the engine composes %q while the tree refuses %q; args may set %q and win the command line",
 					flag, refused, flag)
 			}
@@ -118,7 +124,7 @@ func TestTheRouterServesFromThePresetTheTreeRefuses(t *testing.T) {
 // inheriting llama's endpoints and warm rule would show up as a server that
 // simply never comes up, with nothing on screen to say why.
 func TestABackendWithNoEngineIsRefused(t *testing.T) {
-	for _, backend := range []config.Backend{"vllm", "", "LLAMA"} {
+	for _, backend := range []config.Backend{"sglang", "", "LLAMA"} {
 		engine, err := For(backend)
 		if err == nil {
 			t.Fatalf("backend %q was answered by the %q engine", backend, engine.ID())

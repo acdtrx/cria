@@ -32,7 +32,7 @@ func backendFlags() []string {
 	return flags
 }
 
-// newEntry runs `cria new <id> [--llama|--mlx]`: it creates the entry file and
+// newEntry runs `cria new <id> [--llama|--mlx|--vllm]`: it creates the entry file and
 // opens it in the user's editor — the two steps of adding a model, in one
 // command.
 //

@@ -45,7 +45,9 @@ type Engine interface {
 	// ModelArgs spells the model one launch serves the way this engine's server
 	// takes it. It is the head of a command line: the flags cria owns and the
 	// args the launch composed are appended by the caller, which is what keeps
-	// that tail one composition for every engine.
+	// that tail one composition for every engine. The head ends with the model
+	// under the engine's model flag (config.ModelFlag); a program that serves
+	// through a subcommand opens it with that (vllm serve).
 	//
 	// An engine whose one server serves every model included in it names nothing
 	// here: no entry is on its command line, and no entry may declare it
@@ -80,7 +82,7 @@ type Engine interface {
 
 // engines is every engine cria has, in the order docs/specs/TOOLS.md presents
 // the backends.
-var engines = []Engine{llama{}, mlx{}, router{}}
+var engines = []Engine{llama{}, mlx{}, vllm{}, router{}}
 
 // For answers which engine serves one backend.
 //

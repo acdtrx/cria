@@ -303,6 +303,14 @@ func TestIsManagedServer(t *testing.T) {
 			want:    true,
 		},
 		{
+			// vllm is a console script: the kernel runs the venv's python with
+			// the script's path as argv[1], and `vllm serve` keeps that shape
+			// in the process table (dgx.local, vLLM 0.30.0).
+			name:    "vllm serve through its interpreter",
+			command: "/home/acdtrx/vllm/.venv/bin/python3 /home/acdtrx/vllm/.venv/bin/vllm serve --model Qwen/Qwen3-30B-A3B-FP8 --host 0.0.0.0 --port 8000",
+			want:    true,
+		},
+		{
 			name:    "a server installed as a shell script",
 			command: "/bin/sh /usr/local/bin/mlx_lm.server --model org/repo",
 			want:    true,

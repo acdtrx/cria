@@ -471,6 +471,35 @@ func TestIdentityCaptureAsksOnceWhenTheFirstAnswerNamesTheProgram(t *testing.T) 
 	}
 }
 
+// vllm is a console script, so the process table shows it under the venv's
+// interpreter with the script's path in argv[1] — the whole composed line after
+// the interpreter. That names the program cria launched, and the capture takes
+// it on the first look rather than waiting out the window for an argv that
+// leads with it.
+func TestIdentityCaptureNamesAVLLMServerUnderItsInterpreter(t *testing.T) {
+	entry := config.Entry{
+		ID: "qwen-vllm", Path: "/home/u/.config/cria/models/qwen-vllm.toml",
+		Backend: config.BackendVLLM, Repo: "Qwen/Qwen3-30B-A3B-FP8", Host: "0.0.0.0", Port: 8000,
+	}
+	underInterpreter := identityOf("/usr/local/venv/bin/python3 " +
+		strings.Join(composedFor(t, entry, config.DefaultSelection(entry)), " "))
+	host := &fakeHost{alive: map[int]procs.Identity{4242: underInterpreter}}
+	manager := newManager(t, host)
+	spawner := &fakeSpawner{pid: 4242}
+	manager.spawn = spawner.launch
+
+	record, err := manager.Start(entry, nil, usableReport())
+	if err != nil {
+		t.Fatalf("starting: %v", err)
+	}
+	if record.Identity != underInterpreter {
+		t.Errorf("the record carries %+v, want the interpreter-run identity %+v", record.Identity, underInterpreter)
+	}
+	if looks := host.identifies[4242]; looks != 1 {
+		t.Errorf("the capture took %d looks at the process table, want 1", looks)
+	}
+}
+
 // A pid that goes while cria is still waiting for it to settle ends the wait
 // there: the server failed on its first breath, and the record takes no identity
 // — which is the truth about it.

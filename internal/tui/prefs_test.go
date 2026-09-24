@@ -120,7 +120,7 @@ func TestBrokenPrefsResetLoudly(t *testing.T) {
 		{name: "not JSON at all", file: "backend = llama\n", contains: "unreadable"},
 		{name: "a key cria does not know", file: `{"backend":"llama","theme":"dark"}`, contains: "theme"},
 		{name: "a field of the wrong type", file: `{"backend":42}`, contains: "unreadable"},
-		{name: "a backend cria cannot launch", file: `{"backend":"vllm"}`, contains: `backend is "vllm"`},
+		{name: "a backend cria cannot launch", file: `{"backend":"sglang"}`, contains: `backend is "sglang"`},
 		{name: "two documents in one file", file: `{"backend":"llama"}{"backend":"mlx"}`, contains: "more than one JSON document"},
 		{name: "a group with no name", file: `{"backend":"llama","groups":[{"name":"","entries":[]}]}`, contains: "no name"},
 		{name: "two groups of the same name", file: `{"backend":"llama","groups":[{"name":"daily","entries":[]},{"name":"daily","entries":[]}]}`, contains: `two groups are named "daily"`},

@@ -32,6 +32,7 @@ const (
 	amberHex  = "#fab387" // starting, notices, sizes, and the llama backend (Peach)
 	redHex    = "#f38ba8" // unhealthy, exited, and anything cria could not do (Red)
 	blueHex   = "#89b4fa" // the labels of a detail pane, and the mlx backend (Blue)
+	skyHex    = "#89dceb" // the vllm backend (Sky)
 	pinkHex   = "#f5c2e7" // the router engine (Pink)
 	keyHex    = "#eba0ac" // the keys themselves, in the bar (Maroon)
 
@@ -112,6 +113,7 @@ var palette = []swatch{
 	{name: "amber", hex: amberHex, on: terminalBG, floor: textFloor},
 	{name: "red", hex: redHex, on: terminalBG, floor: textFloor},
 	{name: "blue", hex: blueHex, on: terminalBG, floor: textFloor},
+	{name: "sky", hex: skyHex, on: terminalBG, floor: textFloor},
 	{name: "pink", hex: pinkHex, on: terminalBG, floor: textFloor},
 	{name: "key", hex: keyHex, on: terminalBG, floor: textFloor},
 	{name: "heading", hex: headingHex, on: terminalBG, floor: textFloor},
@@ -140,6 +142,7 @@ var (
 	amber       = lipgloss.Color(amberHex)
 	red         = lipgloss.Color(redHex)
 	blue        = lipgloss.Color(blueHex)
+	sky         = lipgloss.Color(skyHex)
 	pink        = lipgloss.Color(pinkHex)
 	keyRed      = lipgloss.Color(keyHex)
 	heading     = lipgloss.Color(headingHex)
@@ -381,9 +384,12 @@ func (p rowPaint) fill(line string, width int) string {
 // and more violet than the maroon the key bar is drawn in and than the red a
 // failure takes, so the one place a backend word is read — a title, a detail
 // pane's backend row — cannot be mistaken for either.
+// vllm's sky is the cyan beside mlx's blue rather than green, which would read
+// as a running server's phase.
 var backendTones = map[config.Backend]color.Color{
 	config.BackendLlama:  amber,
 	config.BackendMLX:    blue,
+	config.BackendVLLM:   sky,
 	config.BackendRouter: pink,
 }
 

@@ -16,7 +16,7 @@ the command line to `cli`, passing `tui.Run` as the program bare `cria` opens.
 | `internal/config` | the config tree, its schema, the schema's own documentation, and how an args list pairs into flag groups (`specs/CONFIG.md`) | `Load(root)`, `FlagGroups(args)` | — |
 | `internal/format` | how a size, a duration and a Hub reference are spelled | `Bytes`, `HubReference`, … | — |
 | `internal/tools` | which managed programs the host has and what each one's state disables (`specs/TOOLS.md`) | `Check(settings)` | `config` |
-| `internal/engine` | what cria knows about each way of serving — llama, mlx and the router: the program, the model reference, the endpoints, the warm and slot rules, and the router's preset composition (`specs/SERVE.md`) | `For(backend)`, `All()`, `RouterPreset` | `config`, `tools` |
+| `internal/engine` | what cria knows about each way of serving — llama, mlx, vllm and the router: the program, the model reference, the endpoints, the warm and slot rules, and the router's preset composition (`specs/SERVE.md`) | `For(backend)`, `All()`, `RouterPreset` | `config`, `tools` |
 | `internal/procs` | every `ps`/`lsof` exec and every signal cria sends (`specs/SERVE.md`) | `System{}` (a `Host`) | `engine`, `tools` |
 | `internal/picks` | what has been chosen: the option picked on each entry's axes, and which entries the router holds and under what (`specs/CONFIG.md`) | `Load`/`Save`, `LoadRouter`/`SaveRouter` | `config` |
 | `internal/hubcache` | the cache walk, true blob-deduped sizes, entry presence, and the delete plans (`specs/CACHE.md`) | `Read(root)`, `Plan*`/`Execute` | `config`, `engine` |
@@ -244,5 +244,5 @@ The cache location is resolved the way `huggingface_hub` resolves it
 exactly the tree the tools write. The other two trees are fixed paths on both
 platforms.
 
-The host provides `llama-server`, `mlx_lm.server` and `hf`. cria detects them,
+The host provides `llama-server`, `mlx_lm.server`, `vllm` and `hf`. cria detects them,
 reports what a missing or unfit one disables, and installs nothing.

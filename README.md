@@ -3,9 +3,9 @@
 *A cría is a baby llama: something you raise, feed, and keep track of.*
 
 cria is a single-binary TUI for serving local LLMs on one machine. It starts,
-watches and stops llama.cpp's `llama-server` and mlx-lm's `mlx_lm.server`, driven
-by a plain TOML config tree meant to be written by humans and coding agents
-alike — and it shows the Hugging Face cache as it really is on disk, down to
+watches and stops llama.cpp's `llama-server`, mlx-lm's `mlx_lm.server` and
+vLLM's `vllm serve`, driven by a plain TOML config tree meant to be written by
+humans and coding agents alike — and it shows the Hugging Face cache as it really is on disk, down to
 deleting a single quant from a multi-quant GGUF repo, which nothing else does.
 
 No daemon: servers are spawned detached and outlive the TUI; closing it stops

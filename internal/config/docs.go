@@ -70,10 +70,21 @@ const (
 // It is wrapped and indented here rather than left to the bullet it follows: the
 // list grows with the engines, and a line of the page may not run off the edge
 // whatever cria comes to compose.
+//
+// A flag two engines compose is named once, with both engines after it: the
+// page lists what args may not restate, and a flag listed twice reads as two.
 func composedFlagsNote() string {
-	named := make([]string, 0, len(engines)+2)
+	var flags []string
+	owners := map[string][]string{}
 	for _, engine := range engines {
-		named = append(named, fmt.Sprintf("%s (%s)", engine.modelFlag, engine.id))
+		if _, seen := owners[engine.modelFlag]; !seen {
+			flags = append(flags, engine.modelFlag)
+		}
+		owners[engine.modelFlag] = append(owners[engine.modelFlag], string(engine.id))
+	}
+	named := make([]string, 0, len(flags)+2)
+	for _, flag := range flags {
+		named = append(named, fmt.Sprintf("%s (%s)", flag, strings.Join(owners[flag], ", ")))
 	}
 	joined := strings.Join(append(named, "--host", "--port"), ", ")
 
@@ -113,8 +124,8 @@ ENTRY KEYS — models/<id>.toml
 ENGINE KEYS — engines/<engine>.toml
 
 %s
-  An entry names the engine that serves it — "llama" or "mlx", one server per
-  entry. The router is an engine no entry declares: one llama-server per host,
+  An entry names the engine that serves it — "llama", "mlx" or "vllm", one server
+  per entry. The router is an engine no entry declares: one llama-server per host,
   serving many models behind one port, so engines/router.toml is the whole of its
   configuration. Its args are what every model it serves starts from, and its own
   flags — how many models may be resident, and the rest — go in router_args.

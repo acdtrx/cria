@@ -64,6 +64,23 @@ func TestComposedCommand(t *testing.T) {
 			},
 		},
 		{
+			name: "vllm serves a repo through its serve subcommand, the repo already the quantization",
+			entry: config.Entry{
+				ID: "qwen-vllm", Backend: config.BackendVLLM,
+				Repo: "Qwen/Qwen3-30B-A3B-FP8", Host: "0.0.0.0", Port: 8000,
+				Args:       []string{"--max-model-len", "32768"},
+				EngineArgs: []string{"--gpu-memory-utilization", "0.85"},
+			},
+			want: []string{
+				"/usr/local/bin/vllm",
+				"serve", "--model", "Qwen/Qwen3-30B-A3B-FP8",
+				"--host", "0.0.0.0",
+				"--port", "8000",
+				"--gpu-memory-utilization", "0.85",
+				"--max-model-len", "32768",
+			},
+		},
+		{
 			name:      "an entry with axes composes the picked options after its own args",
 			entry:     choicesEntry(),
 			selection: config.Selection{"quant": "q6", "context": "long"},

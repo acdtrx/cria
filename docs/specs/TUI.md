@@ -287,7 +287,8 @@ keybinds get detailed as they are built.
   the selection band (amended 2026-08-21: Surface0, picked from the browser
   proposal, read as barely-there on the real terminal — dim red and heading
   ride lit variants on the brighter band), Teal as the carry band, Mauve as
-  the picked chip (amended 2026-08-23) — every pair still answering to the AA
+  the picked chip (amended 2026-08-23), Sky as the vllm backend (amended
+  2026-09-24: Green would read as a running phase, Peach is llama's) — every pair still answering to the AA
   test on the black ground.
 
 ## Open

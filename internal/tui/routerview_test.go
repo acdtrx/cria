@@ -120,10 +120,11 @@ func TestTheEngineToggleReachesTheRoutersOwnView(t *testing.T) {
 	world.tree = choicesTree()
 	frame = load(t, frame)
 
-	frame, _ = press(t, frame, tea.KeyPressMsg{Code: tea.KeyTab})
-	frame, _ = press(t, frame, tea.KeyPressMsg{Code: tea.KeyTab})
+	for range 3 {
+		frame, _ = press(t, frame, tea.KeyPressMsg{Code: tea.KeyTab})
+	}
 	if frame.prefs.Backend != config.BackendRouter {
-		t.Fatalf("two presses left the toggle on %q, want the router", frame.prefs.Backend)
+		t.Fatalf("three presses left the toggle on %q, want the router", frame.prefs.Backend)
 	}
 
 	frame = frame.observed(frame.refresh().(snapshotMsg))

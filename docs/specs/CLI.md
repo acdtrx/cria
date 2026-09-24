@@ -65,11 +65,11 @@ its subsystem.
   Validate, owns the protocol, the port scoping, the busy gate and the four exit
   codes; `--ignore-busy` is the only override and it lifts the busy gate alone.
 - `cria docs` — prints the config schema and full examples; `docs/specs/CONFIG.md`.
-- `cria new <id> [--llama|--mlx]` (settled 2026-08-18, reinstated from the
+- `cria new <id> [--llama|--mlx|--vllm]` (settled 2026-08-18, reinstated from the
   backlog) — scaffolds `models/<id>.toml` from the schema-rendered example
   (create-only; an existing file refuses toward `cria edit`), opens the editor
   on it, and reports the file's verdict when the editor closes — valid names
-  the start command, broken names the key and the fix. The two backend flags
+  the start command, broken names the key and the fix. The backend flags
   are peers; bare defaults to llama.
 - `cria list [--paths]` (settled 2026-08-18) — one aligned line per entry (id,
   backend, repo:quant, port; `--paths` appends the entry's file — how an agent
@@ -112,7 +112,7 @@ its subsystem.
 Nothing else: no cache operations from the CLI (`docs/BACKLOG.md`).
 
 Flags: `--wait` on start, `--json` on status and bench, `--ignore-busy` on
-validate and `router unload`, `--paths` on list, `--llama`/`--mlx` on new,
+validate and `router unload`, `--paths` on list, `--llama`/`--mlx`/`--vllm` on new,
 `--sizes`/`--runs`/`--gen` on bench, `--version` and `--help` on the bare binary — nothing else takes options,
 and nothing outside `--json` speaks machine. `cria new` takes one flag per backend
 an *entry* may declare (settled 2026-08-31): `--router` scaffolds nothing, and is

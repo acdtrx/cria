@@ -529,6 +529,10 @@ func TestBackendToggleIsWrittenDown(t *testing.T) {
 	}
 
 	frame, _ = press(t, frame, tea.KeyPressMsg{Code: tea.KeyTab})
+	if frame.prefs.Backend != config.BackendVLLM {
+		t.Errorf("the toggle left the backend at %q, want %q", frame.prefs.Backend, config.BackendVLLM)
+	}
+	frame, _ = press(t, frame, tea.KeyPressMsg{Code: tea.KeyTab})
 	if frame.prefs.Backend != config.BackendRouter {
 		t.Errorf("the toggle left the backend at %q, want %q", frame.prefs.Backend, config.BackendRouter)
 	}

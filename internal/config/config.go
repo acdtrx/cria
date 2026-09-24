@@ -23,6 +23,7 @@ type Backend string
 const (
 	BackendLlama  Backend = "llama"
 	BackendMLX    Backend = "mlx"
+	BackendVLLM   Backend = "vllm"
 	BackendRouter Backend = "router"
 )
 
@@ -64,6 +65,7 @@ type engineFacts struct {
 var engines = []engineFacts{
 	{id: BackendLlama, modelFlag: "-hf", perEntry: true},
 	{id: BackendMLX, modelFlag: "--model", perEntry: true},
+	{id: BackendVLLM, modelFlag: "--model", perEntry: true},
 	{id: BackendRouter, modelFlag: "--models-preset"},
 }
 

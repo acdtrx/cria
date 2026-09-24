@@ -103,7 +103,7 @@ func TestEveryKeyExamplesEveryBackend(t *testing.T) {
 // `cria new` writes is a launchable flat entry, and uncommenting the block is all
 // it takes to start varying the entry.
 func TestDocsExamplesCarryTheAxisCommentedOut(t *testing.T) {
-	for _, backend := range []Backend{BackendLlama, BackendMLX} {
+	for _, backend := range Backends() {
 		t.Run(string(backend), func(t *testing.T) {
 			example := ExampleEntry(backend)
 			for _, k := range entrySchema {
@@ -211,12 +211,9 @@ func TestDocsFollowsTheDefinitions(t *testing.T) {
 // The examples are copied into real trees, so they must load as real trees: what
 // the page prints is written to a config tree and read back through the loader.
 func TestDocsExamplesLoadAsAConfigTree(t *testing.T) {
-	files := map[string]string{
-		settingsFile: exampleSettings(),
-		path.Join(entriesDir, "llama-example.toml"): ExampleEntry(BackendLlama),
-		path.Join(entriesDir, "mlx-example.toml"):   ExampleEntry(BackendMLX),
-	}
+	files := map[string]string{settingsFile: exampleSettings()}
 	for _, backend := range Backends() {
+		files[path.Join(entriesDir, string(backend)+"-example.toml")] = ExampleEntry(backend)
 		files[path.Join(enginesDir, string(backend)+tomlExt)] = exampleEngine(backend)
 	}
 	root := writeTree(t, files)
@@ -231,21 +228,19 @@ func TestDocsExamplesLoadAsAConfigTree(t *testing.T) {
 		}
 		t.FailNow()
 	}
-	if len(tree.Entries) != 2 {
-		t.Fatalf("the examples loaded as %d entries, want 2", len(tree.Entries))
+	if len(tree.Entries) != len(Backends()) {
+		t.Fatalf("the examples loaded as %d entries, want one per backend: %d", len(tree.Entries), len(Backends()))
 	}
 
-	llama, mlx := tree.Entries[0], tree.Entries[1]
-	if llama.Backend != BackendLlama || mlx.Backend != BackendMLX {
-		t.Fatalf("entries loaded as backends %q and %q, want %q and %q", llama.Backend, mlx.Backend, BackendLlama, BackendMLX)
-	}
-	if llama.Quant == "" {
-		t.Errorf("the llama example resolved without a quant; it is the key that backend alone takes")
-	}
-	if mlx.Quant != "" {
-		t.Errorf("the mlx example resolved with quant %q, a key that backend does not take", mlx.Quant)
-	}
 	for _, entry := range tree.Entries {
+		if entry.ID != string(entry.Backend)+"-example" {
+			t.Errorf("the %s example loaded as backend %q", entry.ID, entry.Backend)
+		}
+		// quant is the key llama alone takes; every other backend's quantization
+		// is its own repo.
+		if takesQuant := entry.Backend == BackendLlama; takesQuant != (entry.Quant != "") {
+			t.Errorf("the %s example resolved with quant %q", entry.ID, entry.Quant)
+		}
 		if entry.Repo == "" || entry.Port == 0 || entry.Host == "" || entry.Name == "" || len(entry.Args) == 0 {
 			t.Errorf("the %s example resolved incompletely: %+v", entry.ID, entry)
 		}
@@ -262,22 +257,25 @@ func TestDocsExamplesLoadAsAConfigTree(t *testing.T) {
 // to the shared one would hand an agent a repo the backend it names cannot
 // serve, and the two examples reading alike is how that shows.
 func TestEachBackendsExampleTeachesItsOwnModel(t *testing.T) {
-	root := writeTree(t, map[string]string{
-		path.Join(entriesDir, "llama-example.toml"): ExampleEntry(BackendLlama),
-		path.Join(entriesDir, "mlx-example.toml"):   ExampleEntry(BackendMLX),
-	})
-
-	tree, err := Load(root)
+	files := map[string]string{}
+	for _, backend := range Backends() {
+		files[path.Join(entriesDir, string(backend)+"-example.toml")] = ExampleEntry(backend)
+	}
+	tree, err := Load(writeTree(t, files))
 	if err != nil {
 		t.Fatalf("loading the examples: %v", err)
 	}
-	if len(tree.Entries) != 2 {
-		t.Fatalf("the examples loaded as %d entries, want 2", len(tree.Entries))
+	if len(tree.Entries) != len(Backends()) {
+		t.Fatalf("the examples loaded as %d entries, want one per backend: %d", len(tree.Entries), len(Backends()))
 	}
 
-	llama, mlx := tree.Entries[0], tree.Entries[1]
-	if llama.Repo == mlx.Repo {
-		t.Errorf("both examples name the repo %q; each backend's example teaches a model that backend can serve", llama.Repo)
+	taught := map[string]Backend{}
+	for _, entry := range tree.Entries {
+		if other, taken := taught[entry.Repo]; taken {
+			t.Errorf("the %q and %q examples both name the repo %q; each backend's example teaches a model that backend can serve",
+				other, entry.Backend, entry.Repo)
+		}
+		taught[entry.Repo] = entry.Backend
 	}
 }
 

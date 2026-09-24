@@ -139,8 +139,8 @@ var entrySchema = schema{
 		name:     "backend",
 		kind:     kindString,
 		required: true,
-		rules:    `the server program to run: "llama" (llama-server) or "mlx" (mlx_lm.server)`,
-		examples: map[Backend]string{BackendLlama: `"llama"`, BackendMLX: `"mlx"`},
+		rules:    `the server program to run: "llama" (llama-server), "mlx" (mlx_lm.server) or "vllm" (vllm serve)`,
+		examples: map[Backend]string{BackendLlama: `"llama"`, BackendMLX: `"mlx"`, BackendVLLM: `"vllm"`},
 		check:    checkBackend,
 	},
 	{
@@ -151,6 +151,7 @@ var entrySchema = schema{
 		examples: map[Backend]string{
 			BackendLlama: `"unsloth/Qwen3-30B-A3B-GGUF"`,
 			BackendMLX:   `"mlx-community/Qwen3-30B-A3B-4bit"`,
+			BackendVLLM:  `"Qwen/Qwen3-30B-A3B-FP8"`,
 		},
 		check: checkRepo,
 	},
@@ -158,7 +159,7 @@ var entrySchema = schema{
 		name:         "quant",
 		kind:         kindString,
 		onlyBackends: []Backend{BackendLlama},
-		rules:        "the quantization to serve, spelled exactly as the repo's files name it, UD- prefix and all; omit it and the server picks the repo's default (an mlx quantization is its own repo)",
+		rules:        "the quantization to serve, spelled exactly as the repo's files name it, UD- prefix and all; omit it and the server picks the repo's default (an mlx or vllm quantization is its own repo)",
 		example:      `"UD-Q4_K_XL"`,
 		check:        checkNonEmpty,
 	},
@@ -183,6 +184,7 @@ var entrySchema = schema{
 		examples: map[Backend]string{
 			BackendLlama: `"Qwen3 30B A3B"`,
 			BackendMLX:   `"Qwen3 30B A3B (MLX 4bit)"`,
+			BackendVLLM:  `"Qwen3 30B A3B (vLLM FP8)"`,
 		},
 		check: checkNonEmpty,
 	},
@@ -193,6 +195,7 @@ var entrySchema = schema{
 		examples: map[Backend]string{
 			BackendLlama: `["--ctx-size", "16384", "--jinja"]`,
 			BackendMLX:   `["--max-tokens", "32768"]`,
+			BackendVLLM:  `["--max-model-len", "32768", "--reasoning-parser", "qwen3"]`,
 		},
 		check: checkArgs,
 	},
@@ -237,7 +240,7 @@ var choiceOptionSchema = schema{
 		kind:     kindString,
 		required: true,
 		rules:    "the pick's name, unique within its choice; spelled like an entry id",
-		examples: map[Backend]string{BackendLlama: `"q4"`, BackendMLX: `"4bit"`},
+		examples: map[Backend]string{BackendLlama: `"q4"`, BackendMLX: `"4bit"`, BackendVLLM: `"fp8"`},
 		check:    checkName,
 	},
 	{
@@ -251,10 +254,11 @@ var choiceOptionSchema = schema{
 	{
 		name:  "repo",
 		kind:  kindString,
-		rules: "replaces the entry's repo when this option is picked (an mlx quantization is its own repo); only one choice's options may set it",
+		rules: "replaces the entry's repo when this option is picked (an mlx or vllm quantization is its own repo); only one choice's options may set it",
 		examples: map[Backend]string{
 			BackendLlama: `"unsloth/Qwen3-30B-A3B-128K-GGUF"`,
 			BackendMLX:   `"mlx-community/Qwen3-30B-A3B-8bit"`,
+			BackendVLLM:  `"Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"`,
 		},
 		check: checkRepo,
 	},
@@ -265,6 +269,7 @@ var choiceOptionSchema = schema{
 		examples: map[Backend]string{
 			BackendLlama: `["--n-cpu-moe", "24"]`,
 			BackendMLX:   `["--temp", "0.7"]`,
+			BackendVLLM:  `["--max-num-seqs", "4"]`,
 		},
 		check: checkArgs,
 	},
@@ -301,6 +306,7 @@ var engineSchema = schema{
 		examples: map[Backend]string{
 			BackendLlama:  `["-ngl", "99", "-fa", "on"]`,
 			BackendMLX:    `["--log-level", "INFO"]`,
+			BackendVLLM:   `["--gpu-memory-utilization", "0.85"]`,
 			BackendRouter: `["-ngl", "99", "-fa", "on"]`,
 		},
 		check: checkArgs,
@@ -378,7 +384,9 @@ var treeSchema = schema{
 func composedFlags() []string {
 	flags := make([]string, 0, len(engines)+2)
 	for _, engine := range engines {
-		flags = append(flags, engine.modelFlag)
+		if !slices.Contains(flags, engine.modelFlag) {
+			flags = append(flags, engine.modelFlag)
+		}
 	}
 	return append(flags, "--host", "--port")
 }

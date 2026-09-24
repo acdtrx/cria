@@ -27,7 +27,8 @@ SUBCOMMANDS
   validate <id> [picks]        prove the entry serves: swap it in, ask it for a completion, swap back
   bench [<id>] [flags]         measure a running server: prefill and decode tokens/second
   list [--paths]               the entries the config tree declares
-  new <id> [--llama|--mlx]     scaffold an entry file and open your editor on it
+  new <id> [--llama|--mlx|--vllm]
+                               scaffold an entry file and open your editor on it
   edit <id>                    open an entry's file in $VISUAL, else $EDITOR
   docs                         print the config schema and a complete example of every file
   wired-limit <MB>             generate the launchd plist that pins iogpu.wired_limit_mb
@@ -44,6 +45,7 @@ FLAGS
   --paths        list: add each entry's file path
   --llama        new: scaffold a llama entry — the backend a bare cria new takes
   --mlx          new: scaffold an mlx entry
+  --vllm         new: scaffold a vllm entry
   --version      print the version of this binary
   --help, -h     this page
 

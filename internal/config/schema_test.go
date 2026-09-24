@@ -43,6 +43,18 @@ func TestEntryRulesAccept(t *testing.T) {
 			},
 		},
 		{
+			name:  "minimal vllm entry",
+			entry: "backend = \"vllm\"\nrepo = \"Qwen/Qwen3-30B-A3B-FP8\"\nport = 8000\n",
+			want: Entry{
+				ID:      "demo",
+				Backend: BackendVLLM,
+				Repo:    "Qwen/Qwen3-30B-A3B-FP8",
+				Port:    8000,
+				Host:    "0.0.0.0",
+				Name:    "demo",
+			},
+		},
+		{
 			name:  "quant is allowed on llama",
 			entry: "backend = \"llama\"\nrepo = \"unsloth/Qwen3-30B-A3B-GGUF\"\nquant = \"Q4_K_M\"\nport = 8080\n",
 			want: Entry{
@@ -333,8 +345,8 @@ func TestEntryRulesReject(t *testing.T) {
 			wantKey: "backend",
 		},
 		{
-			name:    "backend must be one of the two servers",
-			entry:   "backend = \"vllm\"\nrepo = \"org/name\"\nport = 8080\n",
+			name:    "backend must be one of the servers cria has",
+			entry:   "backend = \"sglang\"\nrepo = \"org/name\"\nport = 8080\n",
 			wantKey: "backend",
 		},
 		{
@@ -365,6 +377,11 @@ func TestEntryRulesReject(t *testing.T) {
 		{
 			name:    "quant belongs to llama only",
 			entry:   "backend = \"mlx\"\nrepo = \"org/name\"\nquant = \"Q4_K_M\"\nport = 8080\n",
+			wantKey: "quant",
+		},
+		{
+			name:    "quant is refused on vllm, whose quantization is its repo",
+			entry:   "backend = \"vllm\"\nrepo = \"org/name\"\nquant = \"FP8\"\nport = 8080\n",
 			wantKey: "quant",
 		},
 		{
@@ -420,6 +437,11 @@ func TestEntryRulesReject(t *testing.T) {
 		{
 			name:    "args may not restate --model",
 			entry:   "backend = \"mlx\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--model\", \"other/repo\"]\n",
+			wantKey: "args",
+		},
+		{
+			name:    "args may not name a second model on vllm",
+			entry:   "backend = \"vllm\"\nrepo = \"org/name\"\nport = 8080\nargs = [\"--model\", \"other/repo\"]\n",
 			wantKey: "args",
 		},
 		{
@@ -859,7 +881,7 @@ func TestAnEntryMayNotDeclareTheRouter(t *testing.T) {
 	if err == nil {
 		t.Fatal("an entry declaring backend = \"router\" was accepted")
 	}
-	for _, want := range []string{`"router"`, `"llama"`, `"mlx"`} {
+	for _, want := range []string{`"router"`, `"llama"`, `"mlx"`, `"vllm"`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal reads %v, want it to name %s", err, want)
 		}
