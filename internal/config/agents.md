@@ -40,8 +40,8 @@ learn the schema from this page.
   and clients address it by its entry id.
 - Take parameters from the model provider's own recommendation and note the source
   in a comment.
-- Tree-wide settings live in `config.toml`: `default_port`, `default_host`, and
-  absolute paths to the tools.
+- Tree-wide settings live in `config.toml`: `default_port`, `default_host`,
+  `logs_kept`, and absolute paths to the tools.
 
 ## Validate what you wrote
 

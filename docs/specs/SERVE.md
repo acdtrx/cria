@@ -153,9 +153,16 @@ failure states.
 ## Logs
 
 - One log file per launch: `~/.local/state/cria/logs/<entry-id>-<timestamp>.log`.
-  At each launch, older logs of the same entry are pruned to the newest three —
-  retention by count, no rotation machinery. Logs are displayed as a raw tail and
-  never parsed (`docs/cria.md`, principle 6).
+  At each launch, older logs of the same entry are pruned to the newest
+  `logs_kept` (`config.toml`, default 3) — retention by count, no rotation
+  machinery. Logs are displayed as a raw tail and never parsed (`docs/cria.md`,
+  principle 6).
+- **The count is tree-wide and settable** (settled 2026-10-11): one `logs_kept`
+  in `config.toml` governs every entry and the router. Three is too few when a
+  model is swapped out and back several times in one sitting — the log of the run
+  before the swaps, still under analysis, gets pruned. The minimum is 1: the
+  launch being made always keeps its own log. Rejected for now: a per-entry
+  override — nothing has asked for one.
 
 ## The router (settled 2026-08-31)
 
@@ -173,7 +180,7 @@ models it holds is asked through the router's documented API (STEP-8).
 - **Engine-scoped state lives in a subfolder per engine** (settled 2026-08-31,
   OVERVIEW ruling 2): `~/.local/state/cria/engines/router/` holds `preset.ini`
   (the composed preset), `server.json` (the record) and `logs/router-<stamp>.log`
-  (the newest three, the same retention entries get). Entry records and logs stay
+  (the newest `logs_kept`, the same retention entries get). Entry records and logs stay
   where they are — an entry's server is still an entry's — so nothing moves and
   nothing needs cleaning up. The router's logs live under its own folder rather
   than beside the entries' so an entry named `router` can neither prune them nor

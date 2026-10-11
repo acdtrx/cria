@@ -27,6 +27,9 @@ const (
 	// config.toml names one: servers are reachable from the LAN out of the box
 	// (docs/specs/CONFIG.md).
 	defaultBindHost = "0.0.0.0"
+	// defaultLogsKept is how many launch logs an entry, and the router, keep when
+	// config.toml sets no logs_kept (docs/specs/SERVE.md).
+	defaultLogsKept = 3
 )
 
 // Load reads the whole config tree under root. A broken entry file disables only
@@ -97,6 +100,7 @@ func loadSettings(path string) (Settings, error) {
 
 	settings.DefaultPort = optInt(table, "default_port")
 	settings.DefaultHost = optString(table, "default_host")
+	settings.LogsKept = optInt(table, "logs_kept")
 	if tools, ok := table["tools"].(map[string]any); ok {
 		settings.Tools = Tools{
 			LlamaServer: optString(tools, "llama_server"),
@@ -163,6 +167,7 @@ func loadEngines(root string, settings Settings) (map[Backend][]string, RouterCo
 	if router.Host == "" {
 		router.Host = defaultBindHost
 	}
+	router.LogsKept = settings.logsKept()
 	return args, router, nil
 }
 
@@ -245,6 +250,7 @@ func resolveEntry(id, path string, table map[string]any, settings Settings, engi
 	if entry.Host == "" {
 		entry.Host = defaultBindHost
 	}
+	entry.LogsKept = settings.logsKept()
 
 	if entry.Name == "" {
 		entry.Name = id

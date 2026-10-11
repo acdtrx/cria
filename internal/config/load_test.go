@@ -313,6 +313,46 @@ func TestTheRouterBindsLikeAnEntry(t *testing.T) {
 	}
 }
 
+// Log retention is tree-wide: every entry and the router keep what config.toml's
+// logs_kept says, else the default (docs/specs/SERVE.md, Logs).
+func TestLogsKeptResolvesFromSettings(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings string
+		want     int
+	}{
+		{name: "the default when config.toml sets none", want: defaultLogsKept},
+		{name: "config.toml's own count", settings: "logs_kept = 7\n", want: 7},
+		{name: "one keeps only the current launch's log", settings: "logs_kept = 1\n", want: 1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			files := map[string]string{
+				"models/one.toml":     "backend = \"llama\"\nrepo = \"org/one\"\nport = 8080\n",
+				"engines/router.toml": "port = 11434\n",
+			}
+			if test.settings != "" {
+				files[settingsFile] = test.settings
+			}
+
+			tree, err := Load(writeTree(t, files))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if len(tree.Entries) != 1 {
+				t.Fatalf("loaded %d entries, want 1 (broken: %v)", len(tree.Entries), tree.Broken)
+			}
+			if got := tree.Entries[0].LogsKept; got != test.want {
+				t.Errorf("the entry keeps %d logs, want %d", got, test.want)
+			}
+			if got := tree.Router.LogsKept; got != test.want {
+				t.Errorf("the router keeps %d logs, want %d", got, test.want)
+			}
+		})
+	}
+}
+
 // A tree with no engines/router.toml has no router to start, and says so by
 // carrying no port — not by falling back to default_port, which is the port the
 // entries share (docs/specs/CONFIG.md).

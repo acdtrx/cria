@@ -50,10 +50,6 @@ const (
 	// happened and holds nothing a filesystem objects to.
 	logStamp = "20060102-150405"
 
-	// logsKept is how many launches of one entry keep their log. Retention by
-	// count, no rotation machinery (docs/specs/SERVE.md).
-	logsKept = 3
-
 	// stopGrace is how long a server has to exit on its own after SIGTERM before
 	// cria escalates to SIGKILL. Long enough for a loaded model to be released,
 	// short enough that a person waiting on `cria stop` does not think it hung.

@@ -212,7 +212,7 @@ cria writes to exactly two trees and reads a third it does not own:
 | tree | who writes it | what is in it |
 | --- | --- | --- |
 | `~/.config/cria/` | people and coding agents; cria creates the root, `models/` and `AGENTS.md` when missing | `config.toml`, one `models/<id>.toml` per launchable entry, one `engines/<engine>.toml` per engine |
-| `~/.local/state/cria/` | cria alone | `servers/<id>.json` state records, `logs/<id>-<stamp>.log` (newest three per entry), `choices.json` picks, `engines/<engine>/` for state that belongs to an engine rather than an entry, `ui.json` UI memory |
+| `~/.local/state/cria/` | cria alone | `servers/<id>.json` state records, `logs/<id>-<stamp>.log` (newest `logs_kept` per entry, default 3), `choices.json` picks, `engines/<engine>/` for state that belongs to an engine rather than an entry, `ui.json` UI memory |
 | `~/.cache/huggingface/hub/` | `hf` and the servers; cria only through a delete plan | every model byte on the host — the single source of truth |
 
 **State is per entry, except where it is per engine** (settled 2026-08-31). Most
@@ -224,14 +224,14 @@ named can collide with it:
 ```
 ~/.local/state/cria/
 ├── servers/<entry-id>.json          one record per entry's running server
-├── logs/<entry-id>-<stamp>.log      newest three per entry
+├── logs/<entry-id>-<stamp>.log      newest logs_kept per entry
 ├── choices.json                     the option picked on each entry's axes
 ├── ui.json                          the TUI's own memory
 └── engines/router/                  the one engine that has state of its own
     ├── models.json                  which entries it holds, and under what
     ├── preset.ini                   composed at every start, never edited
     ├── server.json                  its record
-    └── logs/router-<stamp>.log      newest three
+    └── logs/router-<stamp>.log      newest logs_kept
 ```
 
 Entry records and logs stay where they are: an entry's server is still an

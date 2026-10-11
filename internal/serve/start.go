@@ -59,7 +59,7 @@ func (m *Manager) Start(entry config.Entry, selection config.Selection, report t
 	// Pruning first, to one short of the retention, leaves room for the log this
 	// launch is about to create: a log directory cria cannot tidy then fails the
 	// start instead of a server that is already running.
-	if err := m.pruneLogs(entry.ID, logsKept-1); err != nil {
+	if err := m.pruneLogs(entry.ID, entry.LogsKept-1); err != nil {
 		return Record{}, err
 	}
 

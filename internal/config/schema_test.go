@@ -318,7 +318,8 @@ func TestEntryRulesAccept(t *testing.T) {
 			if err != nil {
 				t.Fatalf("entry was rejected: %v", err)
 			}
-			got.Path = "" // the temp root differs per run; TestLoadRecordsEntryPath covers it
+			got.Path = ""    // the temp root differs per run; TestLoadRecordsEntryPath covers it
+			got.LogsKept = 0 // config.toml's alone to set; TestLogsKeptResolvesFromSettings covers it
 			if !reflect.DeepEqual(got, test.want) {
 				t.Errorf("entry resolved to\n  %+v\nwant\n  %+v", got, test.want)
 			}
@@ -700,6 +701,11 @@ func TestSettingsAccept(t *testing.T) {
 			},
 		},
 		{
+			name:     "a log retention",
+			settings: "logs_kept = 10\n",
+			want:     Settings{LogsKept: 10},
+		},
+		{
 			name:     "a partial tools table leaves the rest on PATH",
 			settings: "[tools]\nhf = \"/opt/homebrew/bin/hf\"\n",
 			want:     Settings{Tools: Tools{HF: "/opt/homebrew/bin/hf"}},
@@ -748,6 +754,21 @@ func TestSettingsReject(t *testing.T) {
 			name:     "default_host may not be blank",
 			settings: "default_host = \"\"\n",
 			wantKey:  "default_host",
+		},
+		{
+			name:     "logs_kept must be an integer",
+			settings: "logs_kept = \"5\"\n",
+			wantKey:  "logs_kept",
+		},
+		{
+			name:     "logs_kept must keep the current launch's log",
+			settings: "logs_kept = 0\n",
+			wantKey:  "logs_kept",
+		},
+		{
+			name:     "logs_kept may not be negative",
+			settings: "logs_kept = -2\n",
+			wantKey:  "logs_kept",
 		},
 		{
 			name:     "tools must be a table",

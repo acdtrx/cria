@@ -269,6 +269,7 @@ there rather than repeated in fifteen profiles.
 | -------------- | ------- | ------------------------------------------------------------------ |
 | `default_port` | integer | optional; the port for entries that declare none                   |
 | `default_host` | string  | optional; the bind address for entries that declare none; `0.0.0.0` when absent |
+| `logs_kept`    | integer | optional; launch logs kept per entry and for the router, at least 1; `3` when absent |
 | `[tools]`      | table   | optional; `llama_server`, `mlx_lm_server`, `vllm`, `hf` — absolute paths overriding `PATH` lookup |
 
 `default_port` exists because entries are expected to share one port — a stable

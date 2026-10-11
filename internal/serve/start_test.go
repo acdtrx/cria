@@ -368,6 +368,46 @@ func TestLogsArePrunedToTheNewestThree(t *testing.T) {
 	}
 }
 
+// The count is the entry's, resolved from config.toml's logs_kept: a longer
+// retention keeps more of the launches before this one.
+func TestLogsArePrunedToTheEntrysCount(t *testing.T) {
+	host := &fakeHost{}
+	manager := newManager(t, host)
+	if err := os.MkdirAll(manager.logsRoot(), 0o755); err != nil {
+		t.Fatalf("creating %s: %v", manager.logsRoot(), err)
+	}
+
+	older := []string{
+		"qwen-20260810-090000.log",
+		"qwen-20260811-090000.log",
+		"qwen-20260812-090000.log",
+		"qwen-20260813-090000.log",
+		"qwen-20260814-090000.log",
+		"qwen-20260815-090000.log",
+	}
+	for _, name := range older {
+		if err := os.WriteFile(filepath.Join(manager.logsRoot(), name), []byte("x"), 0o644); err != nil {
+			t.Fatalf("writing %s: %v", name, err)
+		}
+	}
+
+	entry := llamaEntry()
+	entry.LogsKept = 5
+	record, _ := startOne(t, manager, host, entry, 4242)
+
+	want := []string{
+		"qwen-20260812-090000.log",
+		"qwen-20260813-090000.log",
+		"qwen-20260814-090000.log",
+		"qwen-20260815-090000.log",
+		filepath.Base(record.LogPath),
+	}
+	slices.Sort(want)
+	if kept := logs(t, manager); !slices.Equal(kept, want) {
+		t.Errorf("the log directory holds\n  %v\nwant\n  %v", kept, want)
+	}
+}
+
 // A spawn that never happened leaves nothing behind: no record, and no empty log
 // file to push a real crash log out of the three that are kept.
 func TestAFailedSpawnLeavesNothingBehind(t *testing.T) {
@@ -480,6 +520,7 @@ func TestIdentityCaptureNamesAVLLMServerUnderItsInterpreter(t *testing.T) {
 	entry := config.Entry{
 		ID: "qwen-vllm", Path: "/home/u/.config/cria/models/qwen-vllm.toml",
 		Backend: config.BackendVLLM, Repo: "Qwen/Qwen3-30B-A3B-FP8", Host: "0.0.0.0", Port: 8000,
+		LogsKept: 3,
 	}
 	underInterpreter := identityOf("/usr/local/venv/bin/python3 " +
 		strings.Join(composedFor(t, entry, config.DefaultSelection(entry)), " "))

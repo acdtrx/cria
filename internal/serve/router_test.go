@@ -24,6 +24,7 @@ func routerConfig() config.RouterConfig {
 		Host:       "0.0.0.0",
 		Args:       []string{"-ngl", "99", "-fa", "on"},
 		RouterArgs: []string{"--models-max", "2"},
+		LogsKept:   3,
 	}
 }
 
@@ -382,6 +383,31 @@ func TestTheRoutersLogsAreKeptToTheNewestThree(t *testing.T) {
 	}
 	slices.Sort(want)
 	if !slices.Equal(kept, want) {
+		t.Errorf("the router's log directory holds\n  %v\nwant\n  %v", kept, want)
+	}
+}
+
+// The router's count is config.toml's logs_kept too: at one, only the log of the
+// launch being made survives it.
+func TestTheRoutersLogsAreKeptToItsCount(t *testing.T) {
+	host := &fakeHost{}
+	manager := newManager(t, host)
+	logsRoot := filepath.Join(manager.engineRoot(config.BackendRouter), engineLogsDir)
+	if err := os.MkdirAll(logsRoot, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", logsRoot, err)
+	}
+	for _, name := range []string{"router-20260810-090000.log", "router-20260811-090000.log"} {
+		if err := os.WriteFile(filepath.Join(logsRoot, name), []byte("x"), 0o644); err != nil {
+			t.Fatalf("writing %s: %v", name, err)
+		}
+	}
+
+	router := routerConfig()
+	router.LogsKept = 1
+	record, _ := startRouter(t, manager, host, router, 4242)
+
+	want := []string{filepath.Base(record.LogPath)}
+	if kept := names(t, logsRoot); !slices.Equal(kept, want) {
 		t.Errorf("the router's log directory holds\n  %v\nwant\n  %v", kept, want)
 	}
 }

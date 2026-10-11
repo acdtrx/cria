@@ -193,15 +193,16 @@ func usableReport() tools.Report {
 // llamaEntry is a resolved llama entry, the way config.Load hands one over.
 func llamaEntry() config.Entry {
 	return config.Entry{
-		ID:      "qwen",
-		Path:    "/home/u/.config/cria/models/qwen.toml",
-		Backend: config.BackendLlama,
-		Repo:    "unsloth/Qwen3-30B-A3B-GGUF",
-		Quant:   "UD-Q4_K_XL",
-		Host:    "0.0.0.0",
-		Port:    8080,
-		Name:    "Qwen3 30B",
-		Args:    []string{"--ctx-size", "16384"},
+		ID:       "qwen",
+		Path:     "/home/u/.config/cria/models/qwen.toml",
+		Backend:  config.BackendLlama,
+		Repo:     "unsloth/Qwen3-30B-A3B-GGUF",
+		Quant:    "UD-Q4_K_XL",
+		Host:     "0.0.0.0",
+		Port:     8080,
+		Name:     "Qwen3 30B",
+		Args:     []string{"--ctx-size", "16384"},
+		LogsKept: 3,
 	}
 }
 

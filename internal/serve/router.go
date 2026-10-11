@@ -108,7 +108,7 @@ func (m *Manager) StartRouter(tree *config.Tree, report tools.Report) (Record, R
 
 	// Pruning first, to one short of the retention, leaves room for the log this
 	// launch is about to create — the same order an entry's start takes.
-	if err := pruneLogsIn(m.routerLogsRoot(), string(config.BackendRouter), logsKept-1); err != nil {
+	if err := pruneLogsIn(m.routerLogsRoot(), string(config.BackendRouter), router.LogsKept-1); err != nil {
 		return Record{}, RouterModels{}, err
 	}
 

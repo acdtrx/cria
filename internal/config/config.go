@@ -118,6 +118,7 @@ type Entry struct {
 	Args       []string // the entry's own args tokens, in file order
 	EngineArgs []string // resolved: engines/<backend>.toml's args, the level this entry's own args override
 	Choices    []Choice // the axes this entry varies on, in file order; none for a flat entry
+	LogsKept   int      // resolved: config.toml logs_kept, else 3 — how many launch logs this entry keeps
 }
 
 // Choice is one axis an entry varies on: a named set of options, exactly one of
@@ -144,7 +145,17 @@ type ChoiceOption struct {
 type Settings struct {
 	DefaultPort int // 0 when config.toml sets none
 	DefaultHost string
+	LogsKept    int // 0 when config.toml sets none
 	Tools       Tools
+}
+
+// logsKept is the log retention every entry and the router resolve to: the
+// tree's own logs_kept, else the default.
+func (s Settings) logsKept() int {
+	if s.LogsKept == 0 {
+		return defaultLogsKept
+	}
+	return s.LogsKept
 }
 
 // Tools holds absolute paths that override PATH lookup for the managed tools
@@ -166,6 +177,7 @@ type RouterConfig struct {
 	Host       string   // resolved: the file's own host, else default_host, else 0.0.0.0
 	Args       []string // what every model the router serves starts from: the composed preset's [*] block
 	RouterArgs []string // the router process's own flags, passed verbatim after the ones cria composes
+	LogsKept   int      // resolved: config.toml logs_kept, else 3 — how many launch logs the router keeps
 }
 
 // Tree is a loaded config tree: the entries cria can act on, the engine-level

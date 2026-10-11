@@ -339,6 +339,13 @@ var treeSchema = schema{
 		check:   checkNonEmpty,
 	},
 	{
+		name:    "logs_kept",
+		kind:    kindInteger,
+		rules:   "how many launch logs each entry, and the router, keeps — the newest, pruned at each launch; at least 1, 3 when absent",
+		example: "3",
+		check:   checkLogsKept,
+	},
+	{
 		name:  "tools",
 		kind:  kindTable,
 		rules: "absolute paths to the managed tools, each overriding PATH lookup",
@@ -569,6 +576,15 @@ func checkPort(value any) error {
 	port := value.(int64)
 	if port < 1 || port > 65535 {
 		return fmt.Errorf("want a port between 1 and 65535, got %d", port)
+	}
+	return nil
+}
+
+// checkLogsKept refuses a retention that would delete the log of the launch
+// being made: the current launch's log is always one of the kept.
+func checkLogsKept(value any) error {
+	if kept := value.(int64); kept < 1 {
+		return fmt.Errorf("want at least 1, got %d", kept)
 	}
 	return nil
 }
