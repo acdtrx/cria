@@ -1,123 +1,103 @@
 # Tech Stack
 
-> Decisions and the reasoning behind them. Specs reference this file for anything
-> stack-concrete. When the project deviates later, edit the section in place and date
-> the ruling (`(settled YYYY-MM-DD)`, see `CLAUDE.md`, Documentation) — this file
-> describes the project's actual stack, not a menu.
->
-> This is the **only** doc that names libraries and frameworks — no spec file names a
-> specific technology unless it is inherent to the domain. As dependencies accumulate,
-> grow the dependency inventory below: every dependency, what it is for, why it was
-> chosen.
+> What cria is built with, and why: a Go binary, here a local tool (a TUI plus scriptable
+> subcommands). When the project deviates, edit the section in place (`AGENTS.md`,
+> Documentation): this file describes the project's actual stack, not a menu.
 
 ## Language & runtime (settled 2026-08-18)
 
-- **Go, latest stable toolchain. One module, one static binary, no cgo.** Everything
-  cria does is exec + filesystem + HTTP, and the Go standard library covers all three.
-  A static binary is the whole distribution story: build on one Mac, `scp` to another,
-  run — the Go toolchain ad-hoc-signs darwin/arm64 binaries and scp sets no quarantine
-  xattr, so no developer certificate is needed.
-- Primary target `darwin/arm64`. `linux/amd64` must keep **compiling** (a friend or a
-  future Linux box — `docs/BACKLOG.md`) but is untested and unsupported for now; any
-  platform-specific code goes behind a build-tagged seam.
-- Rejected: **Rust + ratatui** — same single-binary result, slower iteration, no
-  capability this project needs that Go lacks. **Node (Ink or webapp)** — the
-  predecessor llama-runner was a Node webapp; a runtime dependency on every target
-  host defeats copy-a-binary distribution.
+- **Go current stable, one module, one static cgo-free binary**, so it cross-compiles
+  with a `GOOS`/`GOARCH` pair. Add only dependencies that keep it static and cgo-free.
+- **Why Go**: everything cria does is exec, the filesystem and HTTP, and the standard
+  library covers all three. A static binary is the whole distribution story: build on one
+  Mac, copy to another, run (`AGENTS.md`, Deployability). Rejected: **Rust + ratatui**
+  (the same single-binary result, slower iteration, nothing this project needs that Go
+  lacks); **Node, Ink or a webapp** (a runtime on every host defeats copy-a-binary
+  distribution; the predecessor, llama-runner, was a Node webapp).
+- **Standard library first**: `net/http`, `encoding/json`, `flag`, `embed`.
+- The binary carries its version: `var version = "dev"` in `main`, stamped at build with
+  `-ldflags "-X main.version=…"`.
+- **Platforms**: `darwin/arm64` is the one lived on. `linux/amd64` and `linux/arm64`
+  keep compiling and ship as release builds, but are untested and unsupported
+  (`docs/BACKLOG.md`, Platform & distribution).
 
 ## TUI (settled 2026-08-18)
 
-- **bubbletea v2** with its companions **bubbles v2** (widgets) and **lipgloss v2**
-  (styling) — the maintained de-facto standard for Go TUIs; the Elm-style
-  model/update/view loop composes well as screens accumulate. The v2 line is current
-  and stable (verified 2026-08-18; note the `charm.land/...` import paths). Exact
-  versions are whatever `go get` resolves as latest stable at scaffold time
-  (CODING-RULES §3).
-- The binary carries subcommands besides the TUI: `cria docs` prints the config
-  schema with full example configs, and `cria start` / `cria stop` / `cria status`
-  (with `--json`) drive the lifecycle without the TUI (settled 2026-08-18 — agent
-  validation of freshly written entries is the use case; a `cria new` scaffolder was
-  dropped from v1, `docs/BACKLOG.md`).
+- **bubbletea v2**, with its companions **bubbles v2** (widgets) and **lipgloss v2**
+  (styling): the maintained standard for Go TUIs, and its Elm-style model/update/view
+  loop composes well as screens accumulate. Its import paths are `charm.land/...`.
 
-## Configuration: TOML, read-only (settled 2026-08-18)
+## Configuration format & CLI (settled 2026-08-18)
 
-- Config tree at `~/.config/cria/` — the **same path on macOS and Linux** (one set of
-  docs and muscle memory; rejected: platform-native dirs like
-  `~/Library/Application Support`).
-- **TOML**, parsed with **pelletier/go-toml/v2** (actively maintained, strict decoding).
-  TOML over YAML/JSON: comments survive in scaffolded files, no indentation traps, and
-  deleting an unneeded key degrades gracefully — the tree is meant to be edited by
-  hand and by coding agents.
-- cria **reads** config; it never rewrites a config file. Its only writes into the
-  tree: creating the root and an `AGENTS.md` (embedded via `go:embed`) on first run
-  when missing (settled 2026-08-18). Example configs live in the `cria docs` output,
-  not as scaffolded files.
-- Config hygiene: unknown keys or wrong types are rejected loudly at load — a typo
-  must fail, never silently default.
-
-## Runtime state (settled 2026-08-18)
-
-- `~/.local/state/cria/` — pidfiles, one JSON record per managed server (entry,
-  resolved flags, port, log path, start time), the server log files, and a small
-  UI-preferences file (active backend, last-started entry — settled 2026-08-18: UI
-  memory is machine-owned state, never written into the config tree).
-- Neither `~/.config/cria/` nor `~/.local/state/cria/` consults the XDG env vars
-  (settled 2026-08-18): both trees are cria's own, and half of cria's files moving
-  with an env var while the other half stays put is worse than neither moving. The
-  HF cache is different — huggingface_hub owns that path, so cria resolves it
-  exactly the way the library does, XDG included.
-- State records are how the TUI re-attaches after restart: scan records, verify the
-  pid is alive and the port answers, flag the rest stale. `encoding/json` — this is
-  machine-owned state; comments are not needed and cria owns the format.
+- **TOML** via **pelletier/go-toml/v2** with strict decoding, for the config tree
+  (`docs/specs/CONFIG.md`): people and coding agents edit it by hand, comments survive,
+  there are no indentation traps, and deleting an unneeded key degrades gracefully.
+  Rejected: YAML and JSON for the tree.
+- **JSON** (`encoding/json`) for cria's own state: machine-owned, so comments aren't
+  needed and cria owns the format (`docs/ARCHITECTURE.md`, State).
+- CLI: stdlib `flag`, subcommands dispatched by hand, no CLI framework. Bare `cria` opens
+  the TUI; the subcommands are `docs/specs/CLI.md`.
 
 ## External tools (the contract)
 
-cria orchestrates tools the host already has; it installs nothing.
+cria orchestrates tools the host already has; it installs nothing (`docs/BACKENDS.md`
+says how to install each).
 
-- **`hf`** — Hub auth (`hf auth login`); cria reads the token file and exports
-  `HF_TOKEN` to servers it launches so gated repos work. cria moves no model bytes
-  itself — servers fetch their own models (below), and cache surgery is direct
-  filesystem work.
-- **`llama-server`** (llama.cpp) — GGUF serving, launched by Hub reference
-  (`-hf org/repo:QUANT`); it fetches missing models into the standard HF hub cache
-  (2026+ behavior — older builds kept a private `~/.cache/llama.cpp`, which the tool
-  check must flag). Status via its documented HTTP endpoints, never its log format.
-- **`mlx_lm.server`** (mlx-lm) — MLX serving, Apple silicon only, launched with
+- **`hf`**: Hub auth (`hf auth login`). cria reads the token file and exports `HF_TOKEN`
+  to the servers it launches, so gated repos work. cria moves no model bytes itself:
+  servers fetch their own models, and cache surgery is direct filesystem work.
+- **`llama-server`** (llama.cpp): GGUF serving, launched by Hub reference
+  (`-hf org/repo:QUANT`); it fetches missing models into the standard HF hub cache. Older
+  builds kept a private `~/.cache/llama.cpp`, which the tool check flags.
+- **`mlx_lm.server`** (mlx-lm): MLX serving, Apple silicon only, launched with
   `--model org/repo`; fetches via huggingface_hub into the same cache.
-- **`vllm`** (vLLM) — safetensors serving on NVIDIA GPU hosts, launched as
-  `vllm serve --model org/repo`; fetches via huggingface_hub into the same cache.
-  Its install must carry FlashInfer's prebuilt kernels so it runs without `nvcc`
-  on `PATH` (settled 2026-09-24, `docs/BACKENDS.md`).
-- **`ps` / `lsof`** (settled 2026-08-18) — foreign-process detection: finding
-  `llama-server` / `mlx_lm.server` / `vllm` processes cria didn't start, and attributing a
-  busy port (pid, command line, working directory, offered kill). Both ship with
-  macOS; exec'd with explicit field selectors (`ps -o ...`, `lsof -F`), never
-  parsing the human-format tables. macOS has no `/proc`, so exec is the only
-  cgo-free route (CODING-RULES §7 bar: confirmed 2026-08-18).
-- Each found on `PATH`, overridable in `config.toml`. Missing tools degrade features
-  and are reported; `mlx_lm.server` absent on Linux, or `vllm` on a Mac, is normal,
-  not an error.
+- **`vllm`** (vLLM): safetensors serving on NVIDIA GPU hosts, launched as
+  `vllm serve --model org/repo`; fetches via huggingface_hub into the same cache. Its
+  install carries FlashInfer's prebuilt kernels, so it runs without `nvcc` on `PATH`
+  (settled 2026-09-24, `docs/BACKENDS.md`). Rejected: Docker or NGC containers, since a
+  container is not a detached process cria can identify, signal and record.
+- **`ps` / `lsof`** (settled 2026-08-18): foreign-process detection, finding the servers
+  cria didn't start and attributing a busy port (pid, command line, working directory,
+  an offered kill). Both ship with macOS. Exec them with explicit field selectors
+  (`ps -o ...`, `lsof -F`), never parsing the human-format tables. macOS has no
+  `/proc`, so exec is the only cgo-free route (CODING-RULES §7).
+- Find each on `PATH`, overridable in `config.toml`. A missing tool disables features and
+  is reported; `mlx_lm.server` absent on Linux, or `vllm` on a Mac, is normal, not an
+  error.
 
 ## HTTP
 
-- **`net/http`** only — server health checks and the Hugging Face Hub API (repo file
-  listings with sizes, for browsing quants before downloading). No HTTP client
-  library.
+- **`net/http`** only, as a client: server health checks, the router's API, and the
+  Hugging Face Hub API (repo file listings with sizes). cria serves no HTTP of its own.
+
+## Build & lint
+
+- Plain `go` commands; no Makefile.
+- **Lint**: `gofmt -l` (fail on output) and `go vet ./...`, as CI runs them
+  (`.github/workflows/ci.yml`).
+- **Releases**: a v-prefixed tag pushed to GitHub runs `.github/workflows/release.yml`,
+  which tests and builds the release binaries (`AGENTS.md`, Deployability).
 
 ## Testing (lean)
 
-- Built-in `go test`; table tests for cache-walking and config-parsing logic — that is
-  where the risk lives. TUI-level testing: decide when the UI takes shape.
+- `go test ./...`; **table tests** where the risk lives: the cache walk, config parsing,
+  command composition.
+- The TUI is tested by driving its model's update loop against in-repo fakes of the
+  lifecycle; the subcommands, through their dispatcher.
+- Tests that drive real processes skip under `-short`, which CI uses off macOS.
 
-## Dependency inventory
+## Dependencies
 
-- `charm.land/bubbletea/v2` — TUI framework. Maintained standard, Elm architecture.
-- `charm.land/bubbles/v2` — TUI widgets (lists, tables, spinners). First-party
-  companion to bubbletea.
-- `charm.land/lipgloss/v2` — terminal styling and layout. First-party companion.
-- `github.com/pelletier/go-toml/v2` — TOML parsing. Maintained, strict decoding
-  supports the config-hygiene rule.
+Rules: `CODING-RULES.md` §3. Each line: what it is for, and what it saves.
 
-Everything else is standard library. A new dependency needs a yes from the user first
-(`CLAUDE.md`, Project Facts), enters at its latest stable version verified maintained
-(CODING-RULES §3), and gets a line here.
+### Inventory
+
+- `charm.land/bubbletea/v2`: the TUI framework. The maintained standard, Elm
+  architecture.
+- `charm.land/bubbles/v2`: TUI widgets (lists, tables, spinners). bubbletea's
+  first-party companion.
+- `charm.land/lipgloss/v2`: terminal styling and layout. First-party companion.
+- `github.com/pelletier/go-toml/v2`: TOML parsing. Maintained; its strict decoding is
+  what makes config hygiene one setting (CODING-RULES §4).
+
+Everything else is the standard library.

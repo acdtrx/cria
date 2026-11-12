@@ -39,7 +39,7 @@ func backendFlags() []string {
 // What it writes is the example `cria docs` prints for that backend, from the
 // same schema definitions the parser checks the file against (config.ExampleEntry).
 // There is no second template: the page an agent is told to read and the file a
-// person is handed are one string (CLAUDE.md: schema and docs are one source).
+// person is handed are one string (docs/cria.md, principle 5).
 //
 // This is cria's only write into the tree beyond the first-run scaffold, and it
 // creates — it never rewrites. Everything after the file exists is reporting:

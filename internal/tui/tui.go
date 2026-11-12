@@ -248,9 +248,10 @@ func Run() error {
 }
 
 // machine wires the frame to this host. Each subsystem is reached through its
-// own entry point and nothing else (CODING-RULES §7); composing the two-call
-// lookups — where the config tree lives, where the hub cache lives — is this
-// wiring's job rather than a subsystem's.
+// own entry point and nothing else (docs/ARCHITECTURE.md, Repo layout &
+// subsystem boundaries); composing the two-call lookups — where the config tree
+// lives, where the hub cache lives — is this wiring's job rather than a
+// subsystem's.
 func machine(root string) host {
 	return host{
 		servers: serve.New(root, procs.System{}),

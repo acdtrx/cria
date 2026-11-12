@@ -412,10 +412,10 @@ func (m model) emptyRouter(inner int) []string {
 //
 // The picks are the router's own and may differ from the ones a bare
 // `cria start` would use for the same entry — that is the whole point of holding
-// them per engine (docs/plans/engines/OVERVIEW.md, ruling 2) — so everything
-// here is read through them. A profile the router does not hold has none, so it
-// is read through the entry's config defaults, which is what including it would
-// hold it under.
+// them per engine (docs/specs/SERVE.md, The models under the router) — so
+// everything here is read through them. A profile the router does not hold has
+// none, so it is read through the entry's config defaults, which is what
+// including it would hold it under.
 func (m model) routerDetail(inner, capacity int) []string {
 	row, ok := m.selectedRouterRow()
 	switch {

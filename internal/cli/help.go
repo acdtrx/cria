@@ -7,7 +7,7 @@ package cli
 //
 // It does not restate the schema. `cria docs` prints that from the definitions
 // the parser uses, so this page points at it rather than growing a second copy
-// that drifts (CLAUDE.md: schema and docs are one source).
+// that drifts (docs/cria.md, principle 5).
 //
 // The last block is addressed to a coding agent, because one is the expected
 // reader: it names the one command that proves a freshly written entry actually

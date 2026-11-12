@@ -267,8 +267,7 @@ func schemaRows(s schema, prefix string) []docsRow {
 //
 // It is exported because `cria new` writes it into the tree as a fresh entry
 // file: the template someone is handed and the template `cria docs` teaches are
-// the same string, not two copies that drift (CLAUDE.md: schema and docs are one
-// source).
+// the same string, not two copies that drift (docs/cria.md, principle 5).
 func ExampleEntry(backend Backend) string {
 	var file strings.Builder
 	writeComment(&file, fmt.Sprintf(exampleEntryPreamble, backend, entrySchema.requiredNames()))

@@ -11,7 +11,7 @@ import (
 // own format, not a shape cria invented. cria composes that file at every start
 // from what the config tree declares; the tree keeps writing the server's own
 // flags as argv tokens, and the translation happens here (docs/specs/CONFIG.md,
-// OVERVIEW ruling 1).
+// The entry contract).
 //
 // The translation is only possible because upstream canonicalizes its own key
 // names (`ngl` → `--n-gpu-layers`, `fa` → `--flash-attn`, verified live
@@ -33,9 +33,9 @@ const (
 	presetTrue = "true"
 
 	// presetAlias is the key that gives one section the name its clients address
-	// it by. cria writes it itself, from the entry id (STEP-4's ruling): section
-	// names are model references and upstream normalizes their quant tags, while
-	// an alias is passed through as written.
+	// it by. cria writes it itself, from the entry id (docs/specs/SERVE.md, The
+	// models under the router): section names are model references and upstream
+	// normalizes their quant tags, while an alias is passed through as written.
 	presetAlias = "alias"
 )
 

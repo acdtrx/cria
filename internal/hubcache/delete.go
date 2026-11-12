@@ -110,7 +110,7 @@ type Shared struct {
 
 // Served is one model a running server has open right now. The caller assembles
 // the list — surgery does not import the serve layer, so the dependency graph
-// stays acyclic (CODING-RULES §7).
+// stays acyclic (docs/ARCHITECTURE.md, Repo layout & subsystem boundaries).
 type Served struct {
 	Entry string // the entry id, so a refusal names the server to stop
 	Repo  string // the repository the server was launched against

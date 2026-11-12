@@ -100,7 +100,7 @@ func TestTheRouterServesTheModelsItsStoreHolds(t *testing.T) {
 // The router's picks are its own. The same entry can be held here under one
 // combination while a bare `cria start` launches it under another — that is the
 // whole reason inclusion lives in the router's state rather than in the entry
-// (OVERVIEW ruling 2).
+// (docs/specs/SERVE.md, The models under the router).
 func TestTheRoutersPicksAreNotTheEntrysStoredPicks(t *testing.T) {
 	manager := newManager(t, &fakeHost{})
 	entry := choicesEntry()

@@ -64,3 +64,7 @@ and the deletion contract. v1 is visibility and cleaning only; growth ideas wait
 - The model currently being served cannot be deleted — the refusal names the
   running server; stop first. (The server maps the files; deleting under it frees
   no space and invites confusion.)
+- Guard by repo where a quant can't say: refuse to remove a repo's unfinished
+  downloads while any server runs from that repo, since a running fetch can't be told
+  from a leftover; and let a server whose reference names no quant guard its whole
+  repo.

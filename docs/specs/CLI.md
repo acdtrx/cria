@@ -125,6 +125,8 @@ ordinary entries, and what makes them the router's lives outside the tree.
   (started and healthy with `--wait`, stopped, at least one live server for
   `status`); non-zero otherwise. Errors name the failing thing and its fix —
   never a silent failure.
+- Exit `2` for a command line cria cannot route (settled 2026-08-18), distinct from a
+  failed operation's `1`.
 - `validate` extends that rule with a code of its own (settled 2026-08-25),
   because it is the one subcommand that changes the host and has to change it
   back: `1` keeps its meaning (the entry does not serve) and adds the promise that

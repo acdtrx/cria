@@ -125,7 +125,7 @@ func TestTheRouterPresetIsWrittenAtEveryStart(t *testing.T) {
 
 // The router's state is the engine's, not an entry's: its preset, its record and
 // its logs live under the engine's own folder, and the entries' records are left
-// alone (OVERVIEW ruling 2).
+// alone (docs/specs/SERVE.md, The router).
 func TestTheRoutersStateLivesUnderItsEngine(t *testing.T) {
 	host := &fakeHost{}
 	manager := newManager(t, host)

@@ -70,7 +70,7 @@ func TestRecordRoundTrip(t *testing.T) {
 
 // Records are cria's own format and are validated loudly on read: an unknown
 // key, a wrong type or a missing field is an error, never a silent default
-// (CLAUDE.md, feature-building mode). A record cria refuses is reported, not
+// (CODING-RULES §16). A record cria refuses is reported, not
 // skipped — it names a pid cria started.
 func TestRecordsAreValidatedLoudly(t *testing.T) {
 	unknownKey := strings.Replace(validRecord, `"port": 8080,`,
@@ -215,7 +215,7 @@ func TestARecordCarriesThePicksItWasComposedFrom(t *testing.T) {
 // The selection is read off the record file itself, both ways: a file that
 // carries picks hands them over, and a file without the key reads as a flat
 // entry's rather than as a broken record — records are transient, and nothing
-// migrates them (CLAUDE.md, feature-building mode).
+// migrates them (CODING-RULES §16).
 func TestASelectionIsReadOffTheRecordFile(t *testing.T) {
 	withPicks := strings.Replace(validRecord, `"quant": "UD-Q4_K_XL",`,
 		`"quant": "UD-Q4_K_XL",`+"\n  "+`"selection": {"quant": "q4", "context": "long"},`, 1)

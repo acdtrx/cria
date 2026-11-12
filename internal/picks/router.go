@@ -101,7 +101,7 @@ func LoadRouter(dir string) (Router, error) {
 
 // decodeRouter parses one store file, strictly. The shape is cria's own, so an
 // unknown key or a wrong type is an error rather than a silent default
-// (CLAUDE.md, feature-building mode) — and inside the models object every name
+// (CODING-RULES §16) — and inside the models object every name
 // is data, an entry id and a choice name, so what is checked there is that each
 // one is a name at all.
 //

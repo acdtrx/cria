@@ -67,9 +67,18 @@ arguments falls back to the whole-string comparison). Otherwise the record is
 `starting` → (`downloading` →) `running`, with `unhealthy` and `exited` as the
 failure states.
 
-- `starting` — spawned, port not answering yet.
-- `downloading` — port not answering *and* the entry's model is not fully present
-  in the cache, **or a copy of it is landing** (amended 2026-08-19: an upstream
+Derive the phase in this order; the first that holds wins:
+
+- `exited` — the record no longer names the live process cria launched.
+- `running` — the backend's documented health signal is green (2xx) now:
+  llama-server's and vLLM's `/health`; for a backend without a health endpoint, a
+  successful response from a documented endpoint (`/v1/models`).
+- `unhealthy` — red now, after this server answered green at least once. Remember the
+  green per entry and pid, for this cria invocation only, never persisted: a restarted
+  entry is a new pid with its own start window, and a fresh cria that finds a red
+  server reads it as starting until it sees one green.
+- `downloading` — never green yet, and the entry's model is not fully present in the
+  cache, **or a copy of it is landing** (amended 2026-08-19: an upstream
   re-upload makes the server silently re-fetch a changed blob while the old
   copy still reads complete — that start showed as "starting" and got killed as
   stuck). A partial whose blob name matches the entry's current Hub oid is this
@@ -79,15 +88,13 @@ failure states.
   nothing. Otherwise progress renders as on-disk cache bytes versus Hub-API
   sizes (filesystem observation; when the Hub API is unreachable, bytes show
   without a total). The server does the fetching; cria only watches the cache.
-- `running` — the backend's documented health signal is green: llama-server's
-  and vLLM's `/health`; for a backend without a health endpoint, a successful response from
-  a documented endpoint (`/v1/models`).
-- `unhealthy` — process alive but the health signal is red or the port stopped
-  answering.
-- Observation is polling by nature (HTTP probes, `ps`); the TUI refreshes on a
-  short interval, CLI status is a one-shot probe. Health probes go to loopback
-  when the bind is `0.0.0.0`, to the bound address otherwise
-  (`docs/specs/CONFIG.md`).
+- `starting` — never green yet, and the model is in the cache: llama-server answers
+  503 at `/health` for as long as it loads a model, and that is starting, never
+  unhealthy.
+
+Observation is polling by nature (HTTP probes, `ps`); the TUI refreshes on a short
+interval, CLI status is a one-shot probe. Health probes go to loopback when the bind is
+`0.0.0.0`, to the bound address otherwise (`docs/specs/CONFIG.md`).
 
 ## Start
 
@@ -134,6 +141,10 @@ failure states.
    lazily is their engine's own answer. A no-wait start
    cannot carry the request and says so in a note.
 
+No GPU-competition check (settled 2026-09-24, user): a start never refuses because
+another process holds the GPU. Which servers share a machine is the user's call, as with
+two llama-servers on different ports.
+
 ## Stop
 
 - SIGTERM, a short grace period, then SIGKILL; the record is removed once the
@@ -170,15 +181,15 @@ One `llama-server` per host, started in router mode: it supervises a child serve
 per model it holds and proxies all of them on one port (probe-verified
 2026-08-31). cria starts, watches and stops that one process and never manages its
 children one by one — a stop's group signal ends them with it (Stop), and which
-models it holds is asked through the router's documented API (STEP-8).
+models it holds is asked through the router's documented API.
 
 - **It is not an entry.** No `models/<id>.toml` declares it; it is configured by
   `engines/router.toml` and started as itself (`cria router start`,
   `docs/specs/CLI.md`). One router per host, on a port of its own beside the
   entries' — a busy port refuses exactly as a start's does, naming a managed
   holder to stop or a foreign process to deal with.
-- **Engine-scoped state lives in a subfolder per engine** (settled 2026-08-31,
-  OVERVIEW ruling 2): `~/.local/state/cria/engines/router/` holds `preset.ini`
+- **Engine-scoped state lives in a subfolder per engine** (settled 2026-08-31):
+  `~/.local/state/cria/engines/router/` holds `preset.ini`
   (the composed preset), `server.json` (the record) and `logs/router-<stamp>.log`
   (the newest `logs_kept`, the same retention entries get). Entry records and logs stay
   where they are — an entry's server is still an entry's — so nothing moves and
@@ -214,7 +225,7 @@ models it holds is asked through the router's documented API (STEP-8).
 
 Which entries the router serves is **state, not config**: the tree declares
 entries, and a store of the router's own says which of them this host's router
-holds and under which combination (OVERVIEW ruling 2). The same entry can be a
+holds and under which combination. The same entry can be a
 llama entry with its own picks and a router model with different ones — that is
 the point of holding them per engine, and it is why no entry key could express
 inclusion (`docs/specs/CONFIG.md`).

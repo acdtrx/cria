@@ -90,7 +90,7 @@ func (l logScreen) read(msg logMsg) logScreen {
 //
 // The view is the end of the log and only the end — no scrollback. A crash
 // explains itself at the bottom, and the file itself is one `less` away; a
-// scroller earns its place when daily use asks for one (CLAUDE.md, Scope).
+// scroller earns its place when daily use asks for one (docs/cria.md, Anti-goals).
 func (l logScreen) panel(width, rows int) string {
 	title := "log · " + l.entryID
 	capacity := rows - 2

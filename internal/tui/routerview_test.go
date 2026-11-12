@@ -368,7 +368,7 @@ func TestRestartAndBenchDoNotAimAtTheRouter(t *testing.T) {
 // The picker in the router's view edits the router's own store: the same box and
 // the same keys over the same axes, writing the combination the router holds the
 // model under rather than the one a bare start composes with
-// (docs/plans/engines/OVERVIEW.md, ruling 2).
+// (docs/specs/SERVE.md, The models under the router).
 func TestThePickerInTheRouterViewWritesTheRoutersOwnStore(t *testing.T) {
 	fake := &fakeServers{routerModels: heldModels()}
 	frame, _, root := routerFrame(t, fake)

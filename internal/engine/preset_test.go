@@ -108,8 +108,8 @@ func TestThePresetRefusesWhatItCannotWrite(t *testing.T) {
 
 // The models included in the router become sections of the same file: one per
 // entry, named by the model reference it resolves to, carrying the entry id as
-// the alias clients address it by (STEP-4's ruling) and the args that entry
-// contributes over the defaults.
+// the alias clients address it by (docs/specs/SERVE.md, The models under the
+// router) and the args that entry contributes over the defaults.
 func TestThePresetCarriesOneSectionPerIncludedModel(t *testing.T) {
 	composed, err := RouterPreset([]string{"-ngl", "99", "-fa", "on"}, []RouterModel{
 		{ID: "qwen", Repo: "unsloth/Qwen3-30B-A3B-GGUF", Quant: "UD-Q4_K_XL", Args: []string{"-c", "262144", "--jinja"}},

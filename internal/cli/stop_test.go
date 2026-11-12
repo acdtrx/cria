@@ -163,7 +163,7 @@ func TestStopRefusesAnEntryWithNoRecord(t *testing.T) {
 }
 
 // A record cria cannot read names a pid cria started, so stopping it reports the
-// file and the one line that clears it (CLAUDE.md, feature-building mode).
+// file and the one line that clears it (CODING-RULES §16).
 func TestStopReportsAnUnreadableRecord(t *testing.T) {
 	fake := &fakeServers{listing: serve.Listing{Broken: []serve.BrokenRecord{{
 		EntryID: "qwen",

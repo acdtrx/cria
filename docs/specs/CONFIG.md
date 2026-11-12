@@ -152,8 +152,10 @@ next to the options, where fit measurements already live.
   levels beneath it, at the place the first of them stood; a flag the level
   introduces follows at the end. An override therefore changes what the server
   receives, not the order the files read in — which is what makes lifting a flag
-  into the engine file a safe, argv-preserving edit. The effective `repo`/`quant`
-  are the entry's unless a picked option replaces them.
+  into the engine file a safe, argv-preserving edit. Tokens written before any flag
+  form a group with no flag: they override nothing, nothing overrides them, and they
+  reach the server whole. The effective `repo`/`quant` are the entry's unless a picked
+  option replaces them.
 - **Cross-level override is legal and silent; the one collision left is loud, at
   load** (settled 2026-08-31, narrowing 2026-08-22, whose "two parts of one
   launch" rule counted the entry's args and an option's as equals):
@@ -169,14 +171,15 @@ next to the options, where fit measurements already live.
   `--ctx-size=8192`. For the same reason `quant` may be set by only one choice's
   options, and likewise `repo`. An option restating a cria-owned flag is refused
   exactly as entry `args` are.
-- **Picks are state, not config** (settled 2026-08-22): the current pick per
-  entry per choice lives in `~/.local/state/cria/choices.json` — cria-owned,
-  strict-decoded; a broken file is reported and the config defaults used; a pick
-  naming a gone choice or option is skipped on read and pruned on the next
-  write. The config tree stays human-owned. The TUI picker is what writes picks;
-  `cria start <id> choice=option` overrides for that one start and writes
-  nothing — one-shot, so an agent's experiment never silently changes what a
-  bare start launches next.
+- **Picks are state, not config** (settled 2026-08-22): the current pick per entry per
+  choice lives in `~/.local/state/cria/choices.json` — cria-owned, strict-decoded; a
+  broken file is reported and the config defaults used; a pick naming a gone choice or
+  option is skipped on read and pruned on the next write. An entry whose file is
+  refused keeps every stored pick: cria knows its syntax broke, and nothing about its
+  axes. The config tree stays human-owned. The TUI picker is what writes picks;
+  `cria start <id> choice=option` overrides for that one start and writes nothing —
+  one-shot, so an agent's experiment never silently changes what a bare start launches
+  next.
 - **One entry, one set of axes, a combination per engine** (settled 2026-08-31).
   The axes are the entry's; which option is current is per engine, because the
   combination that fits a model as one server per entry is not the combination
@@ -215,8 +218,8 @@ there rather than repeated in fifteen profiles.
   configure (engine files, records, display) and the narrower set of backends an
   entry may name. Rejected: making the router a backend key — the same entry is
   meant to serve under llama *and* under the router, with picks of its own on each
-  side (`docs/plans/engines/OVERVIEW.md`, ruling 2), which a single backend key
-  cannot express.
+  side (Which entries the router serves, below), which a single backend key cannot
+  express.
 - **The router's file carries two arg lists, because it has two command lines**
   (settled 2026-08-31). `args` is what every model it serves starts from — cria
   composes it into the `[*]` section of the preset the router reads, which is the
@@ -224,8 +227,8 @@ there rather than repeated in fifteen profiles.
   exactly as an entry overrides its engine. `router_args` is the supervisor's own
   flags (`--models-max`, `--models-autoload`, …), passed verbatim after the flags
   cria composes. Rejected: a schema field per router flag — `host`/`port` stay the
-  only schema-composed fields (OVERVIEW ruling 3), and upstream's defaults stay
-  upstream's.
+  only schema-composed fields (Context and parallelism, above), and upstream's
+  defaults stay upstream's.
 - **The router takes no port from `default_port`** (settled 2026-08-31): that is
   the port the entries share, and a router bound to it would collide with every one
   of them at the first start. A tree with no `engines/router.toml`, or one that

@@ -90,7 +90,7 @@ func prefsPath(root string) string { return filepath.Join(root, prefsFile) }
 // the whole answer and there is nothing to report. A file cria cannot read or
 // cannot parse is reported and the defaults are used anyway — this is cria's
 // own state, so a broken one is never worth refusing to start over, and the
-// next change writes a good file over it (CLAUDE.md, feature-building mode).
+// next change writes a good file over it (CODING-RULES §16).
 func loadPrefs(root string) (prefs, error) {
 	path := prefsPath(root)
 	data, err := os.ReadFile(path)

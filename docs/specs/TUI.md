@@ -179,6 +179,10 @@ keybinds get detailed as they are built.
     not the current defaults — a swap-back reproduces what ran, records being
     self-contained (`docs/specs/SERVE.md`). The status box names the running
     combination.
+  - When the record's picks no longer resolve (the entry's choices were edited
+    since), restart-last refuses on the notice line, with the reason, before it stops
+    anything. Never fall back to the defaults: that would swap the model under a
+    swap-back, and stopping first would leave nothing for the refusal to protect.
   - A flat entry offers no picker; the key does nothing there.
 - **The router's view** (settled 2026-08-31, `docs/specs/SERVE.md` owns what the
   router is): the toggle's third position, laid out exactly as the entry view is —

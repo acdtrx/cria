@@ -52,8 +52,7 @@ func picksPath(root string) string { return filepath.Join(root, picksFile) }
 // problem to report: every entry runs its config defaults. A file cria cannot
 // read or cannot parse is reported and the config defaults are used anyway —
 // this is cria's own state, so a broken one is never worth refusing to launch
-// over, and the next pick writes a good file over it (CLAUDE.md, feature-building
-// mode).
+// over, and the next pick writes a good file over it (CODING-RULES §16).
 func Load(root string) (Picks, error) {
 	path := picksPath(root)
 	data, err := os.ReadFile(path)

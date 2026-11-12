@@ -131,7 +131,8 @@ func TestComposedCommand(t *testing.T) {
 
 // A real profile's flags reach the server exactly as its files wrote them. The
 // argv below is one the user's own tree serves today, token for token, aliases
-// and all — nothing on it is a spelling cria chose (docs/plans/engines).
+// and all — nothing on it is a spelling cria chose (docs/specs/CONFIG.md, The
+// entry contract).
 //
 // The second tree is that same profile with the machine's own flags lifted into
 // engines/llama.toml, one of them (-c) overridden by the entry: extraction moves

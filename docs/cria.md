@@ -52,8 +52,11 @@ don't own.
    from the binary — plus a complete commented example config per backend, and the
    config root carries an `AGENTS.md` pointing agents at it. Lifecycle is scriptable
    for the same reason (settled 2026-08-18): `cria start/stop/status` work without
-   the TUI, and `cria status --json` lets an agent verify that an entry it just
-   wrote actually serves.
+   the TUI. An agent proves an entry it just wrote with `cria validate <id>`, and the
+   agent-facing pages (`cria docs`, the config root's `AGENTS.md`) teach validate, not
+   the start, wait, status and stop sequence (settled 2026-08-25, user): that sequence
+   can take down the model the calling agent runs on, and validate puts back the
+   server it displaced (`docs/specs/CLI.md`).
 6. **Status over telemetry** (settled 2026-08-18). cria reports what stable
    interfaces expose: process alive, port answering, health endpoint green, raw log
    tail. It never parses log streams for stats — that was llama-runner's mistake, and
@@ -103,4 +106,4 @@ don't own.
 
 Not a daemon, not a proxy or auto-swapper (llama-swap exists), not a model registry
 (ollama exists), not a chat client, not a metrics dashboard. Features earn their
-place (`CLAUDE.md`, Scope) — this list is the standing reminder.
+place — this list is the standing reminder.

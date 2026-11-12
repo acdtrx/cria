@@ -152,7 +152,7 @@ func RouterUnloadPath() string { return routerUnloadPath }
 // RouterModelQuery is one path addressed at a single model the router holds: the
 // endpoints a child answers for take the model's name as a query parameter, and
 // the name cria uses is the entry id each section carries as its alias
-// (STEP-4's ruling, verified live 2026-08-31).
+// (docs/specs/SERVE.md, The models under the router).
 func RouterModelQuery(path, id string) string {
 	return path + "?" + url.Values{routerModelParam: []string{id}}.Encode()
 }

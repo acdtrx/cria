@@ -29,8 +29,8 @@ import (
 const (
 	// engineStateDir holds one subfolder per engine, for state that belongs to an
 	// engine rather than to an entry: the router's composed preset, its record
-	// and its logs (OVERVIEW ruling 2). Entry records and logs stay where they
-	// are — an entry's server is still an entry's.
+	// and its logs (docs/specs/SERVE.md, The router). Entry records and logs stay
+	// where they are — an entry's server is still an entry's.
 	engineStateDir = "engines"
 
 	// presetFile is the composed preset the router serves from, and recordFile

@@ -50,8 +50,9 @@ const pickerFloor = 40
 //
 // router says the picks being edited are the ones the router holds this entry
 // under, not the ones a bare start composes with. One entry carries both, by
-// design (docs/plans/engines/OVERVIEW.md, ruling 2), so the same gesture over
-// the same axes writes whichever store the screen it was opened from is about.
+// design (docs/specs/SERVE.md, The models under the router), so the same
+// gesture over the same axes writes whichever store the screen it was opened
+// from is about.
 type picker struct {
 	entry  string
 	cursor int

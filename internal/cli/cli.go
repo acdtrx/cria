@@ -157,7 +157,7 @@ type app struct {
 	// tui is the program bare `cria` opens. It arrives as a function rather
 	// than an import so this package stays a command-line router: routing to
 	// the TUI is a decision here, but nothing about a terminal program is
-	// (CODING-RULES §7 — main.go does the wiring).
+	// (docs/ARCHITECTURE.md, Repo layout: main.go does the wiring).
 	tui func() error
 
 	// interrupts arms the Ctrl-C watch a command that must not be left halfway

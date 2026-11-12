@@ -30,7 +30,7 @@ const (
 	// itemIndent is how far a quant sits under the repo it belongs to. The tree
 	// renders open: v1 has no expand, because a cache of a dozen repos is read
 	// in one screenful and a collapsed row hides exactly the thing being looked
-	// for (CLAUDE.md, Scope).
+	// for (docs/cria.md, Anti-goals).
 	itemIndent = "  "
 
 	// sizeGap is the space between a row's facts and its size column.

@@ -110,7 +110,7 @@ type Listing struct {
 
 // BrokenRecord is a record file cria refused, with the reason. Its manual fix is
 // always the same one line: delete the file, and stop the pid it named if it is
-// still running (CLAUDE.md, feature-building mode).
+// still running (CODING-RULES §16).
 type BrokenRecord struct {
 	EntryID string
 	Path    string
@@ -161,8 +161,7 @@ func readRecord(path, id string) (Record, error) {
 	// Strict decoding, like the config tree: an unknown key or a wrong type is an
 	// error, never a silent default. Records are cria's own format, so a file
 	// that does not match it was either hand-edited or written by a cria that no
-	// longer exists — both are the author's to fix (CLAUDE.md, feature-building
-	// mode).
+	// longer exists — both are the author's to fix (CODING-RULES §16).
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var record Record

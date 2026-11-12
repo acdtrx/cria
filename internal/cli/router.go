@@ -272,8 +272,8 @@ func (a *app) reportRouterChildren(children serve.RouterChildren) {
 
 // childName is what a client sends to reach one of the router's models: the
 // alias its preset section carries, which is the entry id cria included it under
-// (STEP-4's ruling). A model the router found on its own has none, and answers
-// to its reference.
+// (docs/specs/SERVE.md, The models under the router). A model the router found
+// on its own has none, and answers to its reference.
 func childName(child serve.RouterChild) string {
 	if len(child.Aliases) == 0 {
 		return "(no alias)"
@@ -339,7 +339,8 @@ func picksLine(selection config.Selection) string {
 // routerInclude runs `cria router include <id> [choice=option ...]`: hold one of
 // the tree's entries under the router, in the combination named.
 //
-// Inclusion is state, edited like a pick (OVERVIEW ruling 2): the entry file
+// Inclusion is state, edited like a pick (docs/specs/SERVE.md, The models under
+// the router): the entry file
 // says nothing about the router, and the same entry can be held here under a
 // different combination than the one the llama engine starts it under. Running
 // it again on an entry the router already holds changes that combination — one
@@ -433,8 +434,9 @@ func (a *app) routerExclude(args []string) int {
 //
 // The router loads a model on the first request that names it, which is what
 // clients rely on. This verb exists because the mechanism must be invocable on
-// its own (CODING-RULES §7) — a model wanted resident before the first request
-// is a thing to ask for, not a thing to arrange by sending a fake completion.
+// its own (docs/ARCHITECTURE.md, Background work) — a model wanted resident
+// before the first request is a thing to ask for, not a thing to arrange by
+// sending a fake completion.
 func (a *app) routerLoadModel(args []string) int {
 	manager, record, id, code := a.routerModelTarget(args, "load", routerLoadSynopsis)
 	if code != exitOK {

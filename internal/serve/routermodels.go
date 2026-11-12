@@ -15,9 +15,9 @@ import (
 
 // Which models the router holds is state, not config: the tree declares entries
 // and the router's own store says which of them it serves and under which
-// combination (OVERVIEW ruling 2, internal/picks). This file is where that store
-// meets the tree — one preset composed from both — and where cria asks a running
-// router what each of those models is doing.
+// combination (docs/specs/SERVE.md, The models under the router; internal/picks).
+// This file is where that store meets the tree — one preset composed from both —
+// and where cria asks a running router what each of those models is doing.
 //
 // The router's children are the router's own processes. cria never looks for
 // them in the process table: it asks the router, which publishes one row per
@@ -209,9 +209,10 @@ func (m *Manager) RouterChildren(record Record) RouterChildren {
 //
 // The router loads a model on the request that names it all by itself, which is
 // the feature clients rely on. These exist because a mechanism must be
-// invocable on its own (CODING-RULES §7): a model wanted resident before the
-// first request, or one holding memory that is needed elsewhere, is a thing to
-// ask for rather than a thing to arrange by sending a fake completion.
+// invocable on its own (docs/ARCHITECTURE.md, Background work): a model wanted
+// resident before the first request, or one holding memory that is needed
+// elsewhere, is a thing to ask for rather than a thing to arrange by sending a
+// fake completion.
 func (m *Manager) RouterLoad(record Record, id string) error {
 	return m.commandRouter(serverURL(record, engine.RouterLoadPath()), id)
 }

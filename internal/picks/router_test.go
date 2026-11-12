@@ -107,7 +107,7 @@ func TestTheRouterStoreLeavesItsInputsAlone(t *testing.T) {
 
 // The store is cria's own format, so it is validated loudly on read: an unknown
 // key, a wrong shape or a name that can never match anything is a file to fix,
-// never a silent default (CLAUDE.md, feature-building mode).
+// never a silent default (CODING-RULES §16).
 //
 // It refuses rather than falling back to an empty router, which is where it
 // parts from the picks beside it: an empty answer would start a router serving

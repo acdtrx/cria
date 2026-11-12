@@ -1,12 +1,10 @@
 # Backlog
 
-Deferred bugs and ideas (see `CLAUDE.md`, Scope). Entries that grow graduate to
-`docs/plans/<topic>/`. A resolved entry is removed in the same change — git history is
-the archive; this file lists only what is still open.
+Deferred bugs and ideas (see `AGENTS.md`, Scope).
 
-Entry format: a bolded title, what it is in a sentence or two, and the **revisit
-trigger** — the observed condition that would make it worth building (features earn
-their place). Date rulings inline: `(ruled YYYY-MM-DD: wait to see if needed.)`.
+Write each entry as a bolded title, what it is in a sentence or two, and the **revisit
+trigger**: the observed condition that would make it worth building (features earn their
+place). Date rulings inline: `(ruled YYYY-MM-DD: wait to see if needed.)`.
 Group entries under headings as themes emerge.
 
 ## Dropped from v1
@@ -45,7 +43,7 @@ Group entries under headings as themes emerge.
   number is honest about what it measures and wrong about what a reader wants.
   Candidates: `nvidia-smi --query-compute-apps` per pid (exec of a tool cria
   does not drive today — CODING-RULES §7 bar), or labelling the column "RSS" on
-  hosts where it undercounts. (noted 2026-09-24, vllm STEP-6.) Revisit trigger:
+  hosts where it undercounts. (noted 2026-09-24.) Revisit trigger:
   deciding what fits on dgx from cria's numbers and getting it wrong.
 - **Does llama-server with MTP stream several tokens per chunk?** The bench now
   counts tokens from `usage` (fixed 2026-09-24 for vLLM), so llama's numbers are
@@ -70,7 +68,7 @@ Group entries under headings as themes emerge.
   running router* — which is a different protocol, since nothing needs displacing
   (the router is already up), the load is `POST /models/load` rather than a spawn,
   and the proof is a completion naming the model's alias. Deliberately out of
-  scope when the router landed (`docs/plans/engines/OVERVIEW.md`): the entry-level
+  scope when the router landed: the entry-level
   validate had just been settled and user-designed, and a second protocol under
   the same verb wanted its own design pass. Revisit trigger: wanting to validate
   an entry's router combination without hand-stopping the router — most likely
@@ -164,7 +162,7 @@ Group entries under headings as themes emerge.
 ## Platform & distribution
 
 - **Linux as a supported platform.** `linux/amd64` must keep compiling
-  (`CLAUDE.md`, Project Facts); release builds exist and a first real
+  (`docs/TECH-STACK.md`, Language & runtime); release builds exist and a first real
   linux/amd64 smoke test passed (2026-08-18: profile added, download with
   progress, serve, logs, stop). Still short of *supported*: CI runs only the
   short suite there and nobody lives on it. Revisit trigger: a Linux machine
@@ -195,8 +193,9 @@ Group entries under headings as themes emerge.
   means a view of per-slot fill against the slot's context, plus the sizes of
   saved slot files on disk. Same rails as the ruling above: llama's documented
   `/slots` endpoint plus the filesystem, never logs; mlx documents no
-  equivalent, so this is llama-only. The data is verified there (2026-08-25,
-  live probe): per-slot `n_ctx`, `n_prompt_tokens`, `n_prompt_tokens_cache`,
+  equivalent. vLLM's documented `/metrics` is a second engine's signal for the
+  same view (2026-09-24), each read by its own engine. The llama data is verified
+  (2026-08-25, live probe): per-slot `n_ctx`, `n_prompt_tokens`, `n_prompt_tokens_cache`,
   `is_processing`. Direction (user-sketched 2026-08-25): `is_processing`
   gates the label — a busy slot shows live data, an idle one shows what it
   last processed. `/slots` carries counts, not rates (verified same probe);
@@ -223,8 +222,29 @@ Group entries under headings as themes emerge.
   never red at any step — or *structure* — pins the current shape, may go red
   mid-phase, each named with the step that rewrites it, and never deleted except
   paired with its replacement. It held for nine steps across three phases
-  (`docs/plans/engines/TRIAGE.md` is the classification, and each step file
-  records its own rewrites and mutation checks). Open question: whether it
-  graduates into `CLAUDE.md` as standing methodology, which would bind every
+  (the classification and each step's rewrites are in git history, with the
+  engines plan). Open question: whether it graduates into `AGENTS.md` as standing
+  methodology, which would bind every
   future refactor. Revisit trigger: the next refactor of comparable size — either
   it is reached for again unprompted, or its absence is felt.
+
+## Code against the rules
+
+- **Check the code against the rules the template sync adopted.** The sync
+  (2026-11-12) brought in rules the code wasn't written against: a timeout on every
+  subprocess and outbound request (CODING-RULES §6); a lint that fences the subsystem
+  boundaries, which `docs/ARCHITECTURE.md`'s "may import" column describes and nothing
+  checks (§7); and the Go block's rules on `context.Context`, goroutine owners and
+  config snapshots (§12). Revisit trigger: the next feature that touches a package —
+  check that package first.
+- **staticcheck in the lint.** The go starter's lint adds staticcheck, run as
+  `go run honnef.co/go/tools/cmd/staticcheck@<pinned version>`, a build tool rather
+  than a module dependency. cria's lint is `gofmt` and `go vet`, as CI runs them, and
+  adding a tool is the user's call. Revisit trigger: a bug staticcheck would have
+  caught, or the next change to the lint.
+- **The embedded `agents.md` next to nested-rules readers.** `internal/config/agents.md`
+  is the config root's `AGENTS.md`, kept lowercase so it doesn't read as rules for agents
+  working on cria. On a case-insensitive filesystem (macOS) a tool that loads nested
+  `AGENTS.md` files may still open it as rules for `internal/config/`. Renaming it is a
+  code change. Revisit trigger: an agent working on cria acts on the config-root page's
+  instructions.
