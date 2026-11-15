@@ -151,6 +151,40 @@ func TestPlanQuantOfAStoredQuantReclaimsOnlyWhatItUnlinks(t *testing.T) {
 	}
 }
 
+// A snapshot entry linking straight into the shared store, with no repo blob
+// in between, still never puts the store in a plan: the stored copy is hf's.
+func TestPlanQuantNeverRemovesFromTheSharedStore(t *testing.T) {
+	quant := cachedFile{name: "Flash-Q8_0.gguf", size: 500}
+	tree := newCacheTree(t)
+	repo := tree.repo("models--unsloth--Flash-GGUF").
+		snapshot("revision-one", cachedFile{name: "Flash-UD-Q4_K_XL.gguf", size: 3000}).
+		stored("revision-one", quant).
+		main("revision-one")
+	hash := blobName(quant.content())
+	payload := filepath.Join(tree.Root, "blobs", hash[:2], hash)
+	entry := filepath.Join(repo.dir, "snapshots", "revision-one", quant.name)
+	if err := os.Remove(entry); err != nil {
+		t.Fatal(err)
+	}
+	repo.link(filepath.Dir(entry), quant.name, payload)
+
+	plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
+	for _, removal := range plan.Removes {
+		if within(filepath.Join(tree.Root, "blobs"), removal.Path) {
+			t.Errorf("the plan removes %s, which is in the shared store", removal.Path)
+		}
+	}
+	if plan.Bytes != 0 {
+		t.Errorf("the plan reclaims %d bytes, want 0 — the bytes stay in the store", plan.Bytes)
+	}
+
+	applyPlan(t, tree.Root, plan)
+
+	if _, err := os.Stat(payload); err != nil {
+		t.Errorf("the stored copy is gone after the delete: %v", err)
+	}
+}
+
 // One file linked from several snapshots is one blob and several names: all of
 // them go, and the blob goes with the last of them.
 func TestPlanQuantRemovesEveryLinkOfAFileSeveralSnapshotsShare(t *testing.T) {

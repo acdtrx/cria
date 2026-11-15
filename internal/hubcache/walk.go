@@ -133,25 +133,24 @@ func readRepo(dir string, repoType RepoType, id string) (Repo, error) {
 //
 // The shared store is huggingface_hub's: since hf 2.x a Xet download lands in
 // <cache>/blobs/<xx>/<hash>, and the repo's blobs/<etag> is a symlink to it.
-// Those bytes are the repo's as much as a blob in its own directory is; leaving
-// them out reported a repo at half its size. They count once per repo — two
-// repos linking one stored blob both hold it.
+// Those bytes are the repo's as much as a blob in its own directory is. They
+// count once per repo — two repos linking one stored blob both hold it.
 func diskBytes(dir string) (own, stored int64, err error) {
-	own, err = regularBytes(dir)
-	if err != nil {
-		return 0, 0, fmt.Errorf("cannot measure the cached repository at %s: %w", dir, err)
-	}
-	store, found := sharedStore(filepath.Dir(dir))
-	if !found {
-		return own, 0, nil
-	}
-
+	store, hasStore := sharedStore(filepath.Dir(dir))
 	reached := map[string]bool{}
 	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if entry.Type()&fs.ModeSymlink == 0 {
+		if entry.Type().IsRegular() {
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			own += info.Size()
+			return nil
+		}
+		if !hasStore || entry.Type()&fs.ModeSymlink == 0 {
 			return nil
 		}
 		// A link that leads nowhere holds nothing.
@@ -224,10 +223,17 @@ func regularBytes(dir string) (int64, error) {
 		total += info.Size()
 		return nil
 	})
-	if err != nil {
-		return 0, fmt.Errorf("cannot measure %s: %w", dir, err)
+	return total, err
+}
+
+// inStore reports whether a blob path lies in the shared store, compared the
+// way the store was resolved.
+func inStore(store, blob string) bool {
+	if store == "" {
+		return false
 	}
-	return total, nil
+	dir, err := filepath.EvalSymlinks(filepath.Dir(blob))
+	return err == nil && within(store, dir)
 }
 
 // within reports whether path lies under dir.
@@ -300,10 +306,11 @@ func readRef(path string) string {
 // that (docs/specs/CACHE.md).
 //
 // A file is a name and the blob behind it. The same name reaching the same blob
-// from several snapshots is one file with several links; two names reaching one
-// blob are two files, because each belongs to whatever its name makes it — two
-// quants publishing a byte-identical shard each hold that shard, and folding it
-// under one name would leave the other quant a shard short.
+// from several snapshots is one file with several links. Two names one revision
+// gives a blob are two files, because each belongs to whatever its name makes
+// it: two quants publishing a byte-identical shard each hold that shard. A name
+// an older revision gives a blob a newer one already names is a rename, and
+// folds into the newer file — the name the repo goes by today.
 func readFiles(snapshots, ref string) (files, superseded []File, err error) {
 	entries, current, err := repoEntries(snapshots, ref)
 	if err != nil {
@@ -313,13 +320,26 @@ func readFiles(snapshots, ref string) (files, superseded []File, err error) {
 	type key struct{ name, blob string }
 	byKey := map[key]*File{}
 	var order []key
+	// The revision that first named each blob, and the file it named it as.
+	type naming struct {
+		revision int
+		file     *File
+	}
+	named := map[string]naming{}
 	for _, entry := range entries {
 		at := key{entry.name, entry.blob}
 		file := byKey[at]
 		if file == nil {
+			if first, seen := named[entry.blob]; seen && first.revision != entry.revision {
+				first.file.Links = append(first.file.Links, entry.link)
+				continue
+			}
 			file = &File{Name: entry.name, Blob: entry.blob, Bytes: entry.bytes, Modified: entry.modified}
 			byKey[at] = file
 			order = append(order, at)
+			if _, seen := named[entry.blob]; !seen {
+				named[entry.blob] = naming{revision: entry.revision, file: file}
+			}
 		}
 		file.Links = append(file.Links, entry.link)
 	}
@@ -368,11 +388,15 @@ func repoEntries(snapshots, ref string) (entries []snapshotEntry, current map[st
 		return nil, nil, err
 	}
 
+	store, _ := sharedStore(filepath.Dir(filepath.Dir(snapshots)))
 	resolves := map[string]string{}
-	for _, revision := range revisions {
-		found, err := readSnapshot(filepath.Join(snapshots, revision.name))
+	for i, revision := range revisions {
+		found, err := readSnapshot(filepath.Join(snapshots, revision.name), store)
 		if err != nil {
 			return nil, nil, err
+		}
+		for j := range found {
+			found[j].revision = i
 		}
 		for _, entry := range found {
 			if _, named := resolves[entry.name]; !named {
@@ -399,7 +423,8 @@ type revision struct {
 
 // snapshotRevisions lists the snapshots a repo holds, in authority order: the
 // revision refs/main names first when the cache actually holds it, then the rest
-// newest first.
+// newest first. A blob two revisions know by different names is reported under
+// the first one's, which is the name the repo goes by today.
 //
 // refs/main is the primary rule because it is written: both downloaders record
 // the revision they fetched, so the ref names the copy a start would use. The
@@ -451,13 +476,16 @@ type snapshotEntry struct {
 	link     string // the snapshot entry itself
 	blob     string // the file the bytes live in
 	bytes    int64
-	held     int64 // what unlinking blob returns: bytes, or nothing where blob is itself a link into huggingface_hub's shared store
+	held     int64 // what unlinking blob returns: bytes, or nothing where blob is a link into huggingface_hub's shared store or lies in it
+	stored   bool  // blob lies in the shared store itself, which is hf's to collect and never a cria delete's
 	modified time.Time
+	revision int // the snapshot's place in authority order
 }
 
 // readSnapshot lists one revision's entries. A snapshot can nest directories, so
 // the whole subtree is read and each entry keeps the path the repo gives it.
-func readSnapshot(dir string) ([]snapshotEntry, error) {
+// store is the cache's shared blob store, resolved, or empty where it has none.
+func readSnapshot(dir, store string) ([]snapshotEntry, error) {
 	var entries []snapshotEntry
 	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -474,9 +502,10 @@ func readSnapshot(dir string) ([]snapshotEntry, error) {
 		if err != nil {
 			return err
 		}
+		stored := inStore(store, blob)
 		held := info.Size()
-		if stored, err := os.Lstat(blob); err == nil && stored.Mode()&fs.ModeSymlink != 0 {
-			// The bytes live in the store and stay there when this link goes.
+		if link, err := os.Lstat(blob); stored || (err == nil && link.Mode()&fs.ModeSymlink != 0) {
+			// The bytes live in the store and stay there when this entry goes.
 			held = 0
 		}
 		entries = append(entries, snapshotEntry{
@@ -485,6 +514,7 @@ func readSnapshot(dir string) ([]snapshotEntry, error) {
 			blob:     blob,
 			bytes:    info.Size(),
 			held:     held,
+			stored:   stored,
 			modified: info.ModTime(),
 		})
 		return nil
@@ -590,6 +620,9 @@ func ggufItems(files, superseded []File) []Item {
 		return found
 	}
 
+	// An item counts each blob once, though two of its names can reach one.
+	type counted struct{ label, blob string }
+	seen := map[counted]bool{}
 	for _, file := range files {
 		label, isGGUF := GGUFItem(file.Name)
 		if !isGGUF {
@@ -597,7 +630,10 @@ func ggufItems(files, superseded []File) []Item {
 		}
 		holds := item(label)
 		holds.Files = append(holds.Files, file)
-		holds.Bytes += file.Bytes
+		if at := (counted{label, file.Blob}); !seen[at] {
+			seen[at] = true
+			holds.Bytes += file.Bytes
+		}
 		if file.Modified.After(holds.Modified) {
 			holds.Modified = file.Modified
 		}
@@ -609,7 +645,10 @@ func ggufItems(files, superseded []File) []Item {
 		}
 		holds := item(label)
 		holds.Superseded = append(holds.Superseded, file)
-		holds.SupersededBytes += file.Bytes
+		if at := (counted{label, file.Blob}); !seen[at] {
+			seen[at] = true
+			holds.SupersededBytes += file.Bytes
+		}
 		if file.Modified.After(holds.Modified) {
 			holds.Modified = file.Modified
 		}

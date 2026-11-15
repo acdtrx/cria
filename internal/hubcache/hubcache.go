@@ -72,7 +72,7 @@ type Repo struct {
 	Dir      string   // the repository directory
 	Revision string   // the snapshot refs/main names; empty when the repo has no main ref
 	Items    []Item   // the quants of a KindGGUF repo, ordered by label; empty otherwise, where the repo itself is the unit (docs/specs/CACHE.md)
-	Files    []File   // the blobs the repo's file names resolve to today, ordered by name
+	Files    []File   // the files the repo's names resolve to today, ordered by name
 
 	// Superseded is what an upstream re-upload left behind: copies of files
 	// whose names now resolve to other bytes. They are on disk, they are

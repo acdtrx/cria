@@ -255,10 +255,8 @@ func TestReadCountsABlobSharedBySnapshotsOnce(t *testing.T) {
 	}
 }
 
-// Two quants of one revision can publish a byte-identical shard — unsloth's
-// Q8_0 and UD-Q5_K_XL of Qwen3.8-Flash-Next share the shard holding the n-gram
-// table. One blob, two names, and each quant holds it: folding it under the name
-// that sorts first left the other quant a shard short and read it as absent.
+// Two quants of one revision can publish a byte-identical shard: one blob, two
+// names, and each quant holds it whole.
 func TestReadGivesEachQuantTheShardsItSharesWithAnother(t *testing.T) {
 	table := cachedFile{name: "Q8_0/Flash-Q8_0-00002-of-00002.gguf", size: 5000}
 	tree := newCacheTree(t)
@@ -290,6 +288,48 @@ func TestReadGivesEachQuantTheShardsItSharesWithAnother(t *testing.T) {
 	// The shard is on disk once, and the repo total says so.
 	if want := diskUsage(t, repo.Dir); repo.Bytes != want {
 		t.Errorf("the repo reports %d bytes, want the %d its directory occupies", repo.Bytes, want)
+	}
+}
+
+// Two names in one item reaching one blob are both listed, and the item counts
+// the blob once.
+func TestReadCountsABlobOnceInAnItemThatNamesItTwice(t *testing.T) {
+	quant := cachedFile{name: "Flash-Q4_K_M.gguf", size: 1000}
+	tree := newCacheTree(t)
+	tree.repo("models--unsloth--Flash-GGUF").
+		snapshot("revision-one", quant).
+		alias("revision-one", "Q4_K_M/Flash-Q4_K_M.gguf", quant).
+		main("revision-one")
+
+	repo := repoOf(t, read(t, tree.Root), "unsloth/Flash-GGUF")
+	item, ok := repo.Item("Q4_K_M")
+	if !ok {
+		t.Fatalf("the repo lists %v, want Q4_K_M among them", itemLabels(repo))
+	}
+	if len(item.Files) != 2 || item.Bytes != 1000 {
+		t.Errorf("Q4_K_M lists %v worth %d bytes, want both names worth the 1000 of their one blob",
+			names(item.Files), item.Bytes)
+	}
+}
+
+// A file an upstream rename moved, bytes unchanged, is one file under the name
+// the repo goes by today: the old name is not a quant of its own.
+func TestReadFoldsARenameUnderTheCurrentName(t *testing.T) {
+	quant := cachedFile{name: "Flash-UD-Q4_K_XL.gguf", size: 1000}
+	tree := newCacheTree(t)
+	tree.repo("models--unsloth--Flash-GGUF").
+		snapshot("revision-new", quant).
+		alias("revision-old", "Flash-Q4_K_XL.gguf", quant).
+		main("revision-new")
+
+	repo := repoOf(t, read(t, tree.Root), "unsloth/Flash-GGUF")
+	if got := itemLabels(repo); !reflect.DeepEqual(got, []string{"UD-Q4_K_XL"}) {
+		t.Fatalf("the repo lists %v, want only the current name's UD-Q4_K_XL", got)
+	}
+	item, _ := repo.Item("UD-Q4_K_XL")
+	if item.Bytes != 1000 || len(item.Files) != 1 || len(item.Files[0].Links) != 2 {
+		t.Errorf("UD-Q4_K_XL holds %v worth %d bytes, want one file worth 1000 reached by both names",
+			names(item.Files), item.Bytes)
 	}
 }
 
