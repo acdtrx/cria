@@ -151,13 +151,6 @@ Group entries under headings as themes emerge.
   current pick? (noted 2026-08-23, found in entry-choices step 7.) Revisit
   trigger: a cached quant shows unattributed, or a deletion plan misses a
   choices entry, in real use.
-- **Aliased blobs show as one file.** The walker keys a repo's files by blob, so
-  two different snapshot names pointing at the same blob collapse into a single
-  row in the cache view; deletion handles the aliasing correctly (it re-scans
-  snapshot links itself), only the display is lossy. (noted 2026-08-18 during
-  the surgery step.) Revisit trigger: a real repo shows a confusing row where
-  two names share bytes, or a deletion plan's "shared blobs left behind" list
-  names a file the view never showed.
 
 ## Platform & distribution
 

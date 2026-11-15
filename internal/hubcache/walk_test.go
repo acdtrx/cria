@@ -254,6 +254,44 @@ func TestReadCountsABlobSharedBySnapshotsOnce(t *testing.T) {
 	}
 }
 
+// Two quants of one revision can publish a byte-identical shard — unsloth's
+// Q8_0 and UD-Q5_K_XL of Qwen3.8-Flash-Next share the shard holding the n-gram
+// table. One blob, two names, and each quant holds it: folding it under the name
+// that sorts first left the other quant a shard short and read it as absent.
+func TestReadGivesEachQuantTheShardsItSharesWithAnother(t *testing.T) {
+	table := cachedFile{name: "Q8_0/Flash-Q8_0-00002-of-00002.gguf", size: 5000}
+	tree := newCacheTree(t)
+	tree.repo("models--unsloth--Flash-GGUF").
+		snapshot("revision-one",
+			cachedFile{name: "Q8_0/Flash-Q8_0-00001-of-00002.gguf", size: 1000},
+			table,
+			cachedFile{name: "UD-Q5_K_XL/Flash-UD-Q5_K_XL-00001-of-00002.gguf", size: 800}).
+		alias("revision-one", "UD-Q5_K_XL/Flash-UD-Q5_K_XL-00002-of-00002.gguf", table).
+		main("revision-one")
+
+	repo := repoOf(t, read(t, tree.Root), "unsloth/Flash-GGUF")
+
+	for _, want := range []struct {
+		label string
+		bytes int64
+	}{{"Q8_0", 6000}, {"UD-Q5_K_XL", 5800}} {
+		item, ok := repo.Item(want.label)
+		if !ok {
+			t.Fatalf("the repo lists %v, want %s among them", itemLabels(repo), want.label)
+		}
+		if !item.Complete || len(item.Files) != 2 {
+			t.Errorf("%s holds %v (complete %v), want both of its shards", want.label, names(item.Files), item.Complete)
+		}
+		if item.Bytes != want.bytes {
+			t.Errorf("%s holds %d bytes, want %d — the shared shard is part of it", want.label, item.Bytes, want.bytes)
+		}
+	}
+	// The shard is on disk once, and the repo total says so.
+	if want := diskUsage(t, repo.Dir); repo.Bytes != want {
+		t.Errorf("the repo reports %d bytes, want the %d its directory occupies", repo.Bytes, want)
+	}
+}
+
 // A provider who requantizes a repo leaves two copies of one file name on disk,
 // under different blobs and different snapshots. The item is what the repo holds
 // under that tag today; the copy the current revision no longer names is

@@ -98,8 +98,13 @@ func readRepo(dir string, repoType RepoType, id string) (Repo, error) {
 			repo.Modified = file.Modified
 		}
 	}
+	// Each superseded blob once: two old names can reach the same bytes.
+	reclaimable := map[string]bool{}
 	for _, file := range repo.Superseded {
-		repo.SupersededBytes += file.Bytes
+		if !reclaimable[file.Blob] {
+			reclaimable[file.Blob] = true
+			repo.SupersededBytes += file.Bytes
+		}
 	}
 
 	repo.Kind = repoKind(held)
@@ -193,32 +198,40 @@ func readRef(path string) string {
 	return strings.TrimSpace(string(content))
 }
 
-// readFiles collects the distinct blobs a repo's snapshots reach, split into the
-// copies the repo's file names resolve to today and the ones they no longer do.
-// Every revision is read, not just the current one: a quant that only an older
+// readFiles collects the files a repo's snapshots name, split into the copies
+// the repo's file names resolve to today and the ones they no longer do. Every
+// revision is read, not just the current one: a quant that only an older
 // snapshot names is still on disk, and the cache view exists to show exactly
 // that (docs/specs/CACHE.md).
+//
+// A file is a name and the blob behind it. The same name reaching the same blob
+// from several snapshots is one file with several links; two names reaching one
+// blob are two files, because each belongs to whatever its name makes it — two
+// quants publishing a byte-identical shard each hold that shard, and folding it
+// under one name would leave the other quant a shard short.
 func readFiles(snapshots, ref string) (files, superseded []File, err error) {
 	entries, current, err := repoEntries(snapshots, ref)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	byBlob := map[string]*File{}
-	var order []string
+	type key struct{ name, blob string }
+	byKey := map[key]*File{}
+	var order []key
 	for _, entry := range entries {
-		file := byBlob[entry.blob]
+		at := key{entry.name, entry.blob}
+		file := byKey[at]
 		if file == nil {
 			file = &File{Name: entry.name, Blob: entry.blob, Bytes: entry.bytes, Modified: entry.modified}
-			byBlob[entry.blob] = file
-			order = append(order, entry.blob)
+			byKey[at] = file
+			order = append(order, at)
 		}
 		file.Links = append(file.Links, entry.link)
 	}
 
-	for _, blob := range order {
-		file := *byBlob[blob]
-		if current[blob] {
+	for _, at := range order {
+		file := *byKey[at]
+		if current[at.blob] {
 			files = append(files, file)
 			continue
 		}
@@ -291,8 +304,7 @@ type revision struct {
 
 // snapshotRevisions lists the snapshots a repo holds, in authority order: the
 // revision refs/main names first when the cache actually holds it, then the rest
-// newest first. A blob two revisions know by different names is reported under
-// the first one's, which is the name the repo goes by today.
+// newest first.
 //
 // refs/main is the primary rule because it is written: both downloaders record
 // the revision they fetched, so the ref names the copy a start would use. The

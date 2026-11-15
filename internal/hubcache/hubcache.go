@@ -104,9 +104,11 @@ type Item struct {
 	Modified time.Time // the newest of its blobs
 }
 
-// File is one distinct blob a repo's snapshots reach. Snapshots hold names,
-// blobs hold bytes; several snapshots pointing at the same blob are one file
-// here, because that is what the disk holds.
+// File is one name a repo's snapshots give to one blob. Snapshots hold names,
+// blobs hold bytes; several snapshots giving the same blob the same name are one
+// file here. Two names for one blob are two files — each is part of whatever its
+// name makes it — so bytes are summed per item, and only the walk's totals count
+// each blob once (docs/specs/CACHE.md).
 type File struct {
 	Name     string    // the name the snapshots give it
 	Blob     string    // the file holding the bytes: a blob, or the snapshot entry itself where the cache stores copies instead of symlinks
