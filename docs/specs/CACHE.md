@@ -53,6 +53,12 @@ and the deletion contract. v1 is visibility and cleaning only; growth ideas wait
   its parts; a blob shared across snapshots is never double-counted. Item sizes may
   therefore not sum exactly to a repo or cache total — true bytes win over tidy
   arithmetic.
+- **huggingface_hub's shared blob store counts** (settled 2026-11-16, from chunky's
+  cache): hf 2.x keeps Xet downloads in a cache-wide store (`<cache>/blobs/<xx>/<hash>`,
+  marked `.huggingface-shared-blobs`) and links each repo's `blobs/<etag>` to it. A repo
+  counts every stored blob its links reach, so two repos linking one blob both hold it;
+  the header counts the store once, whole — blobs no repo links any more included,
+  because they are on disk. Repo totals may therefore not sum to the header either.
 
 ## Deletion (settled 2026-08-18)
 
