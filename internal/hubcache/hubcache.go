@@ -82,7 +82,8 @@ type Repo struct {
 	SupersededBytes int64
 
 	Partials     []Partial // unfinished downloads, ordered by path
-	Bytes        int64     // what the repository directory occupies on disk, partials and superseded copies included
+	Bytes        int64     // what the repository occupies on disk, partials, superseded copies and its blobs in the shared store included
+	StoreBytes   int64     // the subset held in huggingface_hub's shared blob store, which other repos may link too
 	PartialBytes int64     // the reclaimable subset
 	Complete     bool      // the repo holds files, every shard series they declare is whole, and nothing is still downloading
 	Modified     time.Time // the newest blob in the repo — when its bytes landed

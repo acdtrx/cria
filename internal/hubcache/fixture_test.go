@@ -101,6 +101,54 @@ func (r *repoTree) alias(revision, name string, of cachedFile) *repoTree {
 	return r
 }
 
+// stored adds one revision's files the way huggingface_hub 2.x lands a Xet
+// download: the bytes in the cache-wide shared store at blobs/<xx>/<hash>, the
+// repo's blobs/<etag> a relative link to them, and the store's .refs manifest
+// naming that link. A second repo storing the same file links the same bytes.
+func (r *repoTree) stored(revision string, files ...cachedFile) *repoTree {
+	r.t.Helper()
+	root := filepath.Dir(r.dir)
+	store := filepath.Join(root, "blobs")
+	mkdir(r.t, store)
+	marker := filepath.Join(store, ".huggingface-shared-blobs")
+	if _, err := os.Stat(marker); errors.Is(err, fs.ErrNotExist) {
+		if err := os.WriteFile(marker, []byte("1\n"), 0o444); err != nil {
+			r.t.Fatalf("cannot mark the shared store: %v", err)
+		}
+	}
+	dir := filepath.Join(r.dir, "snapshots", revision)
+	mkdir(r.t, dir)
+	for _, file := range files {
+		content := file.content()
+		hash := blobName(content)
+		payload := filepath.Join(store, hash[:2], hash)
+		mkdir(r.t, filepath.Dir(payload))
+		if _, err := os.Stat(payload); errors.Is(err, fs.ErrNotExist) {
+			if err := os.WriteFile(payload, content, 0o444); err != nil {
+				r.t.Fatalf("cannot write %s: %v", payload, err)
+			}
+		}
+		// The etag the repo names its blob by is not the Xet hash the store
+		// names the bytes by.
+		blob := filepath.Join(r.dir, "blobs", blobName(append([]byte("etag|"), content...)))
+		r.link(filepath.Dir(blob), filepath.Base(blob), payload)
+		rel, err := filepath.Rel(root, blob)
+		if err != nil {
+			r.t.Fatalf("cannot name %s in the store's manifest: %v", blob, err)
+		}
+		refs, err := os.OpenFile(payload+".refs", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o666)
+		if err != nil {
+			r.t.Fatalf("cannot write the manifest of %s: %v", payload, err)
+		}
+		if _, err := refs.WriteString(filepath.ToSlash(rel) + "\n"); err != nil {
+			r.t.Fatalf("cannot write the manifest of %s: %v", payload, err)
+		}
+		refs.Close()
+		r.link(dir, file.name, blob)
+	}
+	return r
+}
+
 // file drops a plain file into the repository directory, for the bookkeeping the
 // cache keeps beside the snapshots — refs, trees, .no_exist markers.
 func (r *repoTree) file(name, content string) *repoTree {

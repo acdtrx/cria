@@ -53,9 +53,18 @@ func Read(root string) (*Cache, error) {
 			return nil, err
 		}
 		cache.Repos = append(cache.Repos, repo)
-		cache.Bytes += repo.Bytes
+		cache.Bytes += repo.Bytes - repo.StoreBytes
 		cache.PartialBytes += repo.PartialBytes
 	}
+
+	// The shared store counts once and whole, not through the repos: a blob two
+	// repos link is in both and on disk once, and a blob no repo links any more
+	// is on disk all the same.
+	store, err := storeBytes(root)
+	if err != nil {
+		return nil, err
+	}
+	cache.Bytes += store
 
 	sort.Slice(cache.Repos, func(i, j int) bool { return cache.Repos[i].ID < cache.Repos[j].ID })
 	return cache, nil
@@ -66,11 +75,12 @@ func Read(root string) (*Cache, error) {
 func readRepo(dir string, repoType RepoType, id string) (Repo, error) {
 	repo := Repo{ID: id, Type: repoType, Dir: dir}
 
-	bytes, err := diskBytes(dir)
+	bytes, stored, err := diskBytes(dir)
 	if err != nil {
 		return Repo{}, err
 	}
-	repo.Bytes = bytes
+	repo.Bytes = bytes + stored
+	repo.StoreBytes = stored
 
 	partials, err := readPartials(filepath.Join(dir, "blobs"))
 	if err != nil {
@@ -115,11 +125,90 @@ func readRepo(dir string, repoType RepoType, id string) (Repo, error) {
 	return repo, nil
 }
 
-// diskBytes is what a repository directory occupies: every regular file under it.
-// Symlinks hold no bytes of their own and the blob behind them is counted where
-// it lives, so a blob several snapshots share is counted once — the true number,
-// the one du reports (docs/specs/CACHE.md).
-func diskBytes(dir string) (int64, error) {
+// diskBytes is what a repository occupies: every regular file under its
+// directory, and apart from those every file in the cache's shared store its
+// links lead to. Symlinks hold no bytes of their own and the blob behind them is
+// counted where it lives, so a blob several snapshots share is counted once —
+// the true number, the one du reports (docs/specs/CACHE.md).
+//
+// The shared store is huggingface_hub's: since hf 2.x a Xet download lands in
+// <cache>/blobs/<xx>/<hash>, and the repo's blobs/<etag> is a symlink to it.
+// Those bytes are the repo's as much as a blob in its own directory is; leaving
+// them out reported a repo at half its size. They count once per repo — two
+// repos linking one stored blob both hold it.
+func diskBytes(dir string) (own, stored int64, err error) {
+	own, err = regularBytes(dir)
+	if err != nil {
+		return 0, 0, fmt.Errorf("cannot measure the cached repository at %s: %w", dir, err)
+	}
+	store, found := sharedStore(filepath.Dir(dir))
+	if !found {
+		return own, 0, nil
+	}
+
+	reached := map[string]bool{}
+	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&fs.ModeSymlink == 0 {
+			return nil
+		}
+		// A link that leads nowhere holds nothing.
+		target, err := filepath.EvalSymlinks(path)
+		if err != nil || !within(store, target) || reached[target] {
+			return nil
+		}
+		info, err := os.Stat(target)
+		if err != nil || !info.Mode().IsRegular() {
+			return nil
+		}
+		reached[target] = true
+		stored += info.Size()
+		return nil
+	})
+	if err != nil {
+		return 0, 0, fmt.Errorf("cannot measure the cached repository at %s: %w", dir, err)
+	}
+	return own, stored, nil
+}
+
+// storeMarker is the file huggingface_hub writes into its shared blob store to
+// claim the directory; a blobs/ directory at the cache root without it is not
+// one, and hf itself refuses to use it.
+const storeMarker = ".huggingface-shared-blobs"
+
+// sharedStore finds the blob store huggingface_hub shares across a cache's
+// repos, resolved — the form the repos' links resolve to.
+func sharedStore(root string) (string, bool) {
+	dir := filepath.Join(root, "blobs")
+	if info, err := os.Lstat(filepath.Join(dir, storeMarker)); err != nil || !info.Mode().IsRegular() {
+		return "", false
+	}
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", false
+	}
+	return real, true
+}
+
+// storeBytes is what the cache's shared blob store occupies, every file in it
+// once; a cache without one has none.
+func storeBytes(root string) (int64, error) {
+	store, found := sharedStore(root)
+	if !found {
+		return 0, nil
+	}
+	bytes, err := regularBytes(store)
+	if err != nil {
+		return 0, fmt.Errorf("cannot measure the shared blob store at %s: %w", store, err)
+	}
+	return bytes, nil
+}
+
+// regularBytes is what du reports for a tree: every regular file once, links
+// contributing nothing of their own.
+func regularBytes(dir string) (int64, error) {
 	var total int64
 	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -136,9 +225,15 @@ func diskBytes(dir string) (int64, error) {
 		return nil
 	})
 	if err != nil {
-		return 0, fmt.Errorf("cannot measure the cached repository at %s: %w", dir, err)
+		return 0, fmt.Errorf("cannot measure %s: %w", dir, err)
 	}
 	return total, nil
+}
+
+// within reports whether path lies under dir.
+func within(dir, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // readPartials lists the unfinished downloads in a repo's blobs directory. A repo
@@ -356,6 +451,7 @@ type snapshotEntry struct {
 	link     string // the snapshot entry itself
 	blob     string // the file the bytes live in
 	bytes    int64
+	held     int64 // what unlinking blob returns: bytes, or nothing where blob is itself a link into huggingface_hub's shared store
 	modified time.Time
 }
 
@@ -378,11 +474,17 @@ func readSnapshot(dir string) ([]snapshotEntry, error) {
 		if err != nil {
 			return err
 		}
+		held := info.Size()
+		if stored, err := os.Lstat(blob); err == nil && stored.Mode()&fs.ModeSymlink != 0 {
+			// The bytes live in the store and stay there when this link goes.
+			held = 0
+		}
 		entries = append(entries, snapshotEntry{
 			name:     filepath.ToSlash(name),
 			link:     path,
 			blob:     blob,
 			bytes:    info.Size(),
+			held:     held,
 			modified: info.ModTime(),
 		})
 		return nil

@@ -119,6 +119,38 @@ func TestPlanQuantLeavesABlobAnotherFileStillReaches(t *testing.T) {
 	}
 }
 
+// A quant huggingface_hub keeps in its shared store unlinks to nothing: the
+// delete removes the repo's links, the bytes stay in the store for hf to collect
+// once no repo links them, and the plan says it reclaims what it really does
+// (docs/specs/CACHE.md).
+func TestPlanQuantOfAStoredQuantReclaimsOnlyWhatItUnlinks(t *testing.T) {
+	tree := newCacheTree(t)
+	tree.repo("models--unsloth--Flash-GGUF").
+		snapshot("revision-one", cachedFile{name: "Flash-UD-Q4_K_XL.gguf", size: 3000}).
+		stored("revision-one",
+			cachedFile{name: "Q8_0/Flash-Q8_0-00001-of-00002.gguf", size: 2000},
+			cachedFile{name: "Q8_0/Flash-Q8_0-00002-of-00002.gguf", size: 3000}).
+		main("revision-one")
+
+	plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
+	if plan.Bytes != 0 {
+		t.Errorf("the plan reclaims %d bytes, want 0 — the shards stay in the shared store", plan.Bytes)
+	}
+	if len(plan.Removes) != 4 {
+		t.Errorf("the plan removes %v, want both shards' snapshot entries and repo blobs", removalPaths(plan))
+	}
+
+	applyPlan(t, tree.Root, plan)
+
+	after := repoOf(t, read(t, tree.Root), "unsloth/Flash-GGUF")
+	if _, ok := after.Item("UD-Q4_K_XL"); !ok {
+		t.Errorf("the repo lists %v after the delete, want UD-Q4_K_XL still there", itemLabels(after))
+	}
+	if after.StoreBytes != 0 {
+		t.Errorf("the repo still links %d stored bytes, want none", after.StoreBytes)
+	}
+}
+
 // One file linked from several snapshots is one blob and several names: all of
 // them go, and the blob goes with the last of them.
 func TestPlanQuantRemovesEveryLinkOfAFileSeveralSnapshotsShare(t *testing.T) {

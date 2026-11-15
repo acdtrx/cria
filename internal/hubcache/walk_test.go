@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -289,6 +290,71 @@ func TestReadGivesEachQuantTheShardsItSharesWithAnother(t *testing.T) {
 	// The shard is on disk once, and the repo total says so.
 	if want := diskUsage(t, repo.Dir); repo.Bytes != want {
 		t.Errorf("the repo reports %d bytes, want the %d its directory occupies", repo.Bytes, want)
+	}
+}
+
+// huggingface_hub 2.x keeps Xet downloads in a store shared across the cache's
+// repos and links each repo's blob to it. Those bytes are the repo's: a quant
+// held there is whole and its full size, the repo counts every stored blob it
+// links, and the cache counts each stored blob once — also the ones no repo
+// links any more, which are on disk all the same (docs/specs/CACHE.md).
+func TestReadCountsWhatTheSharedStoreHolds(t *testing.T) {
+	projector := cachedFile{name: "mmproj-BF16.gguf", size: 400}
+	tree := newCacheTree(t)
+	flash := tree.repo("models--unsloth--Flash-GGUF").
+		snapshot("revision-one", cachedFile{name: "Flash-UD-Q4_K_XL.gguf", size: 3000}).
+		stored("revision-one",
+			cachedFile{name: "Q8_0/Flash-Q8_0-00001-of-00002.gguf", size: 2000},
+			cachedFile{name: "Q8_0/Flash-Q8_0-00002-of-00002.gguf", size: 3000},
+			projector).
+		main("revision-one")
+	tree.repo("models--unsloth--Small-GGUF").
+		snapshot("revision-one", cachedFile{name: "Small-Q8_0.gguf", size: 700}).
+		stored("revision-one", projector).
+		main("revision-one")
+	tree.write(filepath.Join("blobs", "ab", strings.Repeat("ab", 32)), strings.Repeat("x", 900))
+
+	cache := read(t, tree.Root)
+	repo := repoOf(t, cache, "unsloth/Flash-GGUF")
+	small := repoOf(t, cache, "unsloth/Small-GGUF")
+
+	quant, ok := repo.Item("Q8_0")
+	if !ok {
+		t.Fatalf("the repo lists %v, want Q8_0 among them", itemLabels(repo))
+	}
+	if !quant.Complete || quant.Bytes != 5000 {
+		t.Errorf("Q8_0 holds %d bytes (complete %v), want both stored shards: 5000", quant.Bytes, quant.Complete)
+	}
+	if want := diskUsage(t, flash.dir) + 5400; repo.Bytes != want || repo.StoreBytes != 5400 {
+		t.Errorf("the repo reports %d bytes, %d of them stored, want %d: its directory and the 5400 it links in the store",
+			repo.Bytes, repo.StoreBytes, want)
+	}
+	if want := diskUsage(t, small.Dir) + 400; small.Bytes != want {
+		t.Errorf("the other repo reports %d bytes, want %d: its directory and the projector it links", small.Bytes, want)
+	}
+	// The projector both repos link is on disk once, and so is the stored blob
+	// nothing links.
+	want := diskUsage(t, repo.Dir) + diskUsage(t, small.Dir) + diskUsage(t, filepath.Join(tree.Root, "blobs"))
+	if cache.Bytes != want {
+		t.Errorf("the cache reports %d bytes, want the %d the repos and the store occupy", cache.Bytes, want)
+	}
+}
+
+// A blobs/ directory huggingface_hub has not marked as its store is not one: hf
+// refuses to use it, and cria does not count it as anything's.
+func TestReadIgnoresAnUnmarkedStore(t *testing.T) {
+	tree := newCacheTree(t)
+	repo := tree.repo("models--unsloth--Flash-GGUF").
+		stored("revision-one", cachedFile{name: "Flash-Q8_0.gguf", size: 2000}).
+		main("revision-one")
+	if err := os.Remove(filepath.Join(tree.Root, "blobs", ".huggingface-shared-blobs")); err != nil {
+		t.Fatal(err)
+	}
+
+	cache := read(t, tree.Root)
+	if got := repoOf(t, cache, "unsloth/Flash-GGUF"); got.StoreBytes != 0 || got.Bytes != diskUsage(t, repo.dir) {
+		t.Errorf("the repo reports %d bytes, %d of them stored, want only what its directory holds: %d",
+			got.Bytes, got.StoreBytes, diskUsage(t, repo.dir))
 	}
 }
 

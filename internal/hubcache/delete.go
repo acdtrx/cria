@@ -445,7 +445,10 @@ func quantRemovals(ours, others []snapshotEntry) ([]Removal, []Shared) {
 				shared = append(shared, Shared{Blob: entry.blob, Bytes: entry.bytes, Links: held})
 			}
 		} else {
-			blobs[entry.blob] = entry.bytes
+			// What the removal returns, not what the file holds: a blob that is
+			// a link into the shared store unlinks to nothing, and the store's
+			// copy is hf's to collect once no repo links it.
+			blobs[entry.blob] = entry.held
 		}
 		// Where the cache holds a copy instead of a symlink the entry is the
 		// blob, and a blob that stays keeps its own entry with it.
