@@ -116,13 +116,14 @@ func MatchQuant(labels []string, quant string) (int, bool) {
 // Shards fold into one item either way, and a fallback series is named after
 // the file its shards are parts of.
 //
-// A projector is the exception that has to come first: it carries a precision
-// token that reads exactly like a quantization (mmproj-BF16.gguf) but pairs with
-// any quant of its repo, so grouping it under that token would fold two unrelated
-// things into one row — and one delete.
+// A projector and an MTP draft head are the exceptions that have to come first:
+// each carries a precision token that reads exactly like a quantization
+// (mmproj-BF16.gguf, mtp-Qwen3.8-Flash-Next-Q8_0.gguf) but pairs with any quant
+// of its repo, so grouping it under that token would fold two unrelated things
+// into one row — and one delete.
 func itemLabel(name string) string {
 	base, _, _, _ := splitShard(name)
-	if isProjector(base) {
+	if isProjector(base) || isDraftHead(base) {
 		return base
 	}
 	if label, ok := quantLabel(name); ok {
@@ -147,6 +148,13 @@ func GGUFItem(name string) (string, bool) {
 // llama.cpp and the repos publishing them mark by naming it mmproj-*.
 func isProjector(name string) bool {
 	return strings.HasPrefix(strings.ToLower(filepath.Base(name)), "mmproj")
+}
+
+// isDraftHead reports whether a file is a multi-token-prediction head, which
+// the repos publishing one beside their quants name mtp-*; llama-server loads it
+// as the draft model for whichever quant it serves.
+func isDraftHead(name string) bool {
+	return strings.HasPrefix(strings.ToLower(filepath.Base(name)), "mtp-")
 }
 
 // seriesComplete reports whether every shard the given file names declare is

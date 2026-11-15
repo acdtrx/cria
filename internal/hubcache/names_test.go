@@ -185,6 +185,29 @@ func TestProjectorsAreNeverQuantItems(t *testing.T) {
 	}
 }
 
+// An MTP draft head carries a quant token too, and pairs with any quant of its
+// repo: it is its own item, so a quant's delete never takes the head the other
+// quants draft with.
+func TestDraftHeadsAreNeverQuantItems(t *testing.T) {
+	tests := []struct {
+		name  string
+		label string
+	}{
+		{"mtp-Qwen3.8-Flash-Next-Q8_0.gguf", "mtp-Qwen3.8-Flash-Next-Q8_0.gguf"},
+		{"MTP/mtp-Qwen3.8-27B-Q4_0.gguf", "MTP/mtp-Qwen3.8-27B-Q4_0.gguf"},
+		{"MTP-Qwen3.8-Flash-Next-Q8_0.gguf", "MTP-Qwen3.8-Flash-Next-Q8_0.gguf"},
+		// A quant whose model name merely contains the letters stays a quant.
+		{"Qwen3-mtp-Q4_K_M.gguf", "Q4_K_M"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if label := itemLabel(test.name); label != test.label {
+				t.Errorf("%q becomes item %q, want %q", test.name, label, test.label)
+			}
+		})
+	}
+}
+
 // GGUFItem is the rule internal/hubapi shares to sum the same files off the
 // Hub's listing that the walk finds on disk, so it has to answer for a repo's
 // non-weight files too — and for the extension in whatever case a repo spells
