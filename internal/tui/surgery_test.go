@@ -2,7 +2,9 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -294,6 +296,13 @@ func TestDeleteConfirmOfAStoredDeleteWithoutHF(t *testing.T) {
 				Stored: true,
 				Repos:  []string{"unsloth/Qwen3-30B-A3B-Instruct-GGUF"},
 			},
+			{
+				Blob:   "/hub/blobs/de/dede",
+				Bytes:  324 << 20,
+				Links:  []string{"/hub/models--unsloth--Qwen3-30B-A3B-Instruct-GGUF/blobs/efef"},
+				Stored: true,
+				Repos:  []string{"unsloth/Qwen3-30B-A3B-Instruct-GGUF"},
+			},
 			{Blob: "/hub/blobs/ff/ffff", Bytes: 1 << 30, Stored: true},
 		},
 		Stored: 18 << 30,
@@ -311,9 +320,99 @@ func TestDeleteConfirmOfAStoredDeleteWithoutHF(t *testing.T) {
 		"reclaims 0 B",
 		"store    18.0 GiB stays in hf's shared store; `hf cache prune` frees it (it also removes old revisions and unfinished downloads).",
 		"removes  4 paths",
-		"shared   dddd stays: 700.0 MiB in hf's shared store another repo still links, kept by unsloth/Qwen3-30B-A3B-Instruct-GGUF",
-		"ffff stays: 1.0 GiB in hf's shared store with no readable .refs manifest, which hf never frees",
+		"shared   1.0 GiB in 2 files stays in hf's shared store, kept by unsloth/Qwen3-30B-A3B-Instruct-GGUF",
+		"1.0 GiB in 1 file stays in hf's shared store with no readable .refs manifest, which hf never frees",
 		"used by  referenced by entry qwen — the entry stays; its next start re-downloads",
+		"y deletes it; esc leaves it alone.",
+	}
+	if got := confirmText(t, frame); !reflect.DeepEqual(got, want) {
+		t.Errorf("the confirmation reads\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// However many blobs a delete leaves behind, the confirmation still shows the
+// entries it costs a download and the question it asks: the blobs give way,
+// and say how many lines did.
+func TestDeleteConfirmKeepsItsQuestionWithManyKeepers(t *testing.T) {
+	frame, world := cacheFrame(t)
+	plan := quantPlan()
+	plan.Shared = nil
+	for i := range 40 {
+		plan.Shared = append(plan.Shared, hubcache.Shared{
+			Blob:   fmt.Sprintf("/hub/blobs/%02x/%064x", i, i),
+			Bytes:  1 << 30,
+			Links:  []string{fmt.Sprintf("/hub/models--org--Mirror-%d/blobs/%d", i, i)},
+			Stored: true,
+			Repos:  []string{fmt.Sprintf("org/Mirror-%d", i)},
+		})
+	}
+	world.surgery.plan = plan
+	frame = onRow(t, frame, "UD-Q4_K_XL")
+	frame, cmd := press(t, frame, typed('x'))
+	frame = answer(t, frame, cmd)
+
+	// Ten rows of body: the head, the used-by line and the question take six.
+	var text []string
+	drawn := strings.Split(plain(frame.confirmPanel(300, 12)), "\n")
+	for _, line := range drawn[1 : len(drawn)-1] {
+		text = append(text, strings.TrimSpace(strings.Trim(line, "│")))
+	}
+	want := []string{
+		"delete unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL?",
+		"reclaims 18.0 GiB",
+		"removes  4 paths",
+		"shared   1.0 GiB in 1 file stays in hf's shared store, kept by org/Mirror-0",
+		"1.0 GiB in 1 file stays in hf's shared store, kept by org/Mirror-1",
+		"1.0 GiB in 1 file stays in hf's shared store, kept by org/Mirror-2",
+		"… and 37 more lines",
+		"used by  referenced by entry qwen — the entry stays; its next start re-downloads",
+		"",
+		"y deletes it; esc leaves it alone.",
+	}
+	if !reflect.DeepEqual(text, want) {
+		t.Errorf("the confirmation reads\n%s\nwant\n%s", strings.Join(text, "\n"), strings.Join(want, "\n"))
+	}
+
+	// A pane too short for even the head still asks its question.
+	short := strings.Split(plain(frame.confirmPanel(300, 6)), "\n")
+	if last := strings.TrimSpace(strings.Trim(short[len(short)-2], "│")); last != "y deletes it; esc leaves it alone." {
+		t.Errorf("a four-row confirmation ends %q, want the question", last)
+	}
+
+	// Blobs one repository keeps fold into one line, whatever their number.
+	for i := range plan.Shared {
+		plan.Shared[i].Repos = []string{"org/Mirror"}
+	}
+	if got := confirmText(t, frame); !slices.Contains(got, "shared   40.0 GiB in 40 files stays in hf's shared store, kept by org/Mirror") {
+		t.Errorf("the confirmation reads\n%s\nwant one line for the 40 files org/Mirror keeps", strings.Join(got, "\n"))
+	}
+}
+
+// The copies a re-upload replaced are cria's own delete even where they sit in
+// hf's shared store, so their confirmation says what stays there — with hf
+// found as without it (docs/specs/CACHE.md, Deletion).
+func TestDeleteConfirmOfStoredSupersededCopies(t *testing.T) {
+	frame, world := cacheFrame(t)
+	world.surgery.plan = &hubcache.Plan{
+		Target: hubcache.Target{Kind: hubcache.TargetSuperseded, Repo: "unsloth/Qwen3-30B-A3B-GGUF", Quant: "UD-Q4_K_XL"},
+		Removes: []hubcache.Removal{
+			{Path: "/hub/models--unsloth--Qwen3-30B-A3B-GGUF/blobs/3333"},
+			{Path: "/hub/models--unsloth--Qwen3-30B-A3B-GGUF/snapshots/old/Qwen3-UD-Q4_K_XL.gguf"},
+		},
+		Dirs:   []string{"/hub/models--unsloth--Qwen3-30B-A3B-GGUF/snapshots/old"},
+		Stored: 4 << 30,
+	}
+	frame = onRow(t, frame, "superseded · 2026-08-05 · 2 files")
+
+	frame, cmd := press(t, frame, typed('x'))
+	frame = answer(t, frame, cmd)
+
+	want := []string{
+		"delete the superseded copies of unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL?",
+		"reclaims 0 B",
+		"store    4.0 GiB stays in hf's shared store; `hf cache prune` frees it (it also removes old revisions and unfinished downloads).",
+		"removes  2 paths, and 1 emptied directories",
+		"used by  referenced by entry qwen — the entry stays; the copy it serves stays with it",
 		"y deletes it; esc leaves it alone.",
 	}
 	if got := confirmText(t, frame); !reflect.DeepEqual(got, want) {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -193,42 +194,121 @@ func (m model) deleted(msg deletedMsg) (model, tea.Cmd) {
 // it leaves in hf's shared store, the paths it removes, the blobs it has to
 // leave behind, and the entries that name what is about to go
 // (docs/specs/CACHE.md).
+//
+// The blobs left behind are the one part that can run long, so they are what
+// gives way when the pane is short: the entries a delete costs a download and
+// the question it asks always stay on screen.
 func (m model) confirmPanel(width, rows int) string {
 	plan := m.confirm.plan
 	inner := width - 4
 
-	detail := &details{inner: inner}
-	detail.lines = []string{noticeStyle.Render("delete " + plan.Target.String() + "?")}
-	detail.add("reclaims", format.Bytes(plan.Bytes), factStyle)
+	head := &details{inner: inner}
+	head.lines = []string{noticeStyle.Render("delete " + plan.Target.String() + "?")}
+	head.add("reclaims", format.Bytes(plan.Bytes), factStyle)
 	if plan.Stored > 0 {
 		// cria unlinks only the repository's own entries; the bytes they led to
 		// in hf's store are hf's to free (docs/specs/CACHE.md, Deletion).
-		detail.add("store", fmt.Sprintf("%s stays in hf's shared store; `hf cache prune` frees it "+
+		head.add("store", fmt.Sprintf("%s stays in hf's shared store; `hf cache prune` frees it "+
 			"(it also removes old revisions and unfinished downloads).", format.Bytes(plan.Stored)), noticeStyle)
 	}
-	detail.add("removes", removalWords(plan), factStyle)
+	head.add("removes", removalWords(plan), factStyle)
 
-	for i, shared := range plan.Shared {
+	kept := &details{inner: inner}
+	for i, words := range sharedWords(plan.Shared) {
 		label := "shared"
 		if i > 0 {
 			label = ""
 		}
-		detail.add(label, sharedWords(shared), quietStyle)
+		kept.add(label, words, quietStyle)
 	}
 
+	used := &details{inner: inner}
 	for i, id := range m.entriesUsing(plan.Target.Repo, plan.Target.Quant) {
 		label := "used by"
 		if i > 0 {
 			label = ""
 		}
-		detail.add(label, fmt.Sprintf("referenced by entry %s — %s", id, entryFate(plan.Target)), noticeStyle)
+		used.add(label, fmt.Sprintf("referenced by entry %s — %s", id, entryFate(plan.Target)), noticeStyle)
 	}
 
-	lines := append(detail.lines, "", quietStyle.Render("y deletes it; esc leaves it alone."))
+	tail := []string{"", quietStyle.Render("y deletes it; esc leaves it alone.")}
 	if m.confirm.note != "" {
-		lines = append(lines, noticeStyle.Render(m.confirm.note))
+		tail = append(tail, noticeStyle.Render(m.confirm.note))
 	}
-	return pane(paneTitle(deleteScope), width, sizeLines(lines, rows-2))
+
+	capacity := rows - 2
+	room := capacity - len(head.lines) - len(used.lines) - len(tail)
+	body := slices.Concat(head.lines, fitLines(kept.lines, room, inner), used.lines)
+	if over := len(body) + len(tail) - capacity; over > 0 {
+		body = body[:max(len(body)-over, 0)]
+	}
+	return pane(paneTitle(deleteScope), width, sizeLines(append(body, tail...), capacity))
+}
+
+// fitLines keeps what fits of a run of detail lines in room lines, the last of
+// them saying how many did not.
+func fitLines(lines []string, room, inner int) []string {
+	if len(lines) <= room {
+		return lines
+	}
+	if room < 1 {
+		return nil
+	}
+	cut := &details{inner: inner}
+	cut.add("", fmt.Sprintf("… and %d more lines", len(lines)-room+1), quietStyle)
+	return append(slices.Clone(lines[:room-1]), cut.lines[0])
+}
+
+// sharedWords says, of the blobs a plan leaves behind, what each costs and what
+// keeps it. A blob of this repository is named with the snapshot entries that
+// keep it. Payloads in hf's shared store are told by who keeps them — one line
+// per set of other repositories still linking them, and one for those whose
+// manifest hf cannot read, which it never frees — since a large repository can
+// leave hundreds, and their hashes say nothing.
+func sharedWords(shared []hubcache.Shared) []string {
+	type group struct {
+		files int
+		bytes int64
+	}
+	var words, order []string
+	stored := map[string]*group{}
+	unlisted := &group{}
+	for _, blob := range shared {
+		switch {
+		case !blob.Stored:
+			words = append(words, fmt.Sprintf("%s stays: %s another file still reaches, kept by %s",
+				filepath.Base(blob.Blob), format.Bytes(blob.Bytes), strings.Join(baseNames(blob.Links), ", ")))
+		case len(blob.Links) == 0:
+			unlisted.files++
+			unlisted.bytes += blob.Bytes
+		default:
+			keepers := strings.Join(blob.Repos, ", ")
+			if stored[keepers] == nil {
+				stored[keepers] = &group{}
+				order = append(order, keepers)
+			}
+			stored[keepers].files++
+			stored[keepers].bytes += blob.Bytes
+		}
+	}
+	for _, keepers := range order {
+		kept := stored[keepers]
+		words = append(words, fmt.Sprintf("%s in %s stays in hf's shared store, kept by %s",
+			format.Bytes(kept.bytes), files(kept.files), keepers))
+	}
+	if unlisted.files > 0 {
+		words = append(words, fmt.Sprintf("%s in %s stays in hf's shared store with no readable .refs manifest, which hf never frees",
+			format.Bytes(unlisted.bytes), files(unlisted.files)))
+	}
+	return words
+}
+
+// files counts files the way a sentence does.
+func files(count int) string {
+	if count == 1 {
+		return "1 file"
+	}
+	return fmt.Sprintf("%d files", count)
 }
 
 // entryFate is what a delete leaves the config entries that name those bytes.
@@ -240,25 +320,6 @@ func entryFate(target hubcache.Target) string {
 		return "the entry stays; the copy it serves stays with it"
 	}
 	return "the entry stays; its next start re-downloads"
-}
-
-// sharedWords says why a blob a plan leaves behind stays, and what keeps it: a
-// snapshot entry of this repository by its file name, a payload in hf's shared
-// store by the repositories still linking it — or by nothing anyone can name,
-// where its manifest cannot say, which hf answers by never freeing it.
-func sharedWords(shared hubcache.Shared) string {
-	blob, bytes := filepath.Base(shared.Blob), format.Bytes(shared.Bytes)
-	switch {
-	case !shared.Stored:
-		return fmt.Sprintf("%s stays: %s another file still reaches, kept by %s",
-			blob, bytes, strings.Join(baseNames(shared.Links), ", "))
-	case len(shared.Links) == 0:
-		return fmt.Sprintf("%s stays: %s in hf's shared store with no readable .refs manifest, which hf never frees",
-			blob, bytes)
-	default:
-		return fmt.Sprintf("%s stays: %s in hf's shared store another repo still links, kept by %s",
-			blob, bytes, strings.Join(shared.Repos, ", "))
-	}
 }
 
 // removalWords is what a plan takes off the disk, counted the way it removes
