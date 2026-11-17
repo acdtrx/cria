@@ -3,14 +3,16 @@
 // cache holds, with the true blob-deduped sizes docs/specs/CACHE.md promises, and
 // whether a config entry's model is already fully present.
 //
-// Everything here is filesystem observation: no Hub API call, no `hf` exec, no
-// server output parsed. The result is data — naming repos, their quants, their
+// Everything here is filesystem observation: no Hub API call, no server output
+// parsed. The one exec is `hf cache rm`, for a delete hf's shared blob store is
+// part of (hfrm.go). The result is data — naming repos, their quants, their
 // files and their bytes belongs here; deciding how to show any of it belongs to
 // the TUI and the CLI.
 //
 // The write side is deletion, and only deletion: a plan states what would go
 // before anything is touched, and executing it removes exactly that set
-// (delete.go). Nothing else in this package writes to the cache.
+// (delete.go) — or hands it to hf, where hf's store holds the bytes. Nothing
+// else in this package writes to the cache.
 package hubcache
 
 import (

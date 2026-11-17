@@ -1,11 +1,13 @@
 package hubcache
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -93,8 +95,15 @@ type Plan struct {
 	// is in Shared instead.
 	Stored int64
 
+	// HFTargets is the delete as `hf cache rm` takes it — hf:// URIs, one per
+	// file path, or the repository's own — where it unlinks files whose bytes
+	// live in the shared store and is a unit hf can name. Empty, the delete is
+	// cria's alone; with hf not found, it is cria's all the same.
+	HFTargets []string
+
 	dir      string   // the repository directory, for Execute's re-derivation
 	repoType RepoType // likewise: readRepo needs the namespace back
+	payloads []string // every shared-store payload the removals link to, for what Execute measures
 }
 
 // Removal is one path a plan removes and what removing it returns to the disk.
@@ -197,7 +206,9 @@ func PlanQuant(repo *Repo, quant string, served []Served) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newPlan(repo, target, removes, dirs, shared), nil
+	plan := newPlan(repo, target, removes, dirs, shared)
+	plan.offerToHF(fileURIs(repo, ours))
+	return plan, nil
 }
 
 // PlanRepo describes deleting a whole repository directory — how an MLX model
@@ -337,11 +348,21 @@ func orAnything(label string) string {
 // The caller holds fresh serving state at the moment it executes, so passing it
 // closes that window with no machinery of its own.
 //
+// A plan with HFTargets goes through `hf cache rm` when hf is the program
+// named — the path the tool check resolved, empty when hf was not found —
+// and is cria's own otherwise (docs/specs/CACHE.md, Deletion).
+//
 // Directories go last and only through os.Remove, which refuses a directory
 // that is not empty: a delete can never take something the plan did not name.
 // A failure part-way returns the bytes reclaimed so far with the error — those
 // bytes are gone, and reporting zero would be a lie about the disk.
-func Execute(plan *Plan, served []Served) (int64, error) {
+func Execute(ctx context.Context, plan *Plan, served []Served, hf string) (int64, error) {
+	return execute(ctx, plan, served, hf, runHF)
+}
+
+// execute is Execute with its one exec injected, so tests can stand a fake in
+// for hf.
+func execute(ctx context.Context, plan *Plan, served []Served, hf string, run hfRunner) (int64, error) {
 	current, err := replan(plan)
 	if err != nil {
 		return 0, err
@@ -351,6 +372,9 @@ func Execute(plan *Plan, served []Served) (int64, error) {
 	}
 	if err := guard(plan.Target, served); err != nil {
 		return 0, err
+	}
+	if len(plan.HFTargets) > 0 && hf != "" {
+		return throughHF(ctx, plan, hf, run)
 	}
 
 	var reclaimed int64
@@ -416,7 +440,9 @@ func repoPlan(repo *Repo, target Target) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newPlan(repo, target, removes, dirs, nil), nil
+	plan := newPlan(repo, target, removes, dirs, nil)
+	plan.offerToHF([]string{repoURI(repo)})
+	return plan, nil
 }
 
 // newPlan assembles a plan and totals what it reclaims, so no caller sums the
@@ -424,7 +450,7 @@ func repoPlan(repo *Repo, target Target) (*Plan, error) {
 // the shared store is judged here, once for every kind of delete: unlinking a
 // repository's blob is the same act whichever unit took it.
 func newPlan(repo *Repo, target Target, removes []Removal, dirs []string, shared []Shared) *Plan {
-	stored, kept := storeFate(filepath.Dir(repo.Dir), pathsOf(removes))
+	stored, kept, payloads := storeFate(filepath.Dir(repo.Dir), pathsOf(removes))
 	plan := &Plan{
 		Target:   target,
 		Removes:  removes,
@@ -433,11 +459,49 @@ func newPlan(repo *Repo, target Target, removes []Removal, dirs []string, shared
 		Stored:   stored,
 		dir:      repo.Dir,
 		repoType: repo.Type,
+		payloads: payloads,
 	}
 	for _, removal := range removes {
 		plan.Bytes += removal.Bytes
 	}
 	return plan
+}
+
+// offerToHF hands the delete to hf as targets, where it unlinks a link into the
+// shared store: freeing the bytes behind those links is hf's, and only `hf
+// cache rm` does it by hf's rule (docs/specs/CACHE.md, Deletion). Superseded
+// copies and unfinished downloads are never offered — hf's targets cannot name
+// an old copy apart from the current one, and a partial has no link at all.
+func (p *Plan) offerToHF(targets []string) {
+	if len(p.payloads) > 0 {
+		p.HFTargets = targets
+	}
+}
+
+// repoURI names a repository the way `hf cache rm` takes it.
+func repoURI(repo *Repo) string {
+	return "hf://" + uriTypes[repo.Type] + "/" + repo.ID
+}
+
+// fileURIs names, once each, the file paths a quant's snapshot entries give —
+// hf takes a path out of every revision that holds it, as the plan does.
+func fileURIs(repo *Repo, entries []snapshotEntry) []string {
+	var uris []string
+	for _, entry := range entries {
+		uri := repoURI(repo) + "/" + entry.name
+		if !slices.Contains(uris, uri) {
+			uris = append(uris, uri)
+		}
+	}
+	sort.Strings(uris)
+	return uris
+}
+
+// uriTypes is the type an hf:// URI spells a repository's namespace with.
+var uriTypes = map[RepoType]string{
+	RepoModel:   "models",
+	RepoDataset: "datasets",
+	RepoSpace:   "spaces",
 }
 
 // quantRemovals works out what deleting one item's links takes and what it has
@@ -658,6 +722,9 @@ func difference(planned, current *Plan) string {
 
 	if strings.Join(current.Dirs, "\n") != strings.Join(planned.Dirs, "\n") {
 		return "the directories the delete would leave empty are not the ones it planned for"
+	}
+	if strings.Join(current.HFTargets, "\n") != strings.Join(planned.HFTargets, "\n") {
+		return "what the delete would hand to hf is not what it planned to"
 	}
 	return ""
 }

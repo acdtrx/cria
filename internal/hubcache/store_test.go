@@ -1,6 +1,7 @@
 package hubcache
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -488,7 +489,7 @@ func TestExecuteNamesWhatNowKeepsAStoredFile(t *testing.T) {
 			plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
 			tc.change(t, tree)
 
-			_, err := Execute(plan, nil)
+			_, err := Execute(context.Background(), plan, nil, "")
 			var drift *DriftError
 			if !errors.As(err, &drift) {
 				t.Fatalf("the execute answered %v, want a *DriftError", err)

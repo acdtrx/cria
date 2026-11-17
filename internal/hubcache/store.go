@@ -39,29 +39,27 @@ var hfRepoDirs = map[string]string{
 // storeFate is what a set of removals leaves in the cache's shared store: the
 // bytes of every payload whose links all go with them, which no repository
 // reaches any more, and the payloads something still keeps — another link the
-// manifest lists, or a manifest that cannot say.
-func storeFate(root string, removed map[string]bool) (int64, []Shared) {
+// manifest lists, or a manifest that cannot say. payloads is every payload the
+// removals link to, the one and the other.
+func storeFate(root string, removed map[string]bool) (unreferenced int64, kept []Shared, payloads []string) {
 	if !hfStore(root) {
-		return 0, nil
+		return 0, nil, nil
 	}
 
-	payloads := map[string]bool{}
+	linked := map[string]bool{}
 	for path := range removed {
 		// A removal hf cannot read as one of its links is not one: it leads
 		// nowhere in the store, so it leaves nothing there.
 		if payload, managed, _ := storeTarget(root, path); managed {
-			payloads[payload] = true
+			linked[payload] = true
 		}
 	}
-	ordered := make([]string, 0, len(payloads))
-	for payload := range payloads {
-		ordered = append(ordered, payload)
+	for payload := range linked {
+		payloads = append(payloads, payload)
 	}
-	sort.Strings(ordered)
+	sort.Strings(payloads)
 
-	var unreferenced int64
-	var kept []Shared
-	for _, payload := range ordered {
+	for _, payload := range payloads {
 		info, err := os.Lstat(payload)
 		if err != nil || !info.Mode().IsRegular() {
 			// A link to nothing holds nothing.
@@ -86,7 +84,7 @@ func storeFate(root string, removed map[string]bool) (int64, []Shared) {
 			Repos:  linkRepos(root, keepers),
 		})
 	}
-	return unreferenced, kept
+	return unreferenced, kept, payloads
 }
 
 // hfStore reports whether the cache holds a shared store hf would free from:

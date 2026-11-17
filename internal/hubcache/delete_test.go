@@ -1,6 +1,7 @@
 package hubcache
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -642,7 +643,7 @@ func TestPlanSupersededIsNotRefusedByTheServerOnThatQuant(t *testing.T) {
 	// And the guard at execute time agrees with the guard at plan time, so a
 	// confirmation cannot be answered into a refusal.
 	before := diskUsage(t, tree.Root)
-	reclaimed, err := Execute(plan, served)
+	reclaimed, err := Execute(context.Background(), plan, served, "")
 	if err != nil {
 		t.Fatalf("reclaiming the superseded copies of a served quant: %v", err)
 	}
@@ -983,7 +984,7 @@ func applyPlan(t *testing.T, root string, plan *Plan) int64 {
 
 	// Nothing is serving in the fixtures these deletes run against; the guard at
 	// execute time has its own tests.
-	reclaimed, err := Execute(plan, nil)
+	reclaimed, err := Execute(context.Background(), plan, nil, "")
 	if err != nil {
 		t.Fatalf("executing the plan for %s: %v", plan.Target, err)
 	}
@@ -1025,7 +1026,7 @@ func refuseExecute(t *testing.T, root string, plan *Plan, served []Served) error
 	t.Helper()
 	before := treeEntries(t, root)
 
-	reclaimed, err := Execute(plan, served)
+	reclaimed, err := Execute(context.Background(), plan, served, "")
 	if err == nil {
 		t.Fatalf("the plan for %s executed, want a refusal", plan.Target)
 	}
