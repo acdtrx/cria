@@ -7,8 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A delete that unlinks files whose bytes live in hf's shared store runs
@@ -26,13 +28,18 @@ type fakeHF struct {
 	stderr  string     // what a failing run says
 	fail    error      // the run's error; nil for a clean exit
 	idle    bool       // exit cleanly having removed nothing
+	hang    bool       // run until killed, as a hung hf does
 }
 
-func (f *fakeHF) run(_ context.Context, program string, args []string) ([]byte, error) {
+func (f *fakeHF) run(ctx context.Context, program string, args []string) ([]byte, error) {
 	f.program = program
 	f.args = append(f.args, args)
+	if f.hang {
+		<-ctx.Done()
+		return []byte(f.stderr), errors.New("signal: killed")
+	}
 	if f.idle {
-		return nil, nil
+		return []byte(f.stderr), nil
 	}
 	targets := args[5:]
 	var swept []string
@@ -52,12 +59,12 @@ func (f *fakeHF) run(_ context.Context, program string, args []string) ([]byte, 
 // whose links it unlinked.
 func (f *fakeHF) remove(target string) []string {
 	f.t.Helper()
-	rest, ok := strings.CutPrefix(target, "hf://models/")
-	if !ok {
-		f.t.Fatalf("hf was handed %q, want an hf://models/ URI", target)
+	kind, rest, _ := strings.Cut(strings.TrimPrefix(target, "hf://"), "/")
+	if !strings.HasPrefix(target, "hf://") || !slices.Contains([]string{"models", "datasets", "spaces"}, kind) {
+		f.t.Fatalf("hf was handed %q, want an hf://models/, hf://datasets/ or hf://spaces/ URI", target)
 	}
 	parts := strings.SplitN(rest, "/", 3)
-	repo := filepath.Join(f.root, "models--"+parts[0]+"--"+parts[1])
+	repo := filepath.Join(f.root, kind+"--"+parts[0]+"--"+parts[1])
 
 	if len(parts) == 2 {
 		var payloads []string
@@ -258,9 +265,13 @@ func TestExecuteRefusesAnHFRunThatLeftTheDeleteInPlace(t *testing.T) {
 		main("revision-one")
 
 	plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
-	reclaimed, err := executeThrough(t, tree.Root, plan, &fakeHF{t: t, root: tree.Root, idle: true})
-	if err == nil || !strings.Contains(err.Error(), "hf cache rm left 2 of the 2 paths of unsloth/Flash-GGUF:Q8_0 in place") {
-		t.Errorf("the execute answered %v, want it to say hf left the delete in place", err)
+	idle := &fakeHF{t: t, root: tree.Root, idle: true,
+		stderr: "\x1b[33mCould not find in cache:\x1b[0m\n  - hf://models/unsloth/Flash-GGUF/Flash-Q8_0.gguf\nNothing to delete.\n"}
+	reclaimed, err := executeThrough(t, tree.Root, plan, idle)
+	want := "hf cache rm left 2 of the 2 paths of unsloth/Flash-GGUF:Q8_0 in place, "
+	said := "; it said: Could not find in cache: · - hf://models/unsloth/Flash-GGUF/Flash-Q8_0.gguf · Nothing to delete."
+	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), said) {
+		t.Errorf("the execute answered %v, want it to say hf left the delete in place, and what hf said", err)
 	}
 	if reclaimed != 0 {
 		t.Errorf("the delete reports %d bytes reclaimed, want none", reclaimed)
@@ -328,6 +339,111 @@ func TestRunHFCarriesStderrAndTheExit(t *testing.T) {
 	}
 	if err == nil || err.Error() != "exit status 3" {
 		t.Errorf("the run answered %v, want exit status 3", err)
+	}
+}
+
+// A repository of another namespace goes to hf under that namespace's URI.
+func TestExecuteNamesEachNamespaceToHF(t *testing.T) {
+	for dir, want := range map[string]string{
+		"datasets--unsloth--Flash-Data": "hf://datasets/unsloth/Flash-Data",
+		"spaces--unsloth--Flash-Demo":   "hf://spaces/unsloth/Flash-Demo",
+	} {
+		t.Run(dir, func(t *testing.T) {
+			tree := newCacheTree(t)
+			tree.repo(dir).
+				stored("revision-one", cachedFile{name: "data.bin", size: 2000}).
+				main("revision-one")
+			repoType, id, _ := parseRepoDir(dir)
+			repo := repoOf(t, read(t, tree.Root), id)
+			if repo.Type != repoType {
+				t.Fatalf("the walk read %s as a %s, want a %s", dir, repo.Type, repoType)
+			}
+			plan, err := PlanRepo(repo, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			hf := &fakeHF{t: t, root: tree.Root}
+			if _, err := executeThrough(t, tree.Root, plan, hf); err != nil {
+				t.Fatalf("executing the plan: %v", err)
+			}
+			if got := hf.args[0][5:]; !reflect.DeepEqual(got, []string{want}) {
+				t.Errorf("hf was handed %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// hf takes a path out of every revision that holds it, so a quant two
+// revisions name goes to hf as one URI per path, not one per snapshot entry.
+func TestExecuteNamesAPathTwoRevisionsHoldOnce(t *testing.T) {
+	quant := cachedFile{name: "Flash-Q8_0.gguf", size: 2000}
+	tree := newCacheTree(t)
+	repo := tree.repo("models--unsloth--Flash-GGUF").
+		snapshot("revision-one", cachedFile{name: "Flash-UD-Q4_K_XL.gguf", size: 1200}).
+		stored("revision-one", quant).
+		main("revision-one")
+	second := filepath.Join(repo.dir, "snapshots", "revision-two")
+	mkdir(t, second)
+	repo.link(second, quant.name, repoBlobOf(repo, quant))
+
+	plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
+	hf := &fakeHF{t: t, root: tree.Root}
+	if _, err := executeThrough(t, tree.Root, plan, hf); err != nil {
+		t.Fatalf("executing the plan: %v", err)
+	}
+	if got, want := hf.args[0][5:], []string{"hf://models/unsloth/Flash-GGUF/Flash-Q8_0.gguf"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("hf was handed %q, want %q", got, want)
+	}
+	if _, err := os.Lstat(second); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the revision the delete emptied is still there (%v)", err)
+	}
+}
+
+// A plan that would no longer go to hf as it was confirmed is refused: the
+// store it counted on is not one hf frees from any more.
+func TestExecuteRefusesAPlanWhoseHFTargetsChanged(t *testing.T) {
+	tree := flashWithQ8(t, cachedFile{name: "Flash-Q8_0.gguf", size: 2000})
+	plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
+	if err := os.Remove(filepath.Join(tree.Root, "blobs", ".huggingface-shared-blobs")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := execute(context.Background(), plan, nil, "/opt/homebrew/bin/hf", (&fakeHF{t: t, root: tree.Root}).run)
+	var drift *DriftError
+	if !errors.As(err, &drift) || drift.Change != "what the delete would hand to hf is not what it planned to" {
+		t.Errorf("the execute answered %v, want a drift refusal naming what goes to hf", err)
+	}
+}
+
+// A run that outlives its deadline is killed, and the failure says it timed
+// out.
+func TestExecuteSaysAnHFRunTimedOut(t *testing.T) {
+	tree := flashWithQ8(t, cachedFile{name: "Flash-Q8_0.gguf", size: 2000})
+	plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	_, err := execute(ctx, plan, nil, "/opt/homebrew/bin/hf", (&fakeHF{t: t, root: tree.Root, hang: true}).run)
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("the execute answered %v, want it to say hf timed out", err)
+	}
+}
+
+// hf runs with colour and its update checks off.
+func TestRunHFTurnsOffColourAndUpdateChecks(t *testing.T) {
+	stderr, err := runHF(context.Background(), "/bin/sh", []string{"-c", `echo "$NO_COLOR $HF_HUB_DISABLE_UPDATE_CHECK" >&2`})
+	if err != nil || string(stderr) != "1 1\n" {
+		t.Errorf("hf ran with NO_COLOR and HF_HUB_DISABLE_UPDATE_CHECK reading %q (%v), want both 1", stderr, err)
+	}
+}
+
+// What hf writes to a terminal is not what a failure carries: colour and
+// links come out.
+func TestLastWordsStripsTerminalEscapes(t *testing.T) {
+	got := lastWords([]byte("\x1b[1m\x1b[31mError:\x1b[0m Could not find in cache\n\x1b]8;;https://hf.co\x07docs\x1b]8;;\x07\n\x1b7done\n"))
+	if want := "Error: Could not find in cache · docs · done"; got != want {
+		t.Errorf("the failure carries %q, want %q", got, want)
 	}
 }
 

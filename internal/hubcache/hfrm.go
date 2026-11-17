@@ -29,10 +29,13 @@ const maxStderr = 4 << 10
 
 // runHF execs hf. Its stdout is a report of what it did, which cria does not
 // read: the exit status and the cache itself are the answer
-// (docs/specs/CACHE.md, Deletion).
+// (docs/specs/CACHE.md, Deletion). hf colours its stderr even off a terminal
+// and checks for its own updates on any run, printing hints about them; a
+// failure carries that stderr, so both are turned off.
 func runHF(ctx context.Context, program string, args []string) ([]byte, error) {
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, program, args...)
+	cmd.Env = append(os.Environ(), "NO_COLOR=1", "HF_HUB_DISABLE_UPDATE_CHECK=1")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
 	err := cmd.Run()
@@ -81,7 +84,16 @@ func throughHF(ctx context.Context, plan *Plan, hf string, run hfRunner) (int64,
 	ctx, cancel := context.WithTimeout(ctx, hfTimeout)
 	defer cancel()
 	args := append([]string{"cache", "rm", "--cache-dir", filepath.Dir(plan.dir), "--yes"}, plan.HFTargets...)
-	if stderr, err := run(ctx, hf, args); err != nil {
+	stderr, err := run(ctx, hf, args)
+	if err != nil {
+		// A run killed at its deadline, or by its caller, exits with the
+		// signal; what stopped it is what the failure names.
+		switch {
+		case errors.Is(ctx.Err(), context.DeadlineExceeded):
+			err = fmt.Errorf("timed out: %w (%w)", ctx.Err(), err)
+		case ctx.Err() != nil:
+			err = fmt.Errorf("cancelled: %w (%w)", ctx.Err(), err)
+		}
 		return reclaimed(), &HFError{Target: plan.Target, Stderr: lastWords(stderr), Err: err}
 	}
 
@@ -95,8 +107,12 @@ func throughHF(ctx context.Context, plan *Plan, hf string, run hfRunner) (int64,
 		}
 	}
 	if len(left) > 0 {
-		return reclaimed(), fmt.Errorf("hf cache rm left %d of the %d paths of %s in place, %s among them",
-			len(left), len(plan.Removes), plan.Target, left[0])
+		said := ""
+		if words := lastWords(stderr); words != "" {
+			said = "; it said: " + words
+		}
+		return reclaimed(), fmt.Errorf("hf cache rm left %d of the %d paths of %s in place, %s among them%s",
+			len(left), len(plan.Removes), plan.Target, left[0], said)
 	}
 	for _, dir := range plan.Dirs {
 		if err := os.Remove(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -140,12 +156,18 @@ func occupied(plan *Plan) (int64, error) {
 // should hf ever print it (CODING-RULES §9).
 var hfToken = regexp.MustCompile(`hf_[A-Za-z0-9]{20,}`)
 
+// escapes are the terminal control sequences a program writes for colour,
+// links and the cursor: CSI sequences, OSC strings, and the short escapes
+// (ECMA-48), with any intermediate bytes.
+var escapes = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[ -/]*[0-~])`)
+
 // lastWords is hf's stderr as a failure carries it: its tail, its lines joined
-// into one, any token masked.
+// into one, terminal escapes taken out, any token masked.
 func lastWords(stderr []byte) string {
 	if len(stderr) > maxStderr {
 		stderr = stderr[len(stderr)-maxStderr:]
 	}
+	stderr = escapes.ReplaceAll(stderr, nil)
 	var lines []string
 	for _, line := range strings.Split(string(stderr), "\n") {
 		if line = strings.TrimSpace(line); line != "" {
