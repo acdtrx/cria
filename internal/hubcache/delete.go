@@ -87,6 +87,12 @@ type Plan struct {
 	Shared  []Shared  // blobs left in place because something else still reaches them
 	Bytes   int64     // what the removals return to the disk
 
+	// Stored is what the removals leave in huggingface_hub's shared blob store
+	// with no link to it: hf's to free, by its own rule, never cria's
+	// (docs/specs/CACHE.md, Deletion). A stored payload something still keeps
+	// is in Shared instead.
+	Stored int64
+
 	dir      string   // the repository directory, for Execute's re-derivation
 	repoType RepoType // likewise: readRepo needs the namespace back
 }
@@ -102,10 +108,17 @@ type Removal struct {
 // Shared is a blob a plan leaves behind: another snapshot entry still reaches it
 // once this delete's links are gone, so removing it would take bytes the cache
 // still needs (docs/specs/CACHE.md).
+//
+// A payload in huggingface_hub's shared store is kept the same way, by the
+// links its .refs manifest lists that this plan does not remove — another
+// repository's blobs, which Repos names. A stored payload with no Links is one
+// whose manifest is missing or unreadable: hf never frees those.
 type Shared struct {
-	Blob  string   // the blob that stays
-	Bytes int64    // what staying costs: bytes this delete does not reclaim
-	Links []string // the entries that keep it, the ones this plan does not remove
+	Blob   string   // the blob that stays
+	Bytes  int64    // what staying costs: bytes this delete does not reclaim
+	Links  []string // the entries that keep it, the ones this plan does not remove
+	Stored bool     // Blob is a payload in the shared store, and Links are repository blobs
+	Repos  []string // for a stored payload: the repositories Links belong to, by Hub id, each once
 }
 
 // Served is one model a running server has open right now. The caller assembles
@@ -407,13 +420,17 @@ func repoPlan(repo *Repo, target Target) (*Plan, error) {
 }
 
 // newPlan assembles a plan and totals what it reclaims, so no caller sums the
-// bytes a second time and gets a different number.
+// bytes a second time and gets a different number. What the removals leave in
+// the shared store is judged here, once for every kind of delete: unlinking a
+// repository's blob is the same act whichever unit took it.
 func newPlan(repo *Repo, target Target, removes []Removal, dirs []string, shared []Shared) *Plan {
+	stored, kept := storeFate(filepath.Dir(repo.Dir), pathsOf(removes))
 	plan := &Plan{
 		Target:   target,
 		Removes:  removes,
 		Dirs:     dirs,
-		Shared:   shared,
+		Shared:   append(shared, kept...),
+		Stored:   stored,
 		dir:      repo.Dir,
 		repoType: repo.Type,
 	}
@@ -447,7 +464,8 @@ func quantRemovals(ours, others []snapshotEntry) ([]Removal, []Shared) {
 		} else if !entry.stored {
 			// What the removal returns, not what the file holds: a blob that is
 			// a link into the shared store unlinks to nothing, and the store's
-			// copy is hf's to collect once no repo links it — never this delete's.
+			// copy is hf's to collect once no repo links it — never this delete's
+			// (storeFate says what it leaves there).
 			blobs[entry.blob] = entry.held
 		}
 		// Where the cache holds a copy instead of a symlink the entry is the
