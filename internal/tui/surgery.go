@@ -189,9 +189,10 @@ func (m model) deleted(msg deletedMsg) (model, tea.Cmd) {
 	return m, m.readEntries
 }
 
-// confirmPanel renders the plan, and only the plan: the bytes it returns, the
-// paths it removes, the blobs it has to leave behind, and the entries that name
-// what is about to go (docs/specs/CACHE.md).
+// confirmPanel renders the plan, and only the plan: the bytes it returns, what
+// it leaves in hf's shared store, the paths it removes, the blobs it has to
+// leave behind, and the entries that name what is about to go
+// (docs/specs/CACHE.md).
 func (m model) confirmPanel(width, rows int) string {
 	plan := m.confirm.plan
 	inner := width - 4
@@ -199,6 +200,12 @@ func (m model) confirmPanel(width, rows int) string {
 	detail := &details{inner: inner}
 	detail.lines = []string{noticeStyle.Render("delete " + plan.Target.String() + "?")}
 	detail.add("reclaims", format.Bytes(plan.Bytes), factStyle)
+	if plan.Stored > 0 {
+		// cria unlinks only the repository's own entries; the bytes they led to
+		// in hf's store are hf's to free (docs/specs/CACHE.md, Deletion).
+		detail.add("store", fmt.Sprintf("%s stays in hf's shared store; `hf cache prune` frees it "+
+			"(it also removes old revisions and unfinished downloads).", format.Bytes(plan.Stored)), noticeStyle)
+	}
 	detail.add("removes", removalWords(plan), factStyle)
 
 	for i, shared := range plan.Shared {
@@ -206,8 +213,7 @@ func (m model) confirmPanel(width, rows int) string {
 		if i > 0 {
 			label = ""
 		}
-		detail.add(label, fmt.Sprintf("%s stays: %s another file still reaches, kept by %s",
-			filepath.Base(shared.Blob), format.Bytes(shared.Bytes), strings.Join(baseNames(shared.Links), ", ")), quietStyle)
+		detail.add(label, sharedWords(shared), quietStyle)
 	}
 
 	for i, id := range m.entriesUsing(plan.Target.Repo, plan.Target.Quant) {
@@ -234,6 +240,25 @@ func entryFate(target hubcache.Target) string {
 		return "the entry stays; the copy it serves stays with it"
 	}
 	return "the entry stays; its next start re-downloads"
+}
+
+// sharedWords says why a blob a plan leaves behind stays, and what keeps it: a
+// snapshot entry of this repository by its file name, a payload in hf's shared
+// store by the repositories still linking it — or by nothing anyone can name,
+// where its manifest cannot say, which hf answers by never freeing it.
+func sharedWords(shared hubcache.Shared) string {
+	blob, bytes := filepath.Base(shared.Blob), format.Bytes(shared.Bytes)
+	switch {
+	case !shared.Stored:
+		return fmt.Sprintf("%s stays: %s another file still reaches, kept by %s",
+			blob, bytes, strings.Join(baseNames(shared.Links), ", "))
+	case len(shared.Links) == 0:
+		return fmt.Sprintf("%s stays: %s in hf's shared store with no readable .refs manifest, which hf never frees",
+			blob, bytes)
+	default:
+		return fmt.Sprintf("%s stays: %s in hf's shared store another repo still links, kept by %s",
+			blob, bytes, strings.Join(shared.Repos, ", "))
+	}
 }
 
 // removalWords is what a plan takes off the disk, counted the way it removes

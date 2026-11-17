@@ -2,11 +2,13 @@ package tui
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
 	"cria/internal/hubcache"
 	"cria/internal/serve"
+	"cria/internal/tools"
 )
 
 // fakeSurgery is hubcache's deletion half as the cache view drives it: what a
@@ -224,6 +226,98 @@ func TestDeleteConfirmOfSupersededCopies(t *testing.T) {
 	}
 	if strings.Contains(drawn, "its next start re-downloads") {
 		t.Errorf("the confirmation threatens a re-download the delete does not cause:\n%s", drawn)
+	}
+}
+
+// confirmText is the confirmation as it reads: each line of the pane's body,
+// border and padding taken off, blank lines dropped. Wide enough that no line
+// wraps, so a test can hold the whole text to what it should say.
+func confirmText(t *testing.T, frame model) []string {
+	t.Helper()
+	if frame.confirm == nil {
+		t.Fatal("no confirmation is up")
+	}
+	drawn := strings.Split(plain(frame.confirmPanel(300, 30)), "\n")
+	var text []string
+	for _, line := range drawn[1 : len(drawn)-1] {
+		line = strings.TrimSpace(strings.Trim(line, "│"))
+		if line != "" {
+			text = append(text, line)
+		}
+	}
+	return text
+}
+
+// A delete that touches no stored file reads exactly as it always has: what it
+// reclaims, what it removes, what it has to leave and who names it.
+func TestDeleteConfirmOfAnUnstoredDelete(t *testing.T) {
+	frame, _ := cacheFrame(t)
+	frame = onRow(t, frame, "UD-Q4_K_XL")
+
+	frame, cmd := press(t, frame, typed('x'))
+	frame = answer(t, frame, cmd)
+
+	want := []string{
+		"delete unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL?",
+		"reclaims 18.0 GiB",
+		"removes  4 paths",
+		"shared   cccc stays: 700.0 MiB another file still reaches, kept by mmproj-BF16.gguf",
+		"used by  referenced by entry qwen — the entry stays; its next start re-downloads",
+		"y deletes it; esc leaves it alone.",
+	}
+	if got := confirmText(t, frame); !reflect.DeepEqual(got, want) {
+		t.Errorf("the confirmation reads\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// With hf not found, cria unlinks the repository's entries itself, and the
+// confirmation says what that leaves in hf's shared store and what frees it —
+// and, of each stored file it keeps, what keeps it (docs/specs/CACHE.md,
+// Deletion).
+func TestDeleteConfirmOfAStoredDeleteWithoutHF(t *testing.T) {
+	world := newTestHost(&fakeServers{})
+	world.report.HF = tools.Tool{Name: tools.HF, Status: tools.StatusMissing}
+	world.tree, world.cache = testTree(), fullCache()
+	world.surgery.plan = &hubcache.Plan{
+		Target: hubcache.Target{Kind: hubcache.TargetQuant, Repo: "unsloth/Qwen3-30B-A3B-GGUF", Quant: "UD-Q4_K_XL"},
+		Removes: []hubcache.Removal{
+			{Path: "/hub/models--unsloth--Qwen3-30B-A3B-GGUF/blobs/aaaa"},
+			{Path: "/hub/models--unsloth--Qwen3-30B-A3B-GGUF/blobs/bbbb"},
+			{Path: "/hub/models--unsloth--Qwen3-30B-A3B-GGUF/snapshots/rev/Qwen3-UD-Q4_K_XL-00001-of-00002.gguf"},
+			{Path: "/hub/models--unsloth--Qwen3-30B-A3B-GGUF/snapshots/rev/Qwen3-UD-Q4_K_XL-00002-of-00002.gguf"},
+		},
+		Shared: []hubcache.Shared{
+			{
+				Blob:   "/hub/blobs/dd/dddd",
+				Bytes:  700 << 20,
+				Links:  []string{"/hub/models--unsloth--Qwen3-30B-A3B-Instruct-GGUF/blobs/eeee"},
+				Stored: true,
+				Repos:  []string{"unsloth/Qwen3-30B-A3B-Instruct-GGUF"},
+			},
+			{Blob: "/hub/blobs/ff/ffff", Bytes: 1 << 30, Stored: true},
+		},
+		Stored: 18 << 30,
+	}
+	frame, _, _ := testFrameOn(t, world)
+	frame = load(t, frame)
+	frame.view = viewCache
+	frame = onRow(t, frame.reselect(0), "UD-Q4_K_XL")
+
+	frame, cmd := press(t, frame, typed('x'))
+	frame = answer(t, frame, cmd)
+
+	want := []string{
+		"delete unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL?",
+		"reclaims 0 B",
+		"store    18.0 GiB stays in hf's shared store; `hf cache prune` frees it (it also removes old revisions and unfinished downloads).",
+		"removes  4 paths",
+		"shared   dddd stays: 700.0 MiB in hf's shared store another repo still links, kept by unsloth/Qwen3-30B-A3B-Instruct-GGUF",
+		"ffff stays: 1.0 GiB in hf's shared store with no readable .refs manifest, which hf never frees",
+		"used by  referenced by entry qwen — the entry stays; its next start re-downloads",
+		"y deletes it; esc leaves it alone.",
+	}
+	if got := confirmText(t, frame); !reflect.DeepEqual(got, want) {
+		t.Errorf("the confirmation reads\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 
