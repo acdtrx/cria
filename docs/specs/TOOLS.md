@@ -31,11 +31,13 @@ each one's absence disables.
   install must run from any environment cria is started in
   (`docs/BACKENDS.md#vllm`), and on hosts where a login shell is what puts it on
   `PATH`, `[tools] vllm` names it by absolute path.
-- **`hf`** — cria never execs it in v1: its job is authentication
-  (`hf auth login`); cria reads the resulting token (`HF_TOKEN` env var first,
-  else the token file under the huggingface home) and exports it to servers it
-  launches. Missing `hf` is advisory: gated repos will fail to fetch until the
-  user authenticates.
+- **`hf`** — its job is authentication (`hf auth login`); cria reads the
+  resulting token (`HF_TOKEN` env var first, else the token file under the
+  huggingface home) and exports it to servers it launches. cria execs it for one
+  thing only (settled 2026-11-16): deleting files whose bytes live in hf's shared
+  blob store, a format hf owns (`docs/specs/CACHE.md`, Deletion). Missing `hf` is
+  advisory: gated repos will fail to fetch until the user authenticates, and a
+  delete through the shared store leaves those bytes for `hf cache prune`.
 
 ## The install guide (settled 2026-09-24)
 

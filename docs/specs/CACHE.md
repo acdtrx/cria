@@ -74,3 +74,21 @@ and the deletion contract. v1 is visibility and cleaning only; growth ideas wait
   downloads while any server runs from that repo, since a running fetch can't be told
   from a leftover; and let a server whose reference names no quant guard its whole
   repo.
+- **The shared store is hf's to free** (settled 2026-11-16): cria never writes into
+  huggingface_hub's shared blob store (see Sizes). A delete is planned, guarded and
+  confirmed as always; a stored file counts as reclaimed only when every valid link
+  its `.refs` manifest lists is in this delete — hf's own rule — so a file another
+  repo still links is kept, and the plan names who keeps it.
+  - **`hf` found:** the files go through `hf cache rm --cache-dir <root> --yes` with
+    the plan's `hf://` file URIs (a whole repo: its repo URI). cria then removes the
+    snapshot directories that left empty, re-reads the cache and reports what was
+    actually reclaimed; it reads none of hf's output — the exit status and the
+    re-read are the answer. The confirmation says the delete runs through `hf`.
+  - **`hf` not found:** cria unlinks the repo's entries itself, reports what that
+    frees, and says *"X GB stays in hf's shared store; `hf cache prune` frees it
+    (it also removes old revisions and unfinished downloads)."*
+  - **Superseded copies stay cria's own delete:** hf's file targets name a path in
+    every revision, so they cannot take an old copy and leave the current one. A
+    stored superseded copy gets the not-found message.
+  - **Never `hf cache prune`:** it removes every detached revision and every
+    unfinished download cache-wide — things no confirmation showed.

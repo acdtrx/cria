@@ -152,20 +152,11 @@ Group entries under headings as themes emerge.
   trigger: a cached quant shows unattributed, or a deletion plan misses a
   choices entry, in real use.
 
-- **Deleting through huggingface_hub's shared blob store.** hf 2.x keeps Xet
-  downloads in `<cache>/blobs/<xx>/<hash>` and links each repo's `blobs/<etag>`
-  to it, with a `<hash>.refs` manifest listing the links
-  (`huggingface_hub/utils/_shared_blobs.py`). A cria delete removes the repo's
-  links and reports the 0 bytes that frees; the store copy and a stale `.refs`
-  line stay, for hf's own GC (which validates every manifest line against the
-  filesystem) to collect. Truly reclaiming would mean sweeping the store copy
-  the way hf does — under its per-hash lock, only when no valid reference is
-  left — a write into a format cria does not own, so a spec decision first.
-  Two display gaps ride along: the view's superseded "reclaims" line counts a
-  stored copy's bytes, and store blobs no repo links (counted in the header)
-  have no row. (noted 2026-11-15, found on chunky: Qwen3.8-Flash-Next holds
-  188.5 GB in the store, so deleting Q8_0 there frees almost nothing.) Revisit
-  trigger: wanting to delete a quant or repo whose bytes live in the store.
+- **Shared-store display gaps.** The cache view's superseded "reclaims" line counts
+  a stored copy's bytes, which its delete leaves in hf's shared store; and store
+  blobs no repo links (counted in the header) have no row. (noted 2026-11-15, on
+  chunky.) Revisit trigger: a superseded copy in the store, or an orphaned store
+  blob, shows up in real use.
 
 ## Platform & distribution
 
