@@ -14,6 +14,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -93,7 +94,7 @@ type surgery struct {
 	repo       func(repo *hubcache.Repo, served []hubcache.Served) (*hubcache.Plan, error)
 	partials   func(repo *hubcache.Repo, served []hubcache.Served) (*hubcache.Plan, error)
 	superseded func(repo *hubcache.Repo, quant string, served []hubcache.Served) (*hubcache.Plan, error)
-	execute    func(plan *hubcache.Plan, served []hubcache.Served) (int64, error)
+	execute    func(ctx context.Context, plan *hubcache.Plan, served []hubcache.Served, hf string) (int64, error)
 }
 
 // view names the screen the frame is routed to. Two of them in v1

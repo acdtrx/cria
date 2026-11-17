@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -158,12 +159,21 @@ func (m model) executeConfirmed() (tea.Model, tea.Cmd) {
 	deleting.note = "deleting…"
 	m.confirm = &deleting
 
-	plan, served := deleting.plan, m.servedNow()
+	plan, served, hf := deleting.plan, m.servedNow(), m.hfPath()
 	execute := m.host.surgery.execute
 	return m, func() tea.Msg {
-		reclaimed, err := execute(plan, served)
+		reclaimed, err := execute(context.Background(), plan, served, hf)
 		return deletedMsg{target: plan.Target, reclaimed: reclaimed, err: err}
 	}
+}
+
+// hfPath is the hf a delete may run through: the program the tool check
+// found, or nothing — before the check has run, as when it found none.
+func (m model) hfPath() string {
+	if !m.reported || !m.report.HF.Usable() {
+		return ""
+	}
+	return m.report.HF.Path
 }
 
 // deleted takes the execute's answer and re-reads the cache either way: what is
@@ -202,14 +212,23 @@ func (m model) confirmPanel(width, rows int) string {
 	plan := m.confirm.plan
 	inner := width - 4
 
+	// A delete hf can take runs through it when hf is here, and hf frees what
+	// the delete leaves in its store; anything else is cria unlinking the
+	// repository's own entries, and those bytes stay (docs/specs/CACHE.md,
+	// Deletion).
+	throughHF := len(plan.HFTargets) > 0 && m.hfPath() != ""
 	head := &details{inner: inner}
 	head.lines = []string{noticeStyle.Render("delete " + plan.Target.String() + "?")}
-	head.add("reclaims", format.Bytes(plan.Bytes), factStyle)
-	if plan.Stored > 0 {
-		// cria unlinks only the repository's own entries; the bytes they led to
-		// in hf's store are hf's to free (docs/specs/CACHE.md, Deletion).
+	switch {
+	case throughHF:
+		head.add("reclaims", format.Bytes(plan.Bytes+plan.Stored), factStyle)
+		head.add("through", "`hf cache rm`, which frees what the delete leaves in hf's shared store", noticeStyle)
+	case plan.Stored > 0:
+		head.add("reclaims", format.Bytes(plan.Bytes), factStyle)
 		head.add("store", fmt.Sprintf("%s stays in hf's shared store; `hf cache prune` frees it "+
 			"(it also removes old revisions and unfinished downloads).", format.Bytes(plan.Stored)), noticeStyle)
+	default:
+		head.add("reclaims", format.Bytes(plan.Bytes), factStyle)
 	}
 	head.add("removes", removalWords(plan), factStyle)
 

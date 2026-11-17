@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -27,6 +28,7 @@ type fakeSurgery struct {
 	planned  [][]hubcache.Served // the serving state each plan was made against
 	executed []*hubcache.Plan    // the plans carried out
 	guarded  [][]hubcache.Served // the serving state each execute was handed
+	through  []string            // the hf each execute was handed, empty where none was found
 }
 
 func (f *fakeSurgery) surgery() surgery {
@@ -63,9 +65,10 @@ func (f *fakeSurgery) planSuperseded(repo *hubcache.Repo, quant string, served [
 	return f.plan, f.planErr
 }
 
-func (f *fakeSurgery) execute(plan *hubcache.Plan, served []hubcache.Served) (int64, error) {
+func (f *fakeSurgery) execute(_ context.Context, plan *hubcache.Plan, served []hubcache.Served, hf string) (int64, error) {
 	f.executed = append(f.executed, plan)
 	f.guarded = append(f.guarded, served)
+	f.through = append(f.through, hf)
 	return f.reclaimed, f.executeErr
 }
 
@@ -272,15 +275,11 @@ func TestDeleteConfirmOfAnUnstoredDelete(t *testing.T) {
 	}
 }
 
-// With hf not found, cria unlinks the repository's entries itself, and the
-// confirmation says what that leaves in hf's shared store and what frees it —
-// and, of each stored file it keeps, what keeps it (docs/specs/CACHE.md,
-// Deletion).
-func TestDeleteConfirmOfAStoredDeleteWithoutHF(t *testing.T) {
-	world := newTestHost(&fakeServers{})
-	world.report.HF = tools.Tool{Name: tools.HF, Status: tools.StatusMissing}
-	world.tree, world.cache = testTree(), fullCache()
-	world.surgery.plan = &hubcache.Plan{
+// storedPlan is a quant delete hf can take: its shards live in hf's shared
+// store, 18 GiB of them left with no link, and two stored files another
+// repository keeps and one whose manifest hf cannot read stay.
+func storedPlan() *hubcache.Plan {
+	return &hubcache.Plan{
 		Target: hubcache.Target{Kind: hubcache.TargetQuant, Repo: "unsloth/Qwen3-30B-A3B-GGUF", Quant: "UD-Q4_K_XL"},
 		Removes: []hubcache.Removal{
 			{Path: "/hub/models--unsloth--Qwen3-30B-A3B-GGUF/blobs/aaaa"},
@@ -306,27 +305,73 @@ func TestDeleteConfirmOfAStoredDeleteWithoutHF(t *testing.T) {
 			{Blob: "/hub/blobs/ff/ffff", Bytes: 1 << 30, Stored: true},
 		},
 		Stored: 18 << 30,
+		Bytes:  2 << 20,
+		HFTargets: []string{
+			"hf://models/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-UD-Q4_K_XL-00001-of-00002.gguf",
+			"hf://models/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-UD-Q4_K_XL-00002-of-00002.gguf",
+		},
 	}
-	frame, _, _ := testFrameOn(t, world)
-	frame = load(t, frame)
-	frame.view = viewCache
-	frame = onRow(t, frame.reselect(0), "UD-Q4_K_XL")
+}
 
-	frame, cmd := press(t, frame, typed('x'))
-	frame = answer(t, frame, cmd)
-
-	want := []string{
-		"delete unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL?",
-		"reclaims 0 B",
-		"store    18.0 GiB stays in hf's shared store; `hf cache prune` frees it (it also removes old revisions and unfinished downloads).",
-		"removes  4 paths",
-		"shared   1.0 GiB in 2 files stays in hf's shared store, kept by unsloth/Qwen3-30B-A3B-Instruct-GGUF",
-		"1.0 GiB in 1 file stays in hf's shared store with no readable .refs manifest, which hf never frees",
-		"used by  referenced by entry qwen — the entry stays; its next start re-downloads",
-		"y deletes it; esc leaves it alone.",
+// A delete hf can take runs through hf when the tool check found it: the
+// confirmation counts what hf frees in its store as reclaimed and says the
+// delete runs through hf. With hf not found, cria unlinks the repository's
+// entries itself, and the confirmation says what that leaves in hf's shared
+// store and what frees it. Either way it says what keeps each stored file it
+// cannot free (docs/specs/CACHE.md, Deletion).
+func TestDeleteConfirmOfAStoredDelete(t *testing.T) {
+	cases := map[string]struct {
+		hf      tools.Tool
+		head    []string
+		through string // the hf the execute is handed
+	}{
+		"hf found": {
+			hf: tools.Tool{Name: tools.HF, Status: tools.StatusFound, Path: "/opt/homebrew/bin/hf"},
+			head: []string{
+				"reclaims 18.0 GiB",
+				"through  `hf cache rm`, which frees what the delete leaves in hf's shared store",
+			},
+			through: "/opt/homebrew/bin/hf",
+		},
+		"hf not found": {
+			hf: tools.Tool{Name: tools.HF, Status: tools.StatusMissing},
+			head: []string{
+				"reclaims 2.0 MiB",
+				"store    18.0 GiB stays in hf's shared store; `hf cache prune` frees it (it also removes old revisions and unfinished downloads).",
+			},
+		},
 	}
-	if got := confirmText(t, frame); !reflect.DeepEqual(got, want) {
-		t.Errorf("the confirmation reads\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			world := newTestHost(&fakeServers{})
+			world.report.HF = tc.hf
+			world.tree, world.cache = testTree(), fullCache()
+			world.surgery.plan = storedPlan()
+			frame, _, _ := testFrameOn(t, world)
+			frame = load(t, frame)
+			frame.view = viewCache
+			frame = onRow(t, frame.reselect(0), "UD-Q4_K_XL")
+
+			frame, cmd := press(t, frame, typed('x'))
+			frame = answer(t, frame, cmd)
+
+			want := slices.Concat([]string{"delete unsloth/Qwen3-30B-A3B-GGUF:UD-Q4_K_XL?"}, tc.head, []string{
+				"removes  4 paths",
+				"shared   1.0 GiB in 2 files stays in hf's shared store, kept by unsloth/Qwen3-30B-A3B-Instruct-GGUF",
+				"1.0 GiB in 1 file stays in hf's shared store with no readable .refs manifest, which hf never frees",
+				"used by  referenced by entry qwen — the entry stays; its next start re-downloads",
+				"y deletes it; esc leaves it alone.",
+			})
+			if got := confirmText(t, frame); !reflect.DeepEqual(got, want) {
+				t.Errorf("the confirmation reads\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+			}
+
+			_, cmd = press(t, frame, typed('y'))
+			run(t, cmd)
+			if want := []string{tc.through}; !reflect.DeepEqual(world.surgery.through, want) {
+				t.Errorf("the execute was handed hf %q, want %q", world.surgery.through, want)
+			}
+		})
 	}
 }
 
