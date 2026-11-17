@@ -217,15 +217,17 @@ func checkVLLM(override string) Tool {
 	return tool
 }
 
-// checkHF resolves hf. cria never execs it: its job is `hf auth login`, and cria
-// reads the token that writes (docs/specs/TOOLS.md). So its absence disables no
-// cria feature — it only means gated repos have no credentials to download with.
+// checkHF resolves hf. Its job is `hf auth login`, and cria reads the token that
+// writes; cria runs it for one thing, deleting files whose bytes live in hf's
+// shared blob store (docs/specs/TOOLS.md). So its absence is advisory: gated
+// repos have no credentials to download with, and such a delete leaves those
+// bytes behind.
 func checkHF(override string) Tool {
 	found := resolve(HF, override)
 	tool := Tool{Name: HF, Path: found.path, Override: found.override != ""}
 	if !found.ok() {
 		tool.Status = StatusMissing
-		tool.Disables = "no cria feature — cria never runs hf; without `hf auth login` there is no token, so gated repos fail to download"
+		tool.Disables = "freeing hf's shared blob store: a delete unlinks the repository's own entries and leaves the stored bytes for `hf cache prune`; and without `hf auth login` there is no token, so gated repos fail to download"
 		tool.Fix = found.fix("hf", "install the Hugging Face CLI so hf is on PATH, then run `hf auth login`", "hf")
 	}
 	return tool

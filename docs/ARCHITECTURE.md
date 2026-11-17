@@ -139,7 +139,7 @@ tree the tools write.
 | `internal/engine` | what cria knows about each way of serving — llama, mlx, vllm and the router: the program, the model reference, the endpoints, the warm and slot rules, and the router's preset composition (`specs/SERVE.md`) | `For(backend)`, `All()`, `RouterPreset` | `config`, `tools` |
 | `internal/procs` | every `ps`/`lsof` exec and every signal cria sends (`specs/SERVE.md`) | `System{}` (a `Host`) | `engine`, `tools` |
 | `internal/picks` | what has been chosen: the option picked on each entry's axes, and which entries the router holds and under what (`specs/CONFIG.md`) | `Load`/`Save`, `LoadRouter`/`SaveRouter` | `config` |
-| `internal/hubcache` | the cache walk, true blob-deduped sizes, entry presence, and the delete plans (`specs/CACHE.md`) | `Read(root)`, `Plan*`/`Execute` | `config`, `engine` |
+| `internal/hubcache` | the cache walk, true blob-deduped sizes, entry presence, and the delete plans — carried out by cria, or by `hf cache rm` where hf's shared blob store holds the bytes (`specs/CACHE.md`) | `Read(root)`, `Plan*`/`Execute` | `config`, `engine` |
 | `internal/hubapi` | what a model comes to when complete, and the HF token | `New()`, `Token()` | `config`, `engine`, `hubcache` |
 | `internal/serve` | a managed server's life: compose, spawn detached, record, observe, stop (`specs/SERVE.md`) | `New(root, host)` | `config`, `tools`, `engine`, `procs`, `picks`, `hubcache`, `hubapi` |
 | `internal/cli` | parsing, ordering and output for the subcommands (`specs/CLI.md`) | `Dispatch(args, version, tui)` | `config`, `tools`, `engine`, `procs`, `picks`, `serve`, `format` |
@@ -224,7 +224,9 @@ whether an entry's model is fully present (the cached dot, and the *downloading*
 phase), and the bytes-on-disk that are a download's numerator. Deletion is the
 only write, and it happens in two steps — a plan states exactly what would go, and
 `Execute` removes exactly that plan after re-deriving it against the cache as it
-now stands.
+now stands. A delete whose files live in huggingface_hub's shared blob store is
+handed to `hf cache rm` when the tool check found hf: the store is hf's format,
+and cria measures what came back rather than reading hf's output.
 
 **The Hub API → the denominator.** `hubapi` answers how big a model is when
 complete. It is optional by construction: an unreachable Hub costs the progress

@@ -160,9 +160,11 @@ Verified 2026-09-24 on DGX Spark: vllm 0.30.0, torch 2.13.0+cu130, flashinfer
 
 ## hf
 
-The Hugging Face CLI. cria never runs it; its one job is `hf auth login`, which
-stores the token cria passes to servers so gated repos download. Without it,
-everything else works and gated repos fail to fetch.
+The Hugging Face CLI. Its main job is `hf auth login`, which stores the token cria
+passes to servers so gated repos download. cria runs it for one thing: a delete
+whose files live in hf's shared blob store goes through `hf cache rm`, which frees
+those bytes. Without it, everything else works, gated repos fail to fetch, and such
+a delete leaves its stored bytes for `hf cache prune`.
 
 macOS:
 
