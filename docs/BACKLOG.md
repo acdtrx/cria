@@ -157,6 +157,13 @@ Group entries under headings as themes emerge.
   blobs no repo links (counted in the header) have no row. (noted 2026-11-15, on
   chunky.) Revisit trigger: a superseded copy in the store, or an orphaned store
   blob, shows up in real use.
+- **Two tests for "this is hf's store".** The walk counts a store whose
+  `blobs/` merely holds the `.huggingface-shared-blobs` marker (`sharedStore` in
+  `internal/hubcache/walk.go`); a delete plan judges what it leaves there only where
+  hf itself would, a real directory whose marker reads layout `1` (`hfStore` in
+  `store.go`). Today they agree on every store hf writes. (noted 2026-11-17, in
+  shared-store-delete milestone 1.) Revisit trigger: hf ships a second store layout,
+  or a cache shows a marked store the two tests disagree on.
 
 ## Platform & distribution
 
