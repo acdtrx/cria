@@ -163,8 +163,12 @@ Verified 2026-09-24 on DGX Spark: vllm 0.30.0, torch 2.13.0+cu130, flashinfer
 The Hugging Face CLI. Its main job is `hf auth login`, which stores the token cria
 passes to servers so gated repos download. cria runs it for one thing: a delete
 whose files live in hf's shared blob store goes through `hf cache rm`, which frees
-those bytes. Without it, everything else works, gated repos fail to fetch, and such
-a delete leaves its stored bytes for `hf cache prune`.
+those bytes — except a delete of superseded copies, which stays cria's own and leaves
+them for `hf cache prune`. Without it, everything else works, gated repos fail to
+fetch, and every such delete leaves its stored bytes for `hf cache prune`.
+
+The `hf://` file targets cria hands `hf cache rm` need an hf new enough to take
+them; an older one fails the delete, and cria reports what it said.
 
 macOS:
 
@@ -192,3 +196,6 @@ If not on PATH:
 [tools]
 hf = "/home/me/.local/bin/hf"
 ```
+
+Verified 2026-11-17 on the dev Mac: hf 2.4.0 (Homebrew), deleting one quant of a
+two-quant GGUF repo held in its shared blob store.

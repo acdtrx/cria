@@ -47,7 +47,7 @@ says how to install each).
   to the servers it launches, so gated repos work. cria moves no model bytes itself:
   servers fetch their own models, and cache surgery is direct filesystem work — except
   a delete whose bytes live in hf's shared blob store, which runs `hf cache rm`
-  (`docs/specs/CACHE.md`, Deletion).
+  unless it takes superseded copies (`docs/specs/CACHE.md`, Deletion).
 - **`llama-server`** (llama.cpp): GGUF serving, launched by Hub reference
   (`-hf org/repo:QUANT`); it fetches missing models into the standard HF hub cache. Older
   builds kept a private `~/.cache/llama.cpp`, which the tool check flags.
