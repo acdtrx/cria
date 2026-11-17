@@ -164,6 +164,12 @@ Group entries under headings as themes emerge.
   `store.go`). Today they agree on every store hf writes. (noted 2026-11-17, in
   shared-store-delete milestone 1.) Revisit trigger: hf ships a second store layout,
   or a cache shows a marked store the two tests disagree on.
+- **The walk does not read kernel repositories.** huggingface_hub 2.4 writes
+  `kernels--org--name` repository directories beside models, datasets and spaces; the
+  walk (`repoDirTypes`, `internal/hubcache/names.go`) skips them, so their own bytes are
+  in no row and not in the header (the delete plan's store rule does count their links,
+  as hf does). (noted 2026-11-17, in shared-store-delete review.) Revisit trigger: a
+  kernel repository shows up in a cache cria reads.
 
 ## Platform & distribution
 
