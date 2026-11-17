@@ -1,6 +1,7 @@
 package hubcache
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -259,4 +260,242 @@ func TestPlanOfAnUnstoredQuantIgnoresTheStore(t *testing.T) {
 	}
 
 	applyPlan(t, tree.Root, plan)
+}
+
+// flashWithQ8 is the fixture most store tests start from: a repository holding
+// one quant of its own and Q8_0 in the shared store.
+func flashWithQ8(t *testing.T, stored cachedFile) *cacheTree {
+	t.Helper()
+	tree := newCacheTree(t)
+	tree.repo("models--unsloth--Flash-GGUF").
+		snapshot("revision-one", cachedFile{name: "Flash-UD-Q4_K_XL.gguf", size: 1200}).
+		stored("revision-one", stored).
+		main("revision-one")
+	return tree
+}
+
+// writeManifest replaces a payload's .refs manifest with the given text.
+func writeManifest(t *testing.T, root string, file cachedFile, text string) {
+	t.Helper()
+	if err := os.WriteFile(payloadOf(root, file)+".refs", []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// relToRoot is a path as a manifest line spells it.
+func relToRoot(t *testing.T, root, path string) string {
+	t.Helper()
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.ToSlash(rel)
+}
+
+// hf counts a link from every repository directory it writes — kernels too,
+// which the walk does not list — and names a repository the way an hf:// URI
+// does.
+func TestPlanKeepsAStoredFileAKernelRepoLinks(t *testing.T) {
+	stored := cachedFile{name: "Flash-Q8_0.gguf", size: 2000}
+	tree := flashWithQ8(t, stored)
+	kernel := tree.repo("kernels--kernels-community--flash-attn").
+		stored("revision-one", stored).
+		main("revision-one")
+
+	plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
+	want := []Shared{{
+		Blob:   payloadOf(tree.Root, stored),
+		Bytes:  2000,
+		Links:  []string{repoBlobOf(kernel, stored)},
+		Stored: true,
+		Repos:  []string{"kernels/kernels-community/flash-attn"},
+	}}
+	if plan.Stored != 0 || !reflect.DeepEqual(plan.Shared, want) {
+		t.Errorf("the plan leaves %d in the store and keeps %+v, want nothing left and %+v kept", plan.Stored, plan.Shared, want)
+	}
+}
+
+// A manifest hf can read but that names no valid link keeps nothing: the
+// payload is left with no link, whether the manifest is empty or every line
+// in it is one hf rejects.
+func TestPlanCountsAStoredFileWhoseManifestNamesNoValidLink(t *testing.T) {
+	stored := cachedFile{name: "Flash-Q8_0.gguf", size: 2000}
+	cases := map[string]string{
+		"empty": "",
+		"only invalid lines": "/abs/models--unsloth--Flash-GGUF/blobs/x\n" +
+			"models--unsloth--Flash-GGUF/../models--unsloth--Flash-GGUF/blobs/x\n" +
+			"models--unsloth--Flash-GGUF/snapshots/x\n" +
+			"bogus--unsloth--Flash-GGUF/blobs/x\n" +
+			"models--/blobs/x\n",
+	}
+	for name, text := range cases {
+		t.Run(name, func(t *testing.T) {
+			tree := flashWithQ8(t, stored)
+			writeManifest(t, tree.Root, stored, text)
+
+			plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
+			if plan.Stored != 2000 || plan.Shared != nil {
+				t.Errorf("the plan leaves %d in the store and keeps %+v, want the 2000 left with no link and nothing kept",
+					plan.Stored, plan.Shared)
+			}
+		})
+	}
+}
+
+// hf reads a manifest with Python's read_text and splitlines: a link after
+// any line boundary those know is a link, not part of the line before it.
+func TestPlanReadsManifestLinesAtEveryBoundaryHfDoes(t *testing.T) {
+	stored := cachedFile{name: "Flash-Q8_0.gguf", size: 2000}
+	for name, boundary := range map[string]string{
+		"carriage return": "\r", "crlf": "\r\n", "vertical tab": "\v", "form feed": "\f",
+		"file separator": "\x1c", "group separator": "\x1d", "record separator": "\x1e",
+		"next line": "\u0085", "line separator": " ", "paragraph separator": " ",
+	} {
+		t.Run(name, func(t *testing.T) {
+			tree := flashWithQ8(t, stored)
+			own := repoBlobOf(&repoTree{dir: filepath.Join(tree.Root, "models--unsloth--Flash-GGUF")}, stored)
+			other := tree.repo("models--mirror--Flash-GGUF").stored("revision-one", stored)
+			writeManifest(t, tree.Root, stored,
+				relToRoot(t, tree.Root, own)+boundary+relToRoot(t, tree.Root, repoBlobOf(other, stored)))
+
+			plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
+			if plan.Stored != 0 || len(plan.Shared) != 1 || !reflect.DeepEqual(plan.Shared[0].Repos, []string{"mirror/Flash-GGUF"}) {
+				t.Errorf("the plan leaves %d in the store and keeps %+v, want the file kept by mirror/Flash-GGUF",
+					plan.Stored, plan.Shared)
+			}
+		})
+	}
+}
+
+// hf reads its marker with read_text too, so a marker ending in \r\n or \r
+// marks the same store.
+func TestPlanReadsTheMarkerTheWayHfDoes(t *testing.T) {
+	stored := cachedFile{name: "Flash-Q8_0.gguf", size: 2000}
+	for name, text := range map[string]string{"crlf": "1\r\n", "carriage return": "1\r"} {
+		t.Run(name, func(t *testing.T) {
+			tree := flashWithQ8(t, stored)
+			marker := filepath.Join(tree.Root, "blobs", ".huggingface-shared-blobs")
+			if err := os.Chmod(marker, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(marker, []byte(text), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0"); plan.Stored != 2000 {
+				t.Errorf("the plan leaves %d in the store, want the 2000 of a store hf recognizes", plan.Stored)
+			}
+		})
+	}
+}
+
+// A manifest line hf cannot check — its path runs through a file, or through
+// a directory it may not read — makes the whole manifest unreadable to hf,
+// which then never frees the payload.
+func TestPlanNeverCountsAStoredFileFreedWhenAManifestLinkCannotBeRead(t *testing.T) {
+	stored := cachedFile{name: "Flash-Q8_0.gguf", size: 2000}
+	cases := map[string]func(t *testing.T, tree *cacheTree) string{
+		"through a file": func(t *testing.T, tree *cacheTree) string {
+			tree.write("models--ghost--Flash-GGUF", "not a directory")
+			return "models--ghost--Flash-GGUF/blobs/abc"
+		},
+		"through a closed directory": func(t *testing.T, tree *cacheTree) string {
+			if os.Geteuid() == 0 {
+				t.Skip("root reads a directory whatever its mode")
+			}
+			// A kernel repository: the walk does not read one, so only hf's
+			// rule meets the closed directory.
+			other := tree.repo("kernels--mirror--flash-attn").stored("revision-one", stored)
+			blobs := filepath.Join(other.dir, "blobs")
+			if err := os.Chmod(blobs, 0); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.Chmod(blobs, 0o755) })
+			return relToRoot(t, tree.Root, repoBlobOf(other, stored))
+		},
+	}
+	for name, unreadable := range cases {
+		t.Run(name, func(t *testing.T) {
+			tree := flashWithQ8(t, stored)
+			own := repoBlobOf(&repoTree{dir: filepath.Join(tree.Root, "models--unsloth--Flash-GGUF")}, stored)
+			line := unreadable(t, tree)
+			writeManifest(t, tree.Root, stored, relToRoot(t, tree.Root, own)+"\n"+line+"\n")
+
+			plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
+			want := []Shared{{Blob: payloadOf(tree.Root, stored), Bytes: 2000, Stored: true}}
+			if plan.Stored != 0 || !reflect.DeepEqual(plan.Shared, want) {
+				t.Errorf("the plan leaves %d in the store and keeps %+v, want nothing left and %+v kept",
+					plan.Stored, plan.Shared, want)
+			}
+		})
+	}
+}
+
+// A stored copy a re-upload superseded is judged by the same rule: its delete
+// leaves the old payload in the store with no link.
+func TestPlanSupersededOfAStoredCopyLeavesItInTheStore(t *testing.T) {
+	old := cachedFile{name: "Flash-Q8_0.gguf", size: 2000}
+	current := cachedFile{name: "Flash-Q8_0.gguf", text: "the re-uploaded Q8_0"}
+	tree := newCacheTree(t)
+	tree.repo("models--unsloth--Flash-GGUF").
+		stored("revision-old", old).
+		stored("revision-new", current).
+		main("revision-new")
+
+	repo := repoOf(t, read(t, tree.Root), "unsloth/Flash-GGUF")
+	plan, err := PlanSuperseded(repo, "Q8_0", nil)
+	if err != nil {
+		t.Fatalf("planning the delete of the superseded Q8_0: %v", err)
+	}
+	if plan.Bytes != 0 || plan.Stored != 2000 || plan.Shared != nil {
+		t.Errorf("the plan reclaims %d, leaves %d in the store and keeps %+v; want nothing, the 2000 of the old copy, nothing",
+			plan.Bytes, plan.Stored, plan.Shared)
+	}
+
+	applyPlan(t, tree.Root, plan)
+}
+
+// An execute refuses a plan whose stored file something has come to keep since,
+// and says what keeps it.
+func TestExecuteNamesWhatNowKeepsAStoredFile(t *testing.T) {
+	stored := cachedFile{name: "Flash-Q8_0.gguf", size: 2000}
+	cases := map[string]struct {
+		change func(t *testing.T, tree *cacheTree)
+		want   func(root string) string
+	}{
+		"another repository links it": {
+			change: func(t *testing.T, tree *cacheTree) {
+				tree.repo("models--mirror--Flash-GGUF").stored("revision-one", stored)
+			},
+			want: func(root string) string {
+				return payloadOf(root, stored) + " in hf's shared store is now kept by mirror/Flash-GGUF"
+			},
+		},
+		"its manifest is gone": {
+			change: func(t *testing.T, tree *cacheTree) {
+				if err := os.Remove(payloadOf(tree.Root, stored) + ".refs"); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: func(root string) string {
+				return payloadOf(root, stored) + " in hf's shared store now has no readable .refs manifest, so hf keeps it"
+			},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			tree := flashWithQ8(t, stored)
+			plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
+			tc.change(t, tree)
+
+			_, err := Execute(plan, nil)
+			var drift *DriftError
+			if !errors.As(err, &drift) {
+				t.Fatalf("the execute answered %v, want a *DriftError", err)
+			}
+			if want := tc.want(tree.Root); drift.Change != want {
+				t.Errorf("the refusal says %q, want %q", drift.Change, want)
+			}
+		})
+	}
 }

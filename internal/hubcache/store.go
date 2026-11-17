@@ -26,6 +26,16 @@ const storeLayout = "1\n"
 // xetHash is how the store names a payload.
 var xetHash = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+// hfRepoDirs are the repository directory prefixes huggingface_hub writes
+// (REPO_TYPES_MAPPING), each with the type it puts before the id in an hf://
+// URI. The walk reads fewer of them; hf's rule counts a link from any of them.
+var hfRepoDirs = map[string]string{
+	"models":   "",
+	"datasets": "datasets/",
+	"spaces":   "spaces/",
+	"kernels":  "kernels/",
+}
+
 // storeFate is what a set of removals leaves in the cache's shared store: the
 // bytes of every payload whose links all go with them, which no repository
 // reaches any more, and the payloads something still keeps — another link the
@@ -37,6 +47,8 @@ func storeFate(root string, removed map[string]bool) (int64, []Shared) {
 
 	payloads := map[string]bool{}
 	for path := range removed {
+		// A removal hf cannot read as one of its links is not one: it leads
+		// nowhere in the store, so it leaves nothing there.
 		if payload, managed, _ := storeTarget(root, path); managed {
 			payloads[payload] = true
 		}
@@ -90,7 +102,26 @@ func hfStore(root string) bool {
 		return false
 	}
 	content, err := os.ReadFile(marker)
-	return err == nil && string(content) == storeLayout
+	return err == nil && universalNewlines(string(content)) == storeLayout
+}
+
+// universalNewlines reads text the way Python's read_text does: \r\n and a
+// lone \r both become \n.
+func universalNewlines(text string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+}
+
+// hfLines splits text into lines the way Python's str.splitlines does, which is
+// how hf reads a manifest: at every line boundary Unicode knows, not only \n.
+// Empty lines go — hf finds no link in one either.
+func hfLines(text string) []string {
+	return strings.FieldsFunc(text, func(r rune) bool {
+		switch r {
+		case '\n', '\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\u0085', '\u2028', '\u2029':
+			return true
+		}
+		return false
+	})
 }
 
 // storeTarget is the payload a repository's blob links to, when it is a link
@@ -125,6 +156,7 @@ func storeTarget(root, link string) (payload string, managed bool, err error) {
 	store := filepath.Join(root, "blobs")
 	rel, err := filepath.Rel(store, filepath.Clean(target))
 	if err != nil {
+		// No relative path from the store to the target: it lies outside.
 		return "", false, nil
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
@@ -146,8 +178,20 @@ func repoBlobPath(root, path string) bool {
 	if len(parts) != 3 || parts[1] != "blobs" || parts[2] == "" {
 		return false
 	}
-	_, _, isRepo := parseRepoDir(parts[0])
+	_, isRepo := hfRepoDir(parts[0])
 	return isRepo
+}
+
+// hfRepoDir reads a repository directory name the way hf does, naming the
+// repository as an hf:// URI does: the id, after its type where that is not a
+// model.
+func hfRepoDir(name string) (string, bool) {
+	prefix, rest, ok := strings.Cut(name, "--")
+	kind, known := hfRepoDirs[prefix]
+	if !ok || !known || rest == "" {
+		return "", false
+	}
+	return kind + strings.ReplaceAll(rest, "--", "/"), true
 }
 
 // manifestLinks lists the links a payload's .refs manifest names that really
@@ -166,9 +210,8 @@ func manifestLinks(root, payload string) (links []string, readable bool) {
 	}
 
 	seen := map[string]bool{}
-	for _, line := range strings.Split(string(content), "\n") {
-		line = strings.TrimSuffix(line, "\r")
-		if line == "" || filepath.IsAbs(line) || slices.Contains(strings.Split(line, "/"), "..") {
+	for _, line := range hfLines(string(content)) {
+		if filepath.IsAbs(line) || slices.Contains(strings.Split(line, "/"), "..") {
 			continue
 		}
 		candidate := filepath.Join(root, filepath.FromSlash(line))
@@ -185,17 +228,19 @@ func manifestLinks(root, payload string) (links []string, readable bool) {
 	return links, true
 }
 
-// linkRepos names the repositories a set of repository blobs belong to, by Hub
-// id, each once, in the links' order.
+// linkRepos names the repositories a set of repository blobs belong to, as
+// hfRepoDir names them, each once, in the links' order.
 func linkRepos(root string, links []string) []string {
 	var repos []string
 	for _, link := range links {
 		rel, err := filepath.Rel(root, link)
 		if err != nil {
+			// Not reached: every link here passed repoBlobPath, which took the
+			// same relative path.
 			continue
 		}
 		dir, _, _ := strings.Cut(filepath.ToSlash(rel), "/")
-		if _, id, ok := parseRepoDir(dir); ok && !slices.Contains(repos, id) {
+		if id, ok := hfRepoDir(dir); ok && !slices.Contains(repos, id) {
 			repos = append(repos, id)
 		}
 	}

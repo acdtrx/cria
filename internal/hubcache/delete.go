@@ -649,7 +649,7 @@ func difference(planned, current *Plan) string {
 	}
 	for _, shared := range current.Shared {
 		if !keeping[shared.Blob] {
-			return fmt.Sprintf("%s is now shared with %s", shared.Blob, strings.Join(shared.Links, ", "))
+			return nowKept(shared)
 		}
 	}
 	if len(current.Shared) != len(planned.Shared) {
@@ -660,6 +660,20 @@ func difference(planned, current *Plan) string {
 		return "the directories the delete would leave empty are not the ones it planned for"
 	}
 	return ""
+}
+
+// nowKept says what keeps a blob the plan expected to go: another snapshot
+// entry, another repository linking it in hf's shared store, or a manifest hf
+// can no longer read, which keeps the payload whoever links it.
+func nowKept(shared Shared) string {
+	switch {
+	case !shared.Stored:
+		return fmt.Sprintf("%s is now shared with %s", shared.Blob, strings.Join(shared.Links, ", "))
+	case len(shared.Links) == 0:
+		return fmt.Sprintf("%s in hf's shared store now has no readable .refs manifest, so hf keeps it", shared.Blob)
+	default:
+		return fmt.Sprintf("%s in hf's shared store is now kept by %s", shared.Blob, strings.Join(shared.Repos, ", "))
+	}
 }
 
 // pathsOf is a removal set as a set, for the membership questions the directory
