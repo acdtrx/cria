@@ -202,7 +202,7 @@ func PlanQuant(repo *Repo, quant string, served []Served) (*Plan, error) {
 	}
 
 	removes, shared := quantRemovals(ours, others)
-	dirs, err := emptiedDirs(filepath.Join(repo.Dir, "snapshots"), pathsOf(removes))
+	dirs, err := snapshotsEmptied(repo, removes)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +299,7 @@ func PlanSuperseded(repo *Repo, label string, served []Served) (*Plan, error) {
 	}
 
 	removes, shared := quantRemovals(ours, others)
-	dirs, err := emptiedDirs(filepath.Join(repo.Dir, "snapshots"), pathsOf(removes))
+	dirs, err := snapshotsEmptied(repo, removes)
 	if err != nil {
 		return nil, err
 	}
@@ -436,7 +436,7 @@ func repoPlan(repo *Repo, target Target) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	dirs, err := emptiedDirs(repo.Dir, pathsOf(removes))
+	dirs, err := emptiedDirs(repo.Dir, pathsOf(removes), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -472,8 +472,11 @@ func newPlan(repo *Repo, target Target, removes []Removal, dirs []string, shared
 // cache rm` does it by hf's rule (docs/specs/CACHE.md, Deletion). Superseded
 // copies and unfinished downloads are never offered — hf's targets cannot name
 // an old copy apart from the current one, and a partial has no link at all.
+//
+// A repository hf would skip as damaged is never offered either: hf would
+// exit cleanly having taken nothing.
 func (p *Plan) offerToHF(targets []string) {
-	if len(p.payloads) > 0 {
+	if len(p.payloads) > 0 && !hfSkips(p.dir) {
 		p.HFTargets = targets
 	}
 }
@@ -583,12 +586,94 @@ func treeRemovals(dir string) ([]Removal, error) {
 	return removals, nil
 }
 
+// snapshotsEmptied lists the snapshot directories a removal set leaves empty
+// that may go: every one but those a ref names. hf reads a ref to a missing
+// snapshot as a damaged repository and skips it, so removing one would leave
+// every later delete through hf with nothing done (docs/specs/CACHE.md,
+// Deletion: a snapshot directory a ref names stays).
+func snapshotsEmptied(repo *Repo, removes []Removal) ([]string, error) {
+	targets, err := refTargets(repo.Dir)
+	if err != nil {
+		return nil, err
+	}
+	snapshots := filepath.Join(repo.Dir, "snapshots")
+	keep := map[string]bool{}
+	for _, target := range targets {
+		for _, name := range []string{target, strings.TrimSpace(target)} {
+			if plainName(name) {
+				keep[filepath.Join(snapshots, name)] = true
+			}
+		}
+	}
+	return emptiedDirs(snapshots, pathsOf(removes), keep)
+}
+
+// refFilesIgnored are the files hf passes over in refs/: what desktops drop
+// into any directory they show.
+var refFilesIgnored = []string{".DS_Store", "Thumbs.db", "desktop.ini"}
+
+// refTargets reads what every ref of a repository names — each file anywhere
+// under refs/, as written, which is how hf reads it. A repository with no
+// refs/ has none.
+func refTargets(dir string) ([]string, error) {
+	refs := filepath.Join(dir, "refs")
+	var targets []string
+	err := filepath.WalkDir(refs, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || slices.Contains(refFilesIgnored, entry.Name()) {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		targets = append(targets, string(content))
+		return nil
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cannot read the refs of %s: %w", dir, err)
+	}
+	return targets, nil
+}
+
+// hfSkips reports whether hf's scan would skip a repository as damaged: one of
+// its refs names a snapshot the cache does not hold, compared as written. hf
+// then finds none of the delete's targets, so such a delete is cria's own
+// (docs/specs/CACHE.md, Deletion).
+func hfSkips(dir string) bool {
+	targets, err := refTargets(dir)
+	if err != nil {
+		// Refs hf could not read either: its scan fails on them.
+		return true
+	}
+	for _, target := range targets {
+		if !plainName(target) {
+			return true
+		}
+		if _, err := os.Lstat(filepath.Join(dir, "snapshots", target)); err != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// plainName reports whether a ref's content can name a snapshot directory at
+// all: one path element, nothing that walks elsewhere.
+func plainName(name string) bool {
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, "/"+string(filepath.Separator))
+}
+
 // emptiedDirs lists the directories under root that a removal set leaves with
 // nothing in them, deepest first — the order os.Remove needs, and the order that
 // keeps every step of an execute a removal of something empty. A directory
 // holding anything the plan does not remove — another quant, a dangling entry —
-// keeps it and stays.
-func emptiedDirs(root string, removed map[string]bool) ([]string, error) {
+// keeps it and stays, and so does one keep names, and the directories above it.
+func emptiedDirs(root string, removed, keep map[string]bool) ([]string, error) {
 	var dirs []string
 	var empties func(dir string) (bool, error)
 	empties = func(dir string) (bool, error) {
@@ -613,10 +698,11 @@ func emptiedDirs(root string, removed map[string]bool) ([]string, error) {
 				empty = false
 			}
 		}
-		if empty {
+		if empty && !keep[dir] {
 			dirs = append(dirs, dir)
+			return true, nil
 		}
-		return empty, nil
+		return false, nil
 	}
 
 	if _, err := os.Stat(root); errors.Is(err, fs.ErrNotExist) {

@@ -42,22 +42,45 @@ func (f *fakeHF) run(ctx context.Context, program string, args []string) ([]byte
 		return []byte(f.stderr), nil
 	}
 	targets := args[5:]
+	stderr := f.stderr
 	var swept []string
 	for i, target := range targets {
 		if f.fail != nil && i > 0 {
 			break // a failing run stops after its first target
 		}
-		swept = append(swept, f.remove(target)...)
+		payloads, found := f.remove(target)
+		if !found {
+			stderr += "Could not find in cache:\n  - " + target + "\n"
+		}
+		swept = append(swept, payloads...)
 	}
 	for _, payload := range swept {
 		f.sweep(payload)
 	}
-	return []byte(f.stderr), f.fail
+	return []byte(stderr), f.fail
+}
+
+// damaged reports what hf's scan reports as a corrupted repository, which it
+// then leaves out of the cache it sees: a ref naming a snapshot that is not
+// there.
+func (f *fakeHF) damaged(repo string) bool {
+	damaged := false
+	filepath.WalkDir(filepath.Join(repo, "refs"), func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		revision, _ := os.ReadFile(path)
+		if _, err := os.Stat(filepath.Join(repo, "snapshots", string(revision))); err != nil {
+			damaged = true
+		}
+		return nil
+	})
+	return damaged
 }
 
 // remove takes one hf:// target out of the tree and names the store payloads
-// whose links it unlinked.
-func (f *fakeHF) remove(target string) []string {
+// whose links it unlinked; a target in a repository hf skips is not found.
+func (f *fakeHF) remove(target string) ([]string, bool) {
 	f.t.Helper()
 	kind, rest, _ := strings.Cut(strings.TrimPrefix(target, "hf://"), "/")
 	if !strings.HasPrefix(target, "hf://") || !slices.Contains([]string{"models", "datasets", "spaces"}, kind) {
@@ -65,6 +88,9 @@ func (f *fakeHF) remove(target string) []string {
 	}
 	parts := strings.SplitN(rest, "/", 3)
 	repo := filepath.Join(f.root, kind+"--"+parts[0]+"--"+parts[1])
+	if f.damaged(repo) {
+		return nil, false
+	}
 
 	if len(parts) == 2 {
 		var payloads []string
@@ -77,7 +103,7 @@ func (f *fakeHF) remove(target string) []string {
 		if err := os.RemoveAll(repo); err != nil {
 			f.t.Fatal(err)
 		}
-		return payloads
+		return payloads, true
 	}
 
 	var unlinked []string
@@ -112,7 +138,7 @@ func (f *fakeHF) remove(target string) []string {
 		}
 		os.Remove(blob)
 	}
-	return payloads
+	return payloads, true
 }
 
 // sweep collects a payload no valid link reaches any more, as hf does.
@@ -444,6 +470,129 @@ func TestLastWordsStripsTerminalEscapes(t *testing.T) {
 	got := lastWords([]byte("\x1b[1m\x1b[31mError:\x1b[0m Could not find in cache\n\x1b]8;;https://hf.co\x07docs\x1b]8;;\x07\n\x1b7done\n"))
 	if want := "Error: Could not find in cache · docs · done"; got != want {
 		t.Errorf("the failure carries %q, want %q", got, want)
+	}
+}
+
+// refRepo is the repository hf's damaged-repository rule is about: r1 holds
+// Q4_K_M; refs/main names r2 and refs/pr/1 names r3, each holding only Q8_0;
+// r4, which no ref names, holds only Q8_0 too. Every file is in the store.
+func refRepo(t *testing.T) (*cacheTree, *repoTree) {
+	t.Helper()
+	q8 := cachedFile{name: "Flash-Q8_0.gguf", size: 2000}
+	tree := newCacheTree(t)
+	repo := tree.repo("models--unsloth--Flash-GGUF").
+		stored("r1", cachedFile{name: "Flash-Q4_K_M.gguf", size: 1200}).
+		stored("r2", q8).
+		main("r2").
+		file("refs/pr/1", "r3")
+	for _, revision := range []string{"r3", "r4"} {
+		dir := filepath.Join(repo.dir, "snapshots", revision)
+		mkdir(t, dir)
+		repo.link(dir, q8.name, repoBlobOf(repo, q8))
+	}
+	return tree, repo
+}
+
+// A snapshot directory a ref names stays when a delete empties it, through hf
+// or not; any other emptied snapshot goes (docs/specs/CACHE.md, Deletion).
+// Through hf, that is what lets the repository's next delete go through hf as
+// well: hf skips a repository whose ref names a missing snapshot.
+func TestADeleteKeepsTheSnapshotsRefsName(t *testing.T) {
+	next := map[string]func(t *testing.T, root string) *Plan{
+		"then its last quant": func(t *testing.T, root string) *Plan {
+			return planQuant(t, root, "unsloth/Flash-GGUF", "Q4_K_M")
+		},
+		"then the repo": func(t *testing.T, root string) *Plan {
+			plan, err := PlanRepo(repoOf(t, read(t, root), "unsloth/Flash-GGUF"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return plan
+		},
+	}
+	for name, plan := range next {
+		t.Run(name, func(t *testing.T) {
+			tree, repo := refRepo(t)
+			snapshots := filepath.Join(repo.dir, "snapshots")
+
+			first := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
+			if want := []string{filepath.Join(snapshots, "r4")}; !reflect.DeepEqual(first.Dirs, want) {
+				t.Errorf("the plan empties %v, want only %v", first.Dirs, want)
+			}
+			if _, err := executeThrough(t, tree.Root, first, &fakeHF{t: t, root: tree.Root}); err != nil {
+				t.Fatalf("deleting Q8_0 through hf: %v", err)
+			}
+			for _, kept := range []string{"r1", "r2", "r3"} {
+				if _, err := os.Stat(filepath.Join(snapshots, kept)); err != nil {
+					t.Errorf("snapshot %s is gone after the delete: %v", kept, err)
+				}
+			}
+
+			second := plan(t, tree.Root)
+			if want := []string{"hf://models/unsloth/Flash-GGUF"}; !reflect.DeepEqual(second.HFTargets, want) {
+				t.Errorf("the next delete hands hf %q, want %q", second.HFTargets, want)
+			}
+			if _, err := executeThrough(t, tree.Root, second, &fakeHF{t: t, root: tree.Root}); err != nil {
+				t.Fatalf("the next delete through hf: %v", err)
+			}
+			if _, err := os.Lstat(repo.dir); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("the repository is still there after its delete (%v)", err)
+			}
+		})
+	}
+}
+
+// cria's own delete keeps a snapshot a ref names just the same.
+func TestCriasOwnDeleteKeepsTheSnapshotsRefsName(t *testing.T) {
+	tree, repo := refRepo(t)
+	plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
+	if _, err := Execute(context.Background(), plan, nil, ""); err != nil {
+		t.Fatalf("executing the plan: %v", err)
+	}
+
+	snapshots := filepath.Join(repo.dir, "snapshots")
+	var held []string
+	entries, _ := os.ReadDir(snapshots)
+	for _, entry := range entries {
+		held = append(held, entry.Name())
+	}
+	if want := []string{"r1", "r2", "r3"}; !reflect.DeepEqual(held, want) {
+		t.Errorf("the snapshots are %v, want %v", held, want)
+	}
+}
+
+// A repository whose ref already names a missing snapshot is one hf skips, so
+// its delete is cria's own and never runs hf.
+func TestADamagedRepoNeverGoesToHF(t *testing.T) {
+	plans := map[string]func(t *testing.T, root string) *Plan{
+		"quant": func(t *testing.T, root string) *Plan {
+			return planQuant(t, root, "unsloth/Flash-GGUF", "Q8_0")
+		},
+		"repo": func(t *testing.T, root string) *Plan {
+			plan, err := PlanRepo(repoOf(t, read(t, root), "unsloth/Flash-GGUF"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return plan
+		},
+	}
+	for name, plan := range plans {
+		t.Run(name, func(t *testing.T) {
+			tree := flashWithQ8(t, cachedFile{name: "Flash-Q8_0.gguf", size: 2000})
+			tree.repo("models--unsloth--Flash-GGUF").file("refs/pr/7", "a-revision-not-cached")
+
+			made := plan(t, tree.Root)
+			if made.HFTargets != nil {
+				t.Errorf("the plan hands hf %q, want nothing", made.HFTargets)
+			}
+			hf := &fakeHF{t: t, root: tree.Root}
+			if _, err := executeThrough(t, tree.Root, made, hf); err != nil {
+				t.Fatalf("executing the plan: %v", err)
+			}
+			if hf.args != nil {
+				t.Errorf("the delete ran hf %q, want it cria's own", hf.args)
+			}
+		})
 	}
 }
 

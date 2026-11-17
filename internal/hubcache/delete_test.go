@@ -212,9 +212,11 @@ func TestPlanQuantRemovesEveryLinkOfAFileSeveralSnapshotsShare(t *testing.T) {
 	if plan.Bytes != 3000 {
 		t.Errorf("the plan reclaims %d bytes, want the 3000 of the one blob", plan.Bytes)
 	}
-	// The two revisions that held nothing else are left empty and go too.
+	// The two revisions that held nothing else are left empty; the one no ref
+	// names goes too, and the one refs/main names stays (docs/specs/CACHE.md,
+	// Deletion).
 	snapshots := filepath.Join(repo.Dir, "snapshots")
-	want := []string{filepath.Join(snapshots, "revision-three"), filepath.Join(snapshots, "revision-two")}
+	want := []string{filepath.Join(snapshots, "revision-two")}
 	if got := sorted(plan.Dirs); !reflect.DeepEqual(got, sorted(want)) {
 		t.Errorf("the plan empties %v, want %v", got, sorted(want))
 	}
