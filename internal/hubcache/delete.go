@@ -592,12 +592,20 @@ func treeRemovals(dir string) ([]Removal, error) {
 // every later delete through hf with nothing done (docs/specs/CACHE.md,
 // Deletion: a snapshot directory a ref names stays).
 func snapshotsEmptied(repo *Repo, removes []Removal) ([]string, error) {
-	targets, err := refTargets(repo.Dir)
-	if err != nil {
-		return nil, err
-	}
 	snapshots := filepath.Join(repo.Dir, "snapshots")
 	keep := map[string]bool{}
+	targets, err := refTargets(repo.Dir)
+	if err != nil {
+		// Refs cria cannot read may name any snapshot, so every snapshot stays;
+		// the delete itself needs no ref, and hfSkips keeps such a repo away from hf.
+		entries, err := os.ReadDir(snapshots)
+		if err != nil {
+			return nil, fmt.Errorf("read the snapshots of %s: %w", repo.ID, err)
+		}
+		for _, entry := range entries {
+			keep[filepath.Join(snapshots, entry.Name())] = true
+		}
+	}
 	for _, target := range targets {
 		for _, name := range []string{target, strings.TrimSpace(target)} {
 			if plainName(name) {
@@ -617,6 +625,9 @@ var refFilesIgnored = []string{".DS_Store", "Thumbs.db", "desktop.ini"}
 // refs/ has none.
 func refTargets(dir string) ([]string, error) {
 	refs := filepath.Join(dir, "refs")
+	if _, err := os.Lstat(refs); errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	var targets []string
 	err := filepath.WalkDir(refs, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -632,9 +643,6 @@ func refTargets(dir string) ([]string, error) {
 		targets = append(targets, string(content))
 		return nil
 	})
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
 	if err != nil {
 		return nil, fmt.Errorf("cannot read the refs of %s: %w", dir, err)
 	}

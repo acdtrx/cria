@@ -561,6 +561,31 @@ func TestCriasOwnDeleteKeepsTheSnapshotsRefsName(t *testing.T) {
 	}
 }
 
+// A ref cria cannot read may name any snapshot, so a delete keeps them all, and
+// still goes ahead: it needs no ref, only hf does.
+func TestADeleteWithAnUnreadableRefKeepsEverySnapshot(t *testing.T) {
+	tree, repo := refRepo(t)
+	if err := os.Symlink("nowhere", filepath.Join(repo.dir, "refs", "pr", "9")); err != nil {
+		t.Fatal(err)
+	}
+	plan := planQuant(t, tree.Root, "unsloth/Flash-GGUF", "Q8_0")
+	if plan.HFTargets != nil {
+		t.Errorf("the plan hands hf %q, want nothing", plan.HFTargets)
+	}
+	if _, err := Execute(context.Background(), plan, nil, ""); err != nil {
+		t.Fatalf("executing the plan: %v", err)
+	}
+
+	var held []string
+	entries, _ := os.ReadDir(filepath.Join(repo.dir, "snapshots"))
+	for _, entry := range entries {
+		held = append(held, entry.Name())
+	}
+	if want := []string{"r1", "r2", "r3", "r4"}; !reflect.DeepEqual(held, want) {
+		t.Errorf("the snapshots are %v, want %v", held, want)
+	}
+}
+
 // A repository whose ref already names a missing snapshot is one hf skips, so
 // its delete is cria's own and never runs hf.
 func TestADamagedRepoNeverGoesToHF(t *testing.T) {
