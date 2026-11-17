@@ -84,6 +84,11 @@ and the deletion contract. v1 is visibility and cleaning only; growth ideas wait
     snapshot directories that left empty, re-reads the cache and reports what was
     actually reclaimed; it reads none of hf's output — the exit status and the
     re-read are the answer. The confirmation says the delete runs through `hf`.
+  - **A snapshot directory a ref names stays** (settled 2026-11-17), even emptied, in
+    every delete short of the repo's last quant: hf reads a ref to a missing snapshot
+    as a damaged repo and skips it, so every later delete through `hf` would do
+    nothing (hf's own file delete keeps them too). A repo that already has such a ref
+    takes the not-found path below.
   - **`hf` not found:** cria unlinks the repo's entries itself, reports what that
     frees, and says *"X GB stays in hf's shared store; `hf cache prune` frees it
     (it also removes old revisions and unfinished downloads)."*
